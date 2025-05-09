@@ -11,6 +11,8 @@
 
 .site-layout .site-layout-background {
   background: #fff;
+  border: none;
+  box-shadow: none;
 }
 
 .ant-layout-sider-children {
@@ -60,4 +62,16 @@
 .auth-form-register {
   text-align: center;
   margin-top: 16px;
+}
+
+.dashboard-card-item {
+  transition: all 0.1s ease;
+  cursor: pointer;
+  border-left: 3px solid transparent !important;
+}
+
+.dashboard-card-item:hover {
+  background-color: #f0f0f0 !important;
+  border-left: 3px solid #9370DB !important;
+  font-weight: bold !important;
 }

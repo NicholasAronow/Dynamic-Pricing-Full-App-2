@@ -249,6 +249,24 @@ const getProductData = (productId: string) => {
   };
 };
 
+// Utility function to format numbers with commas that works with various types
+const formatNumberWithCommas = (num: any): string => {
+  // Handle arrays (ValueType in Recharts can sometimes be an array)
+  if (Array.isArray(num)) {
+    return formatNumberWithCommas(num[0]); // Format the first element
+  }
+  // Handle strings
+  if (typeof num === 'string') {
+    return Number(num).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+  // Handle numbers
+  if (typeof num === 'number') {
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+  // Fallback
+  return String(num);
+};
+
 const ProductDetail: React.FC = () => {
   const { productId } = useParams<{ productId: string }>();
   const [activeTab, setActiveTab] = useState<string>('summary');
@@ -339,7 +357,10 @@ const ProductDetail: React.FC = () => {
               title="Current Price"
               value={product.currentPrice}
               precision={2}
-              prefix="$"
+              formatter={(value) => {
+                const numValue = typeof value === 'number' ? value : Number(value);
+                return '$' + formatNumberWithCommas(Number(numValue.toFixed(2)));
+              }}
               valueStyle={{ color: 'rgba(0, 0, 0, 0.85)' }}
             />
           </Col>
@@ -348,7 +369,10 @@ const ProductDetail: React.FC = () => {
             <Statistic
               title="Margin"
               value={product.margin}
-              suffix="%"
+              formatter={(value) => {
+                const numValue = typeof value === 'number' ? value : Number(value);
+                return formatNumberWithCommas(numValue) + '%';
+              }}
               valueStyle={{ color: 'rgba(0, 0, 0, 0.85)' }}
             />
           </Col>
@@ -357,6 +381,10 @@ const ProductDetail: React.FC = () => {
             <Statistic
               title="Weekly Units"
               value={product.weeklyUnits}
+              formatter={(value) => {
+                const numValue = typeof value === 'number' ? value : Number(value);
+                return formatNumberWithCommas(numValue);
+              }}
               valueStyle={{ color: 'rgba(0, 0, 0, 0.85)' }}
               suffix="units"
             />
@@ -400,13 +428,13 @@ const ProductDetail: React.FC = () => {
                       title: 'Units Sold',
                       dataIndex: 'units',
                       key: 'units',
-                      render: (units) => <span>{units}</span>
+                      render: (units) => <span>{formatNumberWithCommas(units)}</span>
                     },
                     {
                       title: 'Revenue',
                       dataIndex: 'revenue',
                       key: 'revenue',
-                      render: (revenue) => <span>${revenue.toFixed(2)}</span>
+                      render: (revenue) => <span>${formatNumberWithCommas(Number(revenue.toFixed(2)))}</span>
                     }
                   ]}
                   summary={(pageData) => {
@@ -420,10 +448,10 @@ const ProductDetail: React.FC = () => {
                       <Table.Summary.Row>
                         <Table.Summary.Cell index={0}><strong>Total</strong></Table.Summary.Cell>
                         <Table.Summary.Cell index={1}>
-                          <strong>{totalUnits}</strong>
+                          <strong>{formatNumberWithCommas(totalUnits)}</strong>
                         </Table.Summary.Cell>
                         <Table.Summary.Cell index={2}>
-                          <strong>${totalRevenue.toFixed(2)}</strong>
+                          <strong>${formatNumberWithCommas(Number(totalRevenue.toFixed(2)))}</strong>
                         </Table.Summary.Cell>
                       </Table.Summary.Row>
                     );
@@ -458,8 +486,18 @@ const ProductDetail: React.FC = () => {
                     >
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="hour" />
-                      <YAxis orientation="left" stroke="#666" />
-                      <RechartsTooltip formatter={(value) => [`$${value}`, 'Sales']} />
+                      <YAxis 
+                        orientation="left" 
+                        stroke="#666" 
+                        tickFormatter={(value) => `$${formatNumberWithCommas(value)}`}
+                      />
+                      <RechartsTooltip 
+                        formatter={(value) => {
+                          // Safe approach to format any value type
+                          const numValue = typeof value === 'number' ? value : Number(value);
+                          return [`$${formatNumberWithCommas(numValue)}`, 'Sales'];
+                        }} 
+                      />
                       <Legend />
                       <Bar 
                         dataKey="sales" 
@@ -491,21 +529,35 @@ const ProductDetail: React.FC = () => {
                       <XAxis 
                         dataKey="price" 
                         label={{ value: 'Price ($)', position: 'insideBottomRight', offset: -10 }}
-                        tickFormatter={(value) => `$${value}`}
+                        tickFormatter={(value) => `$${formatNumberWithCommas(value)}`}
                       />
-                      <YAxis yAxisId="left" orientation="left" stroke="#1890ff" />
-                      <YAxis yAxisId="right" orientation="right" stroke="#52c41a" />
-                      <RechartsTooltip formatter={(value, name) => {
-                        if (name === 'Demand') return [value, 'Units'];
-                        return [`$${value}`, name];
-                      }} />
+                      <YAxis 
+                        yAxisId="left" 
+                        orientation="left" 
+                        stroke="#9370DB" 
+                        tickFormatter={(value) => formatNumberWithCommas(value)}
+                      />
+                      <YAxis 
+                        yAxisId="right" 
+                        orientation="right" 
+                        stroke="#52c41a"
+                        tickFormatter={(value) => `$${formatNumberWithCommas(value)}`}
+                      />
+                      <RechartsTooltip 
+                        formatter={(value, name) => {
+                          // Safe approach to format any value type
+                          const numValue = typeof value === 'number' ? value : Number(value);
+                          if (name === 'Demand') return [formatNumberWithCommas(numValue), 'Units'];
+                          return [`$${formatNumberWithCommas(numValue)}`, name];
+                        }} 
+                      />
                       <Legend />
                       <Line 
                         yAxisId="left"
                         type="monotone" 
                         dataKey="demand" 
                         name="Demand" 
-                        stroke="#1890ff" 
+                        stroke="#9370DB" 
                         strokeWidth={2}
                         dot={(props: any) => {
                           const { cx, cy, payload } = props;
@@ -514,7 +566,7 @@ const ProductDetail: React.FC = () => {
                               <circle cx={6} cy={6} r={6} />
                             </svg>
                           ) : (
-                            <svg x={cx - 4} y={cy - 4} width={0} height={0} fill="#1890ff">
+                            <svg x={cx - 4} y={cy - 4} width={0} height={0} fill="#9370DB">
                               <circle cx={4} cy={4} r={4} />
                             </svg>
                           );
@@ -828,7 +880,7 @@ const ProductDetail: React.FC = () => {
             <Divider>Your Market Position</Divider>
             
             <div style={{ padding: '20px 0' }}>
-              <div style={{ position: 'relative', height: 50, background: 'linear-gradient(to right, #666, #666, #666)', borderRadius: 4 }}>
+              <div style={{ position: 'relative', height: 10, background: 'linear-gradient(to right, #666, #666, #666)', borderRadius: 4 }}>
                 <div style={{ position: 'absolute', left: 0, bottom: -20, color: '#666' }}>
                   <strong>$3.99</strong>
                 </div>
@@ -839,14 +891,14 @@ const ProductDetail: React.FC = () => {
                   style={{ 
                     position: 'absolute', 
                     left: '40%', 
-                    top: -25, 
+                    bottom: -40, 
                     transform: 'translateX(-50%)',
                     color: '#666'
                   }}
                 >
                   <div style={{ position: 'relative' }}>
-                    <ArrowDownOutlined style={{ fontSize: 24 }} />
-                    <div style={{ fontWeight: 'bold' }}>Your Price: $4.99</div>
+                    <ArrowUpOutlined style={{ fontSize: 16, position: 'absolute', top: -18, left: '50%', transform: 'translateX(-50%)' }} />
+                    <strong>Your Price: $4.99</strong>
                   </div>
                 </div>
               </div>

@@ -15,7 +15,7 @@ root.render(
       <ConfigProvider
         theme={{
           token: {
-            colorPrimary: '#1890ff',
+            colorPrimary: '#9370DB', // Pastel purple (Medium Purple)
           },
         }}
       >

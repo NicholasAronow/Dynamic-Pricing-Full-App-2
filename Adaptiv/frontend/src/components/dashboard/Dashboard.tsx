@@ -219,6 +219,14 @@ const generateMockData = (timeFrame: string) => {
   return data;
 };
 
+// Utility function to format numbers with commas
+const formatNumberWithCommas = (num: number | string) => {
+  if (typeof num === 'string') {
+    return Number(num).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+  return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+};
+
 const Dashboard: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -334,19 +342,21 @@ const Dashboard: React.FC = () => {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="date" />
                 {chartView === 'sales' ? (
-                  <YAxis />
+                  <YAxis 
+                    tickFormatter={(tick) => `$${formatNumberWithCommas(tick)}`}
+                  />
                 ) : (
                   <YAxis 
                     domain={[20, 40]} 
-                    tickFormatter={(tick) => `${tick}%`}
+                    tickFormatter={(tick) => `${formatNumberWithCommas(tick)}%`}
                   />
                 )}
                 <RechartsTooltip 
                   formatter={(value: number) => {
                     if (chartView === 'sales') {
-                      return [`$${value}`, 'Sales'];
+                      return [`$${formatNumberWithCommas(value)}`, 'Sales'];
                     } else {
-                      return [`${value}%`, 'Profit Margin'];
+                      return [`${formatNumberWithCommas(value)}%`, 'Profit Margin'];
                     }
                   }}
                   labelFormatter={(label: string) => `Date: ${label}`}
@@ -357,7 +367,7 @@ const Dashboard: React.FC = () => {
                     type="monotone" 
                     dataKey="sales" 
                     name="Sales" 
-                    stroke="#1890ff" 
+                    stroke="#9370DB" 
                     activeDot={{ r: 8 }} 
                     strokeWidth={2}
                   />
@@ -413,16 +423,16 @@ const Dashboard: React.FC = () => {
               <div>
                 {/* Top Performers */}
                 <div>
-                  <Title level={4} style={{ color: '#3f8600', display: 'flex', alignItems: 'center', marginBottom: 16 }}>
-                    <RiseOutlined style={{ marginRight: 8 }} /> Top Performers
+                  <Title level={4} style={{ color: '#3f8600', display: 'flex', alignItems: 'center', marginTop: -5, marginBottom: 16 }}>
+                    Best Selling Items
                   </Title>
                   <div style={{ marginBottom: 36 }}>
                     {topProducts.map((product, index) => (
                       <Card
                         key={product.id}
-                        style={{ marginBottom: 16 }}
+                        style={{ marginBottom: 8, borderRadius: 0, border: 'none'}}
                         size="small"
-                        hoverable
+                        className="dashboard-card-item"
                         onClick={() => navigate(`/product/${product.id}`)}
                       >
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -436,19 +446,19 @@ const Dashboard: React.FC = () => {
                                 <AntTooltip title="Price">
                                   <InfoCircleOutlined style={{ marginRight: 4 }} />
                                 </AntTooltip>
-                                ${product.price.toFixed(2)}
+                                ${formatNumberWithCommas(Number(product.price.toFixed(2)))}
                               </span>
                             </div>
                           </div>
                           <div style={{ textAlign: 'right' }}>
                             <div>
-                              <strong>${product.revenue.toFixed(2)}</strong>
+                              <strong>${formatNumberWithCommas(Number(product.revenue.toFixed(2)))}</strong>
                               <span style={{ fontSize: '0.85em', color: '#8c8c8c', marginLeft: 4 }}>revenue</span>
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 4 }}>
                               <div style={{ marginRight: 12 }}>
                                 <AntTooltip title="Units Sold">
-                                  <span>{product.quantity} units</span>
+                                  <span>{formatNumberWithCommas(product.quantity)} units</span>
                                 </AntTooltip>
                               </div>
                               {product.growth > 0 ? (
@@ -471,15 +481,15 @@ const Dashboard: React.FC = () => {
                 {/* Bottom Performers */}
                 <div>
                   <Title level={4} style={{ color: '#cf1322', display: 'flex', alignItems: 'center', marginBottom: 16, marginTop: 12 }}>
-                    <FallOutlined style={{ marginRight: 8 }} /> Bottom Performers
+                    Worst Selling Items 
                   </Title>
                   <div>
                     {bottomProducts.map((product, index) => (
                       <Card
                         key={product.id}
-                        style={{ marginBottom: 16 }}
+                        style={{ marginBottom: 8, borderRadius: 0, border: 'none'}}
                         size="small"
-                        hoverable
+                        className="dashboard-card-item"
                         onClick={() => navigate(`/product/${product.id}`)}
                       >
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -493,19 +503,19 @@ const Dashboard: React.FC = () => {
                                 <AntTooltip title="Price">
                                   <InfoCircleOutlined style={{ marginRight: 4 }} />
                                 </AntTooltip>
-                                ${product.price.toFixed(2)}
+                                ${formatNumberWithCommas(Number(product.price.toFixed(2)))}
                               </span>
                             </div>
                           </div>
                           <div style={{ textAlign: 'right' }}>
                             <div>
-                              <strong>${product.revenue.toFixed(2)}</strong>
+                              <strong>${formatNumberWithCommas(Number(product.revenue.toFixed(2)))}</strong>
                               <span style={{ fontSize: '0.85em', color: '#8c8c8c', marginLeft: 4 }}>revenue</span>
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 4 }}>
                               <div style={{ marginRight: 12 }}>
                                 <AntTooltip title="Units Sold">
-                                  <span>{product.quantity} units</span>
+                                  <span>{formatNumberWithCommas(product.quantity)} units</span>
                                 </AntTooltip>
                               </div>
                               {product.growth > 0 ? (
@@ -543,6 +553,10 @@ const Dashboard: React.FC = () => {
                 title="Revenue Increase from Adaptiv"
                 value={12750}
                 precision={0}
+                formatter={(value) => {
+                  const numValue = typeof value === 'number' ? value : Number(value);
+                  return formatNumberWithCommas(Number(numValue.toFixed(0)));
+                }}
                 valueStyle={{ color: '#3f8600' }}
                 prefix={<DollarOutlined />}
                 suffix="/mo"
@@ -563,7 +577,7 @@ const Dashboard: React.FC = () => {
               <Statistic
                 title="Market Position"
                 value="Top 15%"
-                valueStyle={{ color: '#1890ff' }}
+                valueStyle={{ color: '#9370DB' }}
                 prefix={<TeamOutlined />}
               />
               <div style={{ marginTop: 16 }}>
