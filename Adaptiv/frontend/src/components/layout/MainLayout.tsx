@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Layout, Menu, Avatar, Dropdown, Button } from 'antd';
 import { 
   MenuUnfoldOutlined, 
@@ -16,14 +16,9 @@ import { useAuth } from '../../context/AuthContext';
 const { Header, Sider, Content } = Layout;
 
 const MainLayout: React.FC = () => {
-  const [collapsed, setCollapsed] = useState(false);
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-
-  const toggle = () => {
-    setCollapsed(!collapsed);
-  };
 
   const handleLogout = () => {
     logout();
@@ -43,14 +38,13 @@ const MainLayout: React.FC = () => {
   );
 
   return (
-    <Layout>
-      <Sider trigger={null} collapsible collapsed={collapsed} breakpoint="lg" 
-        collapsedWidth="80" width={250}>
+    <Layout style={{ background: '#fff' }}>
+      <Sider width={250} style={{ background: '#fff', borderRight: '1px solid #e8e8e8' }}>
         <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-          <div className="logo">
-            {!collapsed ? 'Adaptiv' : 'A'}
+          <div className="logo" style={{ color: '#9370DB' }}>
+            Adaptiv
           </div>
-          <Menu theme="dark" mode="inline" selectedKeys={[location.pathname]} style={{ flex: '1 0 auto' }}>
+          <Menu theme="light" mode="inline" selectedKeys={[location.pathname]} style={{ flex: '1 0 auto' }}>
           <Menu.Item key="/" icon={<DashboardOutlined />}>
             <Link to="/">Dashboard</Link>
           </Menu.Item>
@@ -69,18 +63,13 @@ const MainLayout: React.FC = () => {
         </Menu>
         </div>
       </Sider>
-      <Layout className="site-layout">
-        <Header className="site-layout-background" style={{ padding: 0 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: 24 }}>
-            {React.createElement(collapsed ? MenuUnfoldOutlined : MenuFoldOutlined, {
-              className: 'trigger',
-              onClick: toggle,
-              style: { fontSize: '18px', padding: '0 24px', cursor: 'pointer' }
-            })}
+      <Layout className="site-layout" style={{ background: '#fff' }}>
+        <Header className="site-layout-background" style={{ padding: 0, borderBottom: '1px solid #e8e8e8', height: '64px', display: 'flex', alignItems: 'center', background: '#fff' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', paddingRight: 24, width: '100%' }}>
             <Dropdown overlay={userMenu} placement="bottomRight">
               <Button type="text" style={{ marginRight: 8 }}>
                 <Avatar icon={<UserOutlined />} /> 
-                {!collapsed && <span style={{ marginLeft: 8 }}>{user?.email || 'User'}</span>}
+                <span style={{ marginLeft: 8 }}>{user?.email || 'User'}</span>
               </Button>
             </Dropdown>
           </div>
@@ -88,9 +77,12 @@ const MainLayout: React.FC = () => {
         <Content
           className="site-layout-background"
           style={{
-            margin: '24px 16px',
+            margin: '0',
             padding: 24,
             minHeight: 280,
+            borderLeft: 'none',
+            boxShadow: 'none',
+            background: '#fafafa'
           }}
         >
           <Outlet />
