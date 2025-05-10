@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Typography, Card, Button, Row, Col, Space, Statistic, Table, Tag, Divider, Spin } from 'antd';
+import { Typography, Card, Button, Row, Col, Space, Statistic, Table, Tag, Divider, Spin, Alert } from 'antd';
 import { 
   ArrowLeftOutlined, 
   ArrowUpOutlined, 
@@ -19,6 +19,8 @@ import {
   Tooltip as RechartsTooltip, 
   Legend 
 } from 'recharts';
+import competitorService, { CompetitorItem } from '../../services/competitorService';
+import itemService, { Item } from '../../services/itemService';
 
 const { Title, Text } = Typography;
 
@@ -179,65 +181,226 @@ const generateMarketPositionData = (competitorId: string) => {
   };
 };
 
+// Interface for our processed competitor data
+interface CompetitorData {
+  id: string;
+  name: string;
+  similarityScore: number;
+  priceDifference: string;
+  status: 'higher' | 'lower' | 'same';
+  categories: string[];
+}
+
+// Interface for common items between our menu and competitor menu
+interface CommonItem {
+  key: string;
+  itemName: string;
+  ourPrice: number;
+  theirPrice: number;
+  category: string;
+  difference: string;
+  diffValue: number;
+  status: 'higher' | 'lower' | 'same';
+}
+
+// Interface for market position visualization
+interface MarketPosition {
+  marketLow: number;
+  marketHigh: number;
+  ourPrice: number;
+  competitorPrice: number;
+  marketAverage: number;
+  ourPricePosition: number;
+  competitorPricePosition: number;
+  originalMarketLow: number;
+  originalMarketHigh: number;
+  originalOurPrice: number;
+  originalCompetitorPrice: number;
+  originalMarketAverage: number;
+}
+
 const CompetitorDetail: React.FC = () => {
-  const { competitorId } = useParams<{ competitorId: string }>();
+  // Renamed from competitorId to competitorName for clarity
+  const { competitorId: competitorName } = useParams<{ competitorId: string }>();
   const navigate = useNavigate();
   const [loading, setLoading] = useState<boolean>(true);
-  const [commonItems, setCommonItems] = useState<any[]>([]);
-  const [marketPositionData, setMarketPositionData] = useState<any>(null);
-
-  // This would normally come from an API
-  const competitors = [
-    {
-      id: '1',
-      name: 'PriceWise',
-      similarityScore: 85,
-      priceDifference: '+15%',
-      status: 'higher',
-      categories: ['Dynamic Pricing', 'Analytics', 'Integrations']
-    },
-    {
-      id: '2',
-      name: 'MarketMaster',
-      similarityScore: 72,
-      priceDifference: '-3%',
-      status: 'lower',
-      categories: ['Analytics', 'AI Recommendations']
-    },
-    {
-      id: '3',
-      name: 'PricePoint',
-      similarityScore: 91,
-      priceDifference: '+5%',
-      status: 'higher',
-      categories: ['Analytics', 'Integrations', 'Multi-platform']
-    }
-  ];
-  
-  const competitorData = competitors.find(comp => comp.id === competitorId) || {
-    id: competitorId,
-    name: 'Competitor ' + competitorId,
-    similarityScore: 85,
-    priceDifference: '+15%',
-    status: 'higher',
-    categories: ['Dynamic Pricing', 'Analytics', 'Integrations']
-  };
+  const [error, setError] = useState<string | null>(null);
+  const [commonItems, setCommonItems] = useState<CommonItem[]>([]);
+  const [marketPositionData, setMarketPositionData] = useState<MarketPosition | null>(null);
+  const [competitorData, setCompetitorData] = useState<CompetitorData | null>(null);
   
   useEffect(() => {
-    // Simulate API loading
-    setLoading(true);
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        
+        if (!competitorName) {
+          setError('Competitor name is required');
+          setLoading(false);
+          return;
+        }
+        
+        // Get all competitor names to find the right one
+        const competitorNames = await competitorService.getCompetitors();
+        
+        // Decode the URI component to match with the actual competitor name
+        const decodedName = decodeURIComponent(competitorName);
+        
+        // Check if the name exists in our competitor list
+        if (!competitorNames.includes(decodedName)) {
+          setError(`Competitor '${decodedName}' not found`);
+          setLoading(false);
+          return;
+        }
+        
+        // Get competitor items - use the decoded name
+        const competitorItems = await competitorService.getCompetitorItems(decodedName);
+        
+        // Get our items
+        const ourItems = await itemService.getItems();
+        
+        // Create common items array by matching categories
+        const processedCommonItems: CommonItem[] = [];
+        
+        // Find common items by category
+        competitorItems.forEach((compItem, index) => {
+          // Find our items in the same category
+          const ourCategoryItems = ourItems.filter(item => item.category === compItem.category);
+          
+          if (ourCategoryItems.length > 0) {
+            // Use the first matching item for simplicity (could be enhanced to find closest match)
+            const ourItem = ourCategoryItems[0];
+            
+            // Calculate price difference
+            const priceDiff = ((ourItem.current_price - compItem.price) / compItem.price) * 100;
+            const status = priceDiff < 0 ? 'lower' : priceDiff > 0 ? 'higher' : 'same';
+            const formattedDiff = `${priceDiff > 0 ? '+' : ''}${priceDiff.toFixed(1)}%`;
+            
+            processedCommonItems.push({
+              key: String(index),
+              itemName: compItem.item_name,
+              ourPrice: ourItem.current_price,
+              theirPrice: compItem.price,
+              category: compItem.category,
+              difference: formattedDiff,
+              diffValue: priceDiff,
+              status: status as 'higher' | 'lower' | 'same'
+            });
+          }
+        });
+        
+        // Sort by category
+        processedCommonItems.sort((a, b) => a.category.localeCompare(b.category));
+        
+        setCommonItems(processedCommonItems);
+        
+        // Create market position data
+        const generateMarketData = (): MarketPosition => {
+          // Get all price points for visualization
+          const allPrices = [...ourItems.map(item => item.current_price), ...competitorItems.map(item => item.price)];
+          const marketLow = Math.min(...allPrices);
+          const marketHigh = Math.max(...allPrices);
+          
+          // Calculate average prices
+          const ourAvgPrice = ourItems.reduce((acc, item) => acc + item.current_price, 0) / ourItems.length;
+          const competitorAvgPrice = competitorItems.reduce((acc, item) => acc + item.price, 0) / competitorItems.length;
+          const marketAvgPrice = allPrices.reduce((a, b) => a + b, 0) / allPrices.length;
+          
+          // Normalize prices to 1-10 scale
+          const normalize = (price: number) => {
+            return ((price - marketLow) / (marketHigh - marketLow)) * 9 + 1;
+          };
+          
+          // Calculate percentage position for visualization
+          const ourPricePosition = ((ourAvgPrice - marketLow) / (marketHigh - marketLow)) * 100;
+          const competitorPricePosition = ((competitorAvgPrice - marketLow) / (marketHigh - marketLow)) * 100;
+          
+          return {
+            marketLow: 1,
+            marketHigh: 10,
+            ourPrice: normalize(ourAvgPrice),
+            competitorPrice: normalize(competitorAvgPrice),
+            marketAverage: normalize(marketAvgPrice),
+            ourPricePosition,
+            competitorPricePosition,
+            originalMarketLow: marketLow,
+            originalMarketHigh: marketHigh,
+            originalOurPrice: ourAvgPrice,
+            originalCompetitorPrice: competitorAvgPrice,
+            originalMarketAverage: marketAvgPrice
+          };
+        };
+        
+        setMarketPositionData(generateMarketData());
+        
+        // Calculate overall competitor data
+        const categoriesSet = new Set<string>();
+        competitorItems.forEach(item => categoriesSet.add(item.category));
+        
+        // Calculate average price difference
+        let totalPriceDiff = 0;
+        let comparisonCount = 0;
+        
+        processedCommonItems.forEach(item => {
+          totalPriceDiff += item.diffValue;
+          comparisonCount++;
+        });
+        
+        const avgPriceDiff = comparisonCount > 0 ? totalPriceDiff / comparisonCount : 0;
+        const formattedDiff = `${avgPriceDiff > 0 ? '+' : ''}${avgPriceDiff.toFixed(1)}%`;
+        const status = avgPriceDiff > 0 ? 'higher' : avgPriceDiff < 0 ? 'lower' : 'same';
+        
+        // Calculate average similarity score
+        const avgSimilarityScore = competitorItems.reduce((acc, item) => acc + (item.similarity_score || 75), 0) / competitorItems.length;
+        
+        setCompetitorData({
+          id: '0', // Using a placeholder ID since we're now using names
+          name: decodedName,
+          similarityScore: Math.round(avgSimilarityScore),
+          priceDifference: formattedDiff,
+          status: status as 'higher' | 'lower' | 'same',
+          categories: Array.from(categoriesSet)
+        });
+        
+        setLoading(false);
+      } catch (err) {
+        console.error('Error fetching competitor data:', err);
+        setError('Failed to load competitor data. Please try again later.');
+        setLoading(false);
+      }
+    };
     
-    setTimeout(() => {
-      setCommonItems(generateCommonItems(competitorId || '1'));
-      setMarketPositionData(generateMarketPositionData(competitorId || '1'));
-      setLoading(false);
-    }, 1000);
-  }, [competitorId]);
+    if (competitorName) {
+      fetchData();
+    }
+  }, [competitorName]);
 
   if (loading) {
     return (
       <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
         <Spin size="large" />
+      </div>
+    );
+  }
+  
+  if (error || !competitorData || !competitorName) {
+    return (
+      <div>
+        <Button 
+          type="link" 
+          icon={<LeftOutlined />} 
+          onClick={() => navigate('/competitor-analysis')}
+          style={{ padding: 0, fontSize: 16, marginBottom: 16 }}
+        >
+          Back to Competitor Analysis
+        </Button>
+        
+        <Alert
+          message="Error"
+          description={error || 'Failed to load competitor data'}
+          type="error"
+          showIcon
+        />
       </div>
     );
   }
@@ -273,9 +436,9 @@ const CompetitorDetail: React.FC = () => {
                   <ShopOutlined />
                 </div>
                 <div>
-                  <Title level={3} style={{ margin: 0 }}>{competitorData.name}</Title>
+                  <Title level={3} style={{ margin: 0 }}>{competitorData?.name}</Title>
                   <div style={{ marginTop: 8 }}>
-                    {competitorData.categories.map((category, index) => (
+                    {competitorData?.categories.map((category, index) => (
                       <Tag color="blue" key={index} style={{ marginBottom: 4 }}>{category}</Tag>
                     ))}
                   </div>
@@ -285,18 +448,18 @@ const CompetitorDetail: React.FC = () => {
             <Col xs={24} md={8} style={{ textAlign: 'center' }}>
               <Statistic
                 title="Relative Price"
-                value={competitorData.priceDifference}
+                value={competitorData?.priceDifference}
                 valueStyle={{
-                  color: competitorData.status === 'higher' ? '#cf1322' : '#3f8600'
+                  color: competitorData?.status === 'higher' ? '#cf1322' : '#3f8600'
                 }}
-                prefix={competitorData.status === 'higher' ? <ArrowUpOutlined /> : <ArrowDownOutlined />}
+                prefix={competitorData?.status === 'higher' ? <ArrowUpOutlined /> : <ArrowDownOutlined />}
               />
               <Text type="secondary">compared to our prices</Text>
             </Col>
             <Col xs={24} md={8} style={{ textAlign: 'center' }}>
               <Statistic
                 title="Similarity Score"
-                value={competitorData.similarityScore}
+                value={competitorData?.similarityScore}
                 suffix="%"
                 valueStyle={{ color: '#1890ff' }}
               />
@@ -471,69 +634,77 @@ const CompetitorDetail: React.FC = () => {
           title={<span><ShopOutlined /> Similar Menu Items</span>}
           style={{ marginTop: 24 }}
         >
-          <Table 
-            dataSource={commonItems}
-            rowKey="key"
-            pagination={{ pageSize: 5 }}
-            onRow={(record) => ({
-              onClick: () => navigate(`/product/${record.key}`),
-              style: { cursor: 'pointer' }
-            })}
-            columns={[
-              {
-                title: 'Item Name',
-                dataIndex: 'itemName',
-                key: 'itemName',
-                sorter: (a, b) => a.itemName.localeCompare(b.itemName),
-                sortDirections: ['ascend', 'descend'],
-                defaultSortOrder: 'ascend', // Start with alphabetical sorting by default
-                render: (text, record) => (
-                  <div>
-                    <div>{text}</div>
-                    <Tag color="blue">{record.category}</Tag>
-                  </div>
-                )
-              },
-              {
-                title: 'Our Price',
-                dataIndex: 'ourPrice',
-                key: 'ourPrice',
-                sorter: (a, b) => a.ourPrice - b.ourPrice,
-                sortDirections: ['ascend', 'descend'],
-                render: (price) => `$${price.toFixed(2)}`
-              },
-              {
-                title: 'Their Price',
-                dataIndex: 'theirPrice',
-                key: 'theirPrice',
-                sorter: (a, b) => a.theirPrice - b.theirPrice,
-                sortDirections: ['ascend', 'descend'],
-                render: (price) => `$${price.toFixed(2)}`
-              },
-              {
-                title: 'Difference',
-                dataIndex: 'difference',
-                key: 'difference',
-                sorter: (a, b) => a.diffValue - b.diffValue, // Sort by the actual numeric difference
-                sortDirections: ['ascend', 'descend'],
-                render: (text, record) => {
-                  // Our price being lower is good (green down arrow)
-                  // Our price being higher is bad (red up arrow)
-                  const color = record.status === 'lower' ? '#3f8600' : '#cf1322';
-                  const icon = record.status === 'lower' ? 
-                    <ArrowDownOutlined style={{ marginRight: 4 }} /> : 
-                    <ArrowUpOutlined style={{ marginRight: 4 }} />;
-                  
-                  return (
-                    <span style={{ color }}>
-                      {icon}
+          <Divider orientation="left">Menu Items Comparison</Divider>
+          
+          {commonItems.length === 0 ? (
+            <Alert
+              message="No Common Items Found"
+              description="No menu items were found that match between your business and this competitor."
+              type="info"
+              showIcon
+            />
+          ) : (
+            <Table 
+              dataSource={commonItems}
+              style={{ marginTop: 20 }}
+              onRow={(record) => ({
+                onClick: () => navigate(`/products/${record.key}`),
+                style: { cursor: 'pointer' }
+              })}
+              columns={[
+                {
+                  title: 'Item Name',
+                  dataIndex: 'itemName',
+                  key: 'itemName',
+                },
+                {
+                  title: 'Category',
+                  dataIndex: 'category',
+                  key: 'category',
+                  filters: Array.from(new Set(commonItems.map(item => item.category)))
+                    .map(category => ({ text: category, value: category })),
+                  onFilter: (value, record) => record.category === value,
+                  render: (category) => (
+                    <Tag color="blue">{category}</Tag>
+                  )
+                },
+                {
+                  title: 'Our Price',
+                  dataIndex: 'ourPrice',
+                  key: 'ourPrice',
+                  render: (price) => `$${price.toFixed(2)}`,
+                  sorter: (a, b) => a.ourPrice - b.ourPrice,
+                },
+                {
+                  title: 'Their Price',
+                  dataIndex: 'theirPrice',
+                  key: 'theirPrice',
+                  render: (price) => `$${price.toFixed(2)}`,
+                  sorter: (a, b) => a.theirPrice - b.theirPrice,
+                },
+                {
+                  title: 'Difference',
+                  dataIndex: 'difference',
+                  key: 'difference',
+                  sorter: (a, b) => a.diffValue - b.diffValue,
+                  render: (text, record) => (
+                    <span style={{ 
+                      color: record.status === 'higher' ? '#cf1322' : record.status === 'lower' ? '#3f8600' : 'inherit'
+                    }}>
+                      {record.status === 'higher' 
+                        ? <ArrowUpOutlined style={{ marginRight: 4 }} /> 
+                        : record.status === 'lower' 
+                          ? <ArrowDownOutlined style={{ marginRight: 4 }} /> 
+                          : null
+                      }
                       {text}
                     </span>
-                  );
-                }
-              }
-            ]}
-          />
+                  )
+                },
+              ]}
+            />
+          )}
+          
           <Text type="secondary" style={{ display: 'block', marginTop: 16 }}>
             Click on any item to view detailed product information and metrics.
           </Text>
