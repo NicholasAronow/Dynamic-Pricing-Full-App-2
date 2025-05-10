@@ -51,9 +51,6 @@ const MainLayout: React.FC = () => {
           <Menu.Item key="/price-recommendations" icon={<AreaChartOutlined />}>
             <Link to="/price-recommendations">Price Recommendations</Link>
           </Menu.Item>
-          <Menu.Item key="/sales-overview" icon={<ShoppingOutlined />}>
-            <Link to="/sales-overview">Sales Overview</Link>
-          </Menu.Item>
           <Menu.Item key="/competitor-analysis" icon={<TeamOutlined />}>
             <Link to="/competitor-analysis">Competitor Analysis</Link>
           </Menu.Item>

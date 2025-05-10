@@ -1,53 +1,75 @@
 import React from 'react';
 import { Typography, Card, Alert, Table, Tag } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import { ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
 
 const { Title } = Typography;
 
 const CompetitorAnalysis: React.FC = () => {
+  const navigate = useNavigate();
+
   // Sample competitor data
-  const competitors = [
+  const unsortedCompetitors = [
     {
       key: '1',
       name: 'PriceWise',
-      price: '$149.99',
-      difference: '+15%',
+      similarityScore: 85,
+      priceDifference: '+15%',
       status: 'higher',
-      features: ['Dynamic Pricing', 'Analytics', 'Integrations']
+      categories: ['Dynamic Pricing', 'Analytics', 'Integrations']
     },
     {
       key: '2',
       name: 'MarketMaster',
-      price: '$129.99',
-      difference: '-3%',
+      similarityScore: 72,
+      priceDifference: '-3%',
       status: 'lower',
-      features: ['Analytics', 'AI Recommendations']
+      categories: ['Analytics', 'AI Recommendations']
     },
     {
       key: '3',
       name: 'PricePoint',
-      price: '$139.99',
-      difference: '+5%',
+      similarityScore: 91,
+      priceDifference: '+5%',
       status: 'higher',
-      features: ['Analytics', 'Integrations', 'Multi-platform']
+      categories: ['Analytics', 'Integrations', 'Multi-platform']
     }
   ];
+  
+  // Define competitor type for better type safety
+  interface Competitor {
+    key: string;
+    name: string;
+    similarityScore: number;
+    priceDifference: string;
+    status: string;
+    categories: string[];
+  }
 
-  const columns = [
+  // Sort competitors by similarity score (descending)
+  const competitors = [...unsortedCompetitors].sort((a, b) => b.similarityScore - a.similarityScore);
+
+  const columns: ColumnsType<Competitor> = [
     {
       title: 'Competitor Name',
       dataIndex: 'name',
       key: 'name',
     },
     {
-      title: 'Price',
-      dataIndex: 'price',
-      key: 'price',
+      title: 'Similarity Score',
+      dataIndex: 'similarityScore',
+      key: 'similarityScore',
+      defaultSortOrder: 'descend' as const,
+      sorter: (a: Competitor, b: Competitor) => a.similarityScore - b.similarityScore,
+      render: (score: number) => (
+        <span>{score}%</span>
+      ),
     },
     {
-      title: 'Difference',
-      dataIndex: 'difference',
-      key: 'difference',
+      title: 'Avg. Price Difference',
+      dataIndex: 'priceDifference',
+      key: 'priceDifference',
       render: (text: string, record: any) => (
         <span>
           {record.status === 'higher' ? 
@@ -57,9 +79,9 @@ const CompetitorAnalysis: React.FC = () => {
       ),
     },
     {
-      title: 'Features',
-      key: 'features',
-      dataIndex: 'features',
+      title: 'Categories',
+      key: 'categories',
+      dataIndex: 'categories',
       render: (tags: string[]) => (
         <>
           {tags.map(tag => (
@@ -79,17 +101,17 @@ const CompetitorAnalysis: React.FC = () => {
         Monitor competitor pricing and features
       </Title>
       
-      <Card style={{ marginTop: 24 }}>
-        <Alert
-          message="Feature in Development"
-          description="The competitor analysis feature is currently in development. Check back soon for detailed comparisons of your products against competitors."
-          type="info"
-          showIcon
-          style={{ marginBottom: 24 }}
+      <Card style={{ marginTop: 24 }}> 
+        <Title level={4} style={{ marginTop: 0, marginBottom: 16 }}>Competitor Data</Title>
+        <Table 
+          dataSource={competitors} 
+          columns={columns} 
+          pagination={false} 
+          onRow={(record) => ({
+            onClick: () => navigate(`/competitor/${record.key}`),
+            style: { cursor: 'pointer' }
+          })}
         />
-        
-        <Title level={4}>Sample Competitor Data (Placeholder)</Title>
-        <Table dataSource={competitors} columns={columns} pagination={false} />
       </Card>
     </div>
   );
