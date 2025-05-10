@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Card, Row, Col, Statistic, Button, Radio, Spin, Table, Tag, Space, Tooltip as AntTooltip } from 'antd';
+import { Typography, Card, Row, Col, Statistic, Button, Radio, Spin, Table, Tag, Space, Tooltip as AntTooltip, Alert } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { 
   ArrowUpOutlined, 
@@ -14,6 +14,11 @@ import {
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
 import moment from 'moment';
+
+// Import our API services
+import itemService, { Item } from '../../services/itemService';
+import orderService, { Order } from '../../services/orderService';
+import analyticsService, { SalesAnalytics } from '../../services/analyticsService';
 
 const { Title } = Typography;
 
@@ -219,12 +224,16 @@ const generateMockData = (timeFrame: string) => {
   return data;
 };
 
-// Utility function to format numbers with commas
-const formatNumberWithCommas = (num: number | string) => {
-  if (typeof num === 'string') {
-    return Number(num).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  }
+// Utility function to format numbers with commas that safely handles undefined/null
+const formatNumberWithCommas = (num: number | string | undefined | null) => {
+  if (num === undefined || num === null) return '0';
   return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+};
+
+// Safe number formatting with toFixed that handles undefined/null values
+const safeNumberFormat = (value: any, decimals: number = 2) => {
+  if (value === undefined || value === null) return '0.00';
+  return Number(value).toFixed(decimals);
 };
 
 const Dashboard: React.FC = () => {
@@ -233,31 +242,117 @@ const Dashboard: React.FC = () => {
   const [timeFrame, setTimeFrame] = useState('7d');
   const [salesData, setSalesData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [chartView, setChartView] = useState<'sales' | 'margin'>('sales'); // Toggle between sales and profit margin
   const [productsLoading, setProductsLoading] = useState(true);
   const [productPerformance, setProductPerformance] = useState<any[]>([]);
   const [itemsTimeFrame, setItemsTimeFrame] = useState('7d');
+  const [analyticsData, setAnalyticsData] = useState<SalesAnalytics | null>(null);
   
-  // Fetch sales data
+  // Helper function to convert timeframe to dates
+  const getDateRangeFromTimeFrame = (timeFrame: string) => {
+    const end = moment();
+    let start;
+    
+    switch (timeFrame) {
+      case '1d':
+        start = moment().subtract(1, 'day');
+        break;
+      case '7d':
+        start = moment().subtract(7, 'days');
+        break;
+      case '1m':
+        start = moment().subtract(30, 'days');
+        break;
+      case '6m':
+        start = moment().subtract(180, 'days');
+        break;
+      case '1yr':
+        start = moment().subtract(365, 'days');
+        break;
+      default:
+        start = moment().subtract(30, 'days');
+    }
+    
+    console.log(`Time frame selected: ${timeFrame}, Date range: ${start.format('YYYY-MM-DD')} to ${end.format('YYYY-MM-DD')}`);
+    
+    return {
+      startDate: start.format('YYYY-MM-DD'),
+      endDate: end.format('YYYY-MM-DD')
+    };
+  };
+
+  // Fetch sales data from API
   useEffect(() => {
-    // Simulate loading data
-    setLoading(true);
-    // Generate mock data based on selected time frame
-    setTimeout(() => {
-      setSalesData(generateMockData(timeFrame));
-      setLoading(false);
-    }, 500);
+    const fetchSalesData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        const { startDate, endDate } = getDateRangeFromTimeFrame(timeFrame);
+        
+        // Fetch analytics data if available
+        try {
+          const analytics = await analyticsService.getSalesAnalytics(startDate, endDate);
+          setAnalyticsData(analytics);
+          
+          // If we have daily sales data, use it for the chart
+          if (analytics.salesByDay && analytics.salesByDay.length > 0) {
+            setSalesData(analytics.salesByDay.map(day => ({
+              name: day.date,
+              revenue: day.revenue,
+              orders: day.orders
+            })));
+          } else {
+            // Fallback to mock data if API doesn't provide what we need
+            setSalesData(generateMockData(timeFrame));
+          }
+        } catch (err) {
+          console.error('Failed to fetch analytics data:', err);
+          // Fallback to mock data
+          setSalesData(generateMockData(timeFrame));
+        }
+        
+        setLoading(false);
+      } catch (err) {
+        console.error('Error fetching sales data:', err);
+        setError('Failed to load sales data. Using mock data as fallback.');
+        setSalesData(generateMockData(timeFrame));
+        setLoading(false);
+      }
+    };
+    
+    fetchSalesData();
   }, [timeFrame]);
   
-  // Fetch product performance data
+  // Fetch product performance data from API
   useEffect(() => {
-    setProductsLoading(true);
-    // Generate mock product performance data
-    setTimeout(() => {
-      const data = generateProductPerformanceData(itemsTimeFrame);
-      setProductPerformance(data);
-      setProductsLoading(false);
-    }, 600);
+    const fetchProductPerformance = async () => {
+      try {
+        setProductsLoading(true);
+        
+        // Try to fetch real item performance data
+        try {
+          const data = await analyticsService.getItemPerformance(itemsTimeFrame);
+          setProductPerformance(data);
+        } catch (err) {
+          console.error('Failed to fetch item performance:', err);
+          // Fallback to mock data
+          const mockData = generateProductPerformanceData(itemsTimeFrame);
+          setProductPerformance(mockData);
+        }
+        
+        setProductsLoading(false);
+      } catch (err) {
+        console.error('Error fetching product performance:', err);
+        // Use mock data as fallback
+        const data = generateProductPerformanceData(itemsTimeFrame);
+        setProductPerformance(data);
+        setProductsLoading(false);
+      }
+    };
+    
+    fetchProductPerformance();
   }, [itemsTimeFrame]);
   
   // Extract the user's name for the welcome message
@@ -340,7 +435,7 @@ const Dashboard: React.FC = () => {
                 margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
               >
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
+                <XAxis dataKey="name" />
                 {chartView === 'sales' ? (
                   <YAxis 
                     tickFormatter={(tick) => `$${formatNumberWithCommas(tick)}`}
@@ -365,7 +460,7 @@ const Dashboard: React.FC = () => {
                 {chartView === 'sales' ? (
                   <Line 
                     type="monotone" 
-                    dataKey="sales" 
+                    dataKey="revenue" 
                     name="Sales" 
                     stroke="#9370DB" 
                     activeDot={{ r: 8 }} 
@@ -446,19 +541,19 @@ const Dashboard: React.FC = () => {
                                 <AntTooltip title="Price">
                                   <InfoCircleOutlined style={{ marginRight: 4 }} />
                                 </AntTooltip>
-                                ${formatNumberWithCommas(Number(product.price.toFixed(2)))}
+                                ${formatNumberWithCommas(Number((product.currentPrice || 0).toFixed(2)))}
                               </span>
                             </div>
                           </div>
                           <div style={{ textAlign: 'right' }}>
                             <div>
-                              <strong>${formatNumberWithCommas(Number(product.revenue.toFixed(2)))}</strong>
+                              <strong>${formatNumberWithCommas(Number((product.revenue || 0).toFixed(2)))}</strong>
                               <span style={{ fontSize: '0.85em', color: '#8c8c8c', marginLeft: 4 }}>revenue</span>
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 4 }}>
                               <div style={{ marginRight: 12 }}>
                                 <AntTooltip title="Units Sold">
-                                  <span>{formatNumberWithCommas(product.quantity)} units</span>
+                                  <span>{formatNumberWithCommas(product.quantitySold || 0)} units</span>
                                 </AntTooltip>
                               </div>
                               {product.growth > 0 ? (
@@ -503,19 +598,19 @@ const Dashboard: React.FC = () => {
                                 <AntTooltip title="Price">
                                   <InfoCircleOutlined style={{ marginRight: 4 }} />
                                 </AntTooltip>
-                                ${formatNumberWithCommas(Number(product.price.toFixed(2)))}
+                                ${formatNumberWithCommas(Number((product.currentPrice || 0).toFixed(2)))}
                               </span>
                             </div>
                           </div>
                           <div style={{ textAlign: 'right' }}>
                             <div>
-                              <strong>${formatNumberWithCommas(Number(product.revenue.toFixed(2)))}</strong>
+                              <strong>${formatNumberWithCommas(Number((product.revenue || 0).toFixed(2)))}</strong>
                               <span style={{ fontSize: '0.85em', color: '#8c8c8c', marginLeft: 4 }}>revenue</span>
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 4 }}>
                               <div style={{ marginRight: 12 }}>
                                 <AntTooltip title="Units Sold">
-                                  <span>{formatNumberWithCommas(product.quantity)} units</span>
+                                  <span>{formatNumberWithCommas(product.quantitySold || 0)} units</span>
                                 </AntTooltip>
                               </div>
                               {product.growth > 0 ? (

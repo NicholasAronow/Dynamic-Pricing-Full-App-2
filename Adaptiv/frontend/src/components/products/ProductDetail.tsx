@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
+import api from '../../services/api';
 import {
   Typography,
   Card,
@@ -9,12 +10,15 @@ import {
   Tag,
   Space,
   Radio,
+  RadioChangeEvent,
   DatePicker,
   Table,
   Divider,
   Tabs,
   Progress,
-  Spin
+  Spin,
+  Alert,
+  Button
 } from 'antd';
 import { 
   ArrowUpOutlined, ArrowDownOutlined, DollarOutlined, AreaChartOutlined,
@@ -27,10 +31,16 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend 
 } from 'recharts';
 
+// Import our API services
+import itemService, { Item, PriceHistory } from '../../services/itemService';
+import competitorService, { CompetitorItem } from '../../services/competitorService';
+import analyticsService, { PriceElasticityData, CompetitorData } from '../../services/analyticsService';
+
 const { Title, Text } = Typography;
 const { TabPane } = Tabs;
 
-// Mock data generator functions
+// Legacy mock data generator functions - these will be used as fallbacks
+// when API data isn't available yet
 const generateSalesData = (productId: string, timeFrame: string) => {
   const data = [];
   const now = moment();
@@ -157,46 +167,31 @@ const generateIntradayData = (productId: string, date: moment.Moment) => {
 };
 
 // Generate price elasticity data
-const generateElasticityData = (productId: string) => {
-  const data = [];
+const generateElasticityData = (productId: string): PriceElasticityData[] => {
+  const data: PriceElasticityData[] = [];
   
   // Generate data points for prices between $3.00 and $6.00
-  for (let price = 300; price <= 600; price += 25) {
-    const displayPrice = price / 100;
+  for (let price = 3.0; price <= 6.0; price += 0.5) {
+    // Simple elasticity model: as price increases, demand decreases
+    // with a non-linear relationship
+    const baseDemand = 100;
+    const priceElasticity = -1.5; // More elastic than -1
     
-    // Calculate demand with elasticity model
-    // Higher elasticity at higher prices
-    let elasticity = -1.2;
-    if (price > 500) elasticity = -1.8;
-    else if (price > 400) elasticity = -1.5;
+    // Apply elasticity formula: % change in demand = elasticity * % change in price
+    const basePrice = 4.5;
+    const pctPriceChange = (price - basePrice) / basePrice;
+    const pctDemandChange = priceElasticity * pctPriceChange;
     
-    // Base demand at $4.00 (reference price)
-    const basePrice = 400;
-    const baseDemand = 200;
+    // Calculate actual demand value
+    const sales_volume = baseDemand * (1 + pctDemandChange);
     
-    // Simplified constant elasticity demand function
-    const demand = baseDemand * Math.pow(price/basePrice, elasticity);
-    
-    // Revenue at this price point
-    const revenue = demand * displayPrice;
-    
-    // Cost per unit (assuming 60% COGS)
-    const costPerUnit = displayPrice * 0.6;
-    const totalCost = demand * costPerUnit;
-    const profit = revenue - totalCost;
-    
-    // Optimal price indicator
-    let isOptimal = false;
-    if (price === 450) { // Set $4.50 as the optimal price for this example
-      isOptimal = true;
-    }
+    // Calculate revenue
+    const revenue = price * sales_volume;
     
     data.push({
-      price: displayPrice,
-      demand: Math.round(demand),
-      revenue: Math.round(revenue),
-      profit: Math.round(profit),
-      isOptimal
+      price,
+      sales_volume,
+      revenue
     });
   }
   
@@ -239,7 +234,7 @@ const getProductData = (productId: string) => {
     name: "Signature Latte",
     category: "Beverages",
     basePrice: 4.50,
-    currentPrice: 4.50,
+    current_price: 4.50,
     weeklyUnits: 834,
     weeklySales: 3753,
     costToMake: 2.70,
@@ -255,52 +250,254 @@ const formatNumberWithCommas = (num: any): string => {
   if (Array.isArray(num)) {
     return formatNumberWithCommas(num[0]); // Format the first element
   }
-  // Handle strings
+  
+  let value: number;
+  
+  // Convert to number
   if (typeof num === 'string') {
-    return Number(num).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    value = Number(num);
+  } else if (typeof num === 'number') {
+    value = num;
+  } else {
+    // Fallback
+    return String(num);
   }
-  // Handle numbers
-  if (typeof num === 'number') {
-    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  }
-  // Fallback
-  return String(num);
+  
+  // Round to 2 decimal places to avoid floating point issues
+  const roundedValue = Math.round(value * 100) / 100;
+  
+  // Split into whole and decimal parts
+  const parts = roundedValue.toString().split('.');
+  
+  // Add commas to the whole part
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  
+  // Combine whole and decimal parts (if any)
+  return parts.length > 1 ? parts.join('.') : parts[0];
 };
 
 const ProductDetail: React.FC = () => {
   const { productId } = useParams<{ productId: string }>();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<string>('summary');
   const [salesTimeFrame, setSalesTimeFrame] = useState<string>('7d');
   const [selectedDate, setSelectedDate] = useState<moment.Moment>(moment().subtract(1, 'day'));
   const [salesData, setSalesData] = useState<any[]>([]);
   const [intradayData, setIntradayData] = useState<any[]>([]);
-  const [elasticityData, setElasticityData] = useState<any[]>([]);
-  const [competitorData, setCompetitorData] = useState<any[]>([]);
+  const [elasticityData, setElasticityData] = useState<PriceElasticityData[]>([]);
+  const [competitorData, setCompetitorData] = useState<CompetitorItem[]>([]);
   const [weeklyData, setWeeklyData] = useState<any[]>([]);
   const [forecastData, setForecastData] = useState<any[]>([]);
-  const [marketPositionData, setMarketPositionData] = useState<any>(null);
+  const [forecastMetrics, setForecastMetrics] = useState<any>({nextMonthForecast: 0, growthRate: 0, forecastAccuracy: 0});
+  const [totalWeeklyUnits, setTotalWeeklyUnits] = useState<number>(0);
+  const [totalWeeklyRevenue, setTotalWeeklyRevenue] = useState<number>(0);
+  const [marketData, setMarketData] = useState<CompetitorData | null>(null);
+  const [marketPositionData, setMarketPositionData] = useState<{
+    marketLow: number;
+    marketHigh: number;
+    marketAverage: number;
+    ourPrice: number;
+    ourPricePosition: number;
+    averagePosition: number;
+  } | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [product, setProduct] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [product, setProduct] = useState<Item | null>(null);
+  const [priceHistory, setPriceHistory] = useState<PriceHistory[]>([]);
+
+  // Function to set market position from API data or calculate it if needed
+  const setMarketPositionFromData = (product: Item, marketData: any) => {
+    if (!product || !marketData) {
+      setMarketPositionData(null);
+      return;
+    }
+
+    setMarketPositionData({
+      marketLow: marketData.marketStats.low,
+      marketHigh: marketData.marketStats.high,
+      marketAverage: marketData.marketStats.average,
+      ourPrice: product.current_price,
+      ourPricePosition: marketData.ourPosition,
+      averagePosition: marketData.marketStats.averagePosition
+    });
+  };
+
+  // Fallback calculation in case we need to calculate market position from raw competitor data
+  const calculateMarketPosition = (product: Item, competitors: any[]) => {
+    if (!product || !competitors || competitors.length === 0) {
+      // If no data, set null or default values
+      setMarketPositionData(null);
+      return;
+    }
+
+    const competitorPrices = competitors.map(comp => comp.price || 0);
+    const allPrices = [...competitorPrices, product.current_price];
+    const minPrice = Math.min(...allPrices);
+    const maxPrice = Math.max(...allPrices);
+    
+    // Calculate average market price (excluding our product)
+    const avgMarketPrice = competitorPrices.reduce((sum, price) => sum + price, 0) / competitorPrices.length;
+    
+    // Calculate position percentage (0-100%)
+    const priceRange = maxPrice - minPrice;
+    const ourPricePosition = priceRange > 0 
+      ? ((product.current_price - minPrice) / priceRange) * 100
+      : 50;
+      
+    // Calculate average position on a scale of 1-10
+    const avgPosition = priceRange > 0
+      ? ((avgMarketPrice - minPrice) / priceRange * 9) + 1
+      : 5;
+    
+    setMarketPositionData({
+      marketLow: minPrice,
+      marketHigh: maxPrice,
+      marketAverage: avgMarketPrice,
+      ourPrice: product.current_price,
+      ourPricePosition: ourPricePosition,
+      averagePosition: avgPosition
+    });
+  };
 
   useEffect(() => {
-    // Simulate API loading
-    setLoading(true);
-    
-    setTimeout(() => {
-      if (productId) {
-        const productData = getProductData(productId);
+    const fetchProductData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        if (!productId) {
+          setError('Product ID is required');
+          setLoading(false);
+          return;
+        }
+
+        // Convert string productId to number
+        const numericProductId = parseInt(productId, 10);
+        
+        if (isNaN(numericProductId)) {
+          setError('Invalid product ID');
+          setLoading(false);
+          return;
+        }
+
+        // Fetch product details
+        const productData = await itemService.getItem(numericProductId);
         setProduct(productData);
-        setSalesData(generateSalesData(productId, salesTimeFrame));
-        setIntradayData(generateIntradayData(productId, selectedDate));
-        setElasticityData(generateElasticityData(productId));
-        setCompetitorData(generateCompetitorData(productId));
+        
+        // Fetch price history
+        const history = await itemService.getPriceHistory(numericProductId);
+        setPriceHistory(history);
+        
+        try {
+          // Fetch competitor data using our updated service method
+          console.log('Fetching similar competitors for item:', numericProductId);
+          const marketData = await competitorService.getSimilarCompetitors(numericProductId);
+          
+          if (marketData && marketData.competitors) {
+            console.log('Successfully received market data with competitors:', marketData);
+            // Set competitor data from the response
+            setCompetitorData(marketData.competitors);
+            // Set market position directly from the API data
+            setMarketPositionFromData(productData, marketData);
+          } else {
+            throw new Error('No competitors found in market data');
+          }
+        } catch (error) {
+          console.error('Error with similar competitors endpoint:', error);
+          // Use the original method as fallback
+          console.log('Falling back to basic competitor data');
+          const competitorItems = await competitorService.getCompetitorItemsByItemId(numericProductId);
+          setCompetitorData(competitorItems);
+          if (competitorItems.length > 0) {
+            // Calculate market position from raw competitor data as fallback
+            calculateMarketPosition(productData, competitorItems);
+          }
+        }
+        
+        // Fetch or generate sales data
+        try {
+          // Fetch real sales data
+          console.log('Fetching sales data for item:', numericProductId);
+          const realSalesData = await analyticsService.getItemSalesData(numericProductId, salesTimeFrame);
+          setSalesData(realSalesData);
+          
+          // Fetch weekly sales data
+          console.log('Fetching weekly sales data for item:', numericProductId);
+          const weekData = await analyticsService.getItemWeeklySales(numericProductId);
+          setWeeklyData(weekData);
+          
+          // Calculate totals for weekly data
+          const totalUnits = weekData.reduce((sum: number, day: any) => sum + day.units, 0);
+          const totalRevenue = weekData.reduce((sum: number, day: any) => sum + day.revenue, 0);
+          setTotalWeeklyUnits(totalUnits);
+          setTotalWeeklyRevenue(totalRevenue);
+          
+          // Fetch or generate hourly (intraday) data
+          console.log('Fetching hourly data for item:', numericProductId);
+          try {
+            // Convert selectedDate to string format if needed by the API
+            const dateString = selectedDate.format('YYYY-MM-DD');
+            const hourlySales = await analyticsService.getItemHourlySales(numericProductId, dateString);
+            setIntradayData(hourlySales);
+          } catch (err) {
+            console.error('Failed to fetch hourly data, falling back to mock data', err);
+            setIntradayData(generateIntradayData(productId || '1', selectedDate));
+          }
+          
+          // Fetch or generate price elasticity data
+          try {
+            console.log('Fetching elasticity data for item:', numericProductId);
+            const elasticityResult = await analyticsService.getPriceElasticity(numericProductId);
+            setElasticityData(elasticityResult);
+          } catch (err) {
+            console.error('Failed to fetch elasticity data, falling back to mock data', err);
+            setElasticityData(generateElasticityData(productId || '1'));
+          }
+          
+        } catch (err) {
+          console.error('Failed to fetch sales data, falling back to mock data', err);
+          // Fallback to mock data
+          const mockSalesData = generateSalesData(productId || '1', salesTimeFrame);
+          setSalesData(mockSalesData);
+          
+          // Generate mock weekly data
+          const mockWeeklyData = [
+            { key: '1', day: 'Monday', units: 125, revenue: 750 },
+            { key: '2', day: 'Tuesday', units: 145, revenue: 870 },
+            { key: '3', day: 'Wednesday', units: 165, revenue: 990 },
+            { key: '4', day: 'Thursday', units: 180, revenue: 1080 },
+            { key: '5', day: 'Friday', units: 210, revenue: 1260 },
+            { key: '6', day: 'Saturday', units: 230, revenue: 1380 },
+            { key: '7', day: 'Sunday', units: 190, revenue: 1140 }
+          ];
+          setWeeklyData(mockWeeklyData);
+          
+          // Calculate mock totals
+          const totalUnits = mockWeeklyData.reduce((sum, day) => sum + day.units, 0);
+          const totalRevenue = mockWeeklyData.reduce((sum, day) => sum + day.revenue, 0);
+          setTotalWeeklyUnits(totalUnits);
+          setTotalWeeklyRevenue(totalRevenue);
+          
+          // Generate mock intraday data
+          setIntradayData(generateIntradayData(productId || '1', selectedDate));
+          
+          // Generate mock elasticity data
+          setElasticityData(generateElasticityData(productId || '1'));
+        }
+        
+        setLoading(false);
+      } catch (err) {
+        console.error('Error fetching product data:', err);
+        setError('Failed to load product data. Please try again.');
         setLoading(false);
       }
-    }, 1000);
-  }, [productId, selectedDate]); // Removed salesTimeFrame from dependency array
+    };
+    
+    fetchProductData();
+  }, [productId, selectedDate]);
   
   // Handle changing the time frame for sales data
-  const handleTimeFrameChange = (e: any) => {
+  const handleTimeFrameChange = async (e: RadioChangeEvent) => {
     // Prevent default form submission behavior
     e.preventDefault();
     e.stopPropagation();
@@ -309,9 +506,17 @@ const ProductDetail: React.FC = () => {
     const newTimeFrame = e.target.value;
     setSalesTimeFrame(newTimeFrame);
     
-    // Generate new data for the selected time frame without triggering a reload
-    const newData = generateSalesData(productId || '1', newTimeFrame);
-    setSalesData(newData);
+    try {
+      // Fetch real sales data for the selected time frame
+      const numericProductId = parseInt(productId || '1', 10);
+      const realSalesData = await analyticsService.getItemSalesData(numericProductId, newTimeFrame);
+      setSalesData(realSalesData);
+    } catch (err) {
+      console.error('Failed to fetch real sales data for time frame, falling back to mock data', err);
+      // Fallback to mock data only if API fails
+      const newData = generateSalesData(productId || '1', newTimeFrame);
+      setSalesData(newData);
+    }
   };
   
   const handleDateChange = (date: moment.Moment | null) => {
@@ -352,10 +557,10 @@ const ProductDetail: React.FC = () => {
             </div>
           </Col>
           
-          <Col xs={24} md={5}>
+          <Col xs={24} md={4}>
             <Statistic
               title="Current Price"
-              value={product.currentPrice}
+              value={product.current_price}
               precision={2}
               formatter={(value) => {
                 const numValue = typeof value === 'number' ? value : Number(value);
@@ -365,7 +570,7 @@ const ProductDetail: React.FC = () => {
             />
           </Col>
           
-          <Col xs={24} md={5}>
+          <Col xs={24} md={4}>
             <Statistic
               title="Margin"
               value={product.margin}
@@ -377,16 +582,28 @@ const ProductDetail: React.FC = () => {
             />
           </Col>
           
-          <Col xs={24} md={6}>
+          <Col xs={24} md={4}>
             <Statistic
               title="Weekly Units"
-              value={product.weeklyUnits}
+              value={totalWeeklyUnits}
               formatter={(value) => {
                 const numValue = typeof value === 'number' ? value : Number(value);
                 return formatNumberWithCommas(numValue);
               }}
               valueStyle={{ color: 'rgba(0, 0, 0, 0.85)' }}
               suffix="units"
+            />
+          </Col>
+          
+          <Col xs={24} md={4}>
+            <Statistic
+              title="Weekly Revenue"
+              value={totalWeeklyRevenue}
+              formatter={(value) => {
+                const numValue = typeof value === 'number' ? value : Number(value);
+                return '$' + formatNumberWithCommas(numValue);
+              }}
+              valueStyle={{ color: 'rgba(0, 0, 0, 0.85)' }}
             />
           </Col>
         </Row>
@@ -408,15 +625,7 @@ const ProductDetail: React.FC = () => {
                 style={{ marginBottom: 24 }}
               >
                 <Table
-                  dataSource={[
-                    { day: 'Monday', units: 45, revenue: 224.55 },
-                    { day: 'Tuesday', units: 38, revenue: 189.62 },
-                    { day: 'Wednesday', units: 52, revenue: 259.48 },
-                    { day: 'Thursday', units: 65, revenue: 324.35 },
-                    { day: 'Friday', units: 87, revenue: 434.13 },
-                    { day: 'Saturday', units: 103, revenue: 513.97 },
-                    { day: 'Sunday', units: 72, revenue: 359.28 }
-                  ]}
+                  dataSource={weeklyData}
                   pagination={false}
                   columns={[
                     {
@@ -614,7 +823,7 @@ const ProductDetail: React.FC = () => {
                   <Col span={8}>
                     <Statistic
                       title="Market Low"
-                      value={3.99}
+                      value={marketPositionData ? marketPositionData.marketLow : 0}
                       precision={2}
                       prefix="$"
                       valueStyle={{ color: 'rgba(0, 0, 0, 0.85)' }}
@@ -623,7 +832,7 @@ const ProductDetail: React.FC = () => {
                   <Col span={8}>
                     <Statistic
                       title="Our Price"
-                      value={product.currentPrice}
+                      value={product.current_price}
                       precision={2}
                       prefix="$"
                       valueStyle={{ fontWeight: 'bold' }}
@@ -632,7 +841,7 @@ const ProductDetail: React.FC = () => {
                   <Col span={8}>
                     <Statistic
                       title="Market High"
-                      value={6.99}
+                      value={marketPositionData ? marketPositionData.marketHigh : 0}
                       precision={2}
                       prefix="$"
                       valueStyle={{ color: 'rgba(0, 0, 0, 0.85)' }}
@@ -643,11 +852,26 @@ const ProductDetail: React.FC = () => {
                 <Divider>Top Competitors</Divider>
                 
                 <Table
-                  dataSource={[
-                    { name: 'Java Junction', logo: '☕', price: 4.99, difference: '-$0.00' },
-                    { name: 'Bean Scene', logo: '🌱', price: 5.49, difference: '+$0.50' },
-                    { name: 'Brew Haven', logo: '🍵', price: 4.49, difference: '-$0.50' }
-                  ]}
+                  dataSource={competitorData.map((competitor, index) => {
+                    // Get the competitor name (handle both API response formats)
+                    const competitorName = 'name' in competitor 
+                      ? (competitor.name as string) 
+                      : competitor.competitor_name;
+                    
+                    // Calculate price difference
+                    const difference = competitor.price - (product?.current_price || 0);
+                    const formattedDiff = difference > 0 ? 
+                      `+$${Math.abs(difference).toFixed(2)}` : 
+                      `-$${Math.abs(difference).toFixed(2)}`;
+                    
+                    return {
+                      key: index,
+                      name: competitorName,
+                      logo: '☕', // Simple coffee icon for all competitors
+                      price: competitor.price,
+                      difference: formattedDiff
+                    };
+                  }).slice(0, 5)} // Show top 5 competitors
                   pagination={false}
                   size="small"
                   columns={[
@@ -674,13 +898,16 @@ const ProductDetail: React.FC = () => {
                       key: 'difference',
                       render: (diff) => {
                         if (diff.startsWith('+')) {
-                          return <span style={{ color: 'rgba(0, 0, 0, 0.85)' }}>{diff}</span>;
+                          return <span style={{ color: '#cf1322' }}>{diff}</span>; // They're more expensive (red)
+                        } else if (diff.startsWith('-$0.00')) {
+                          return <span style={{ color: '#888' }}>$0.00</span>; // Same price (gray)
                         } else {
-                          return <span style={{ color: 'rgba(0, 0, 0, 0.85)' }}>{diff}</span>;
+                          return <span style={{ color: '#3f8600' }}>{diff}</span>; // They're cheaper (green)
                         }
                       }
                     }
                   ]}
+                  locale={{ emptyText: 'No competitor data available' }}
                 />
               </Card>
             </Col>
@@ -758,7 +985,7 @@ const ProductDetail: React.FC = () => {
               <Col xs={24} sm={8}>
                 <Statistic
                   title="Forecast (Next Month)"
-                  value={2750}
+                  value={forecastMetrics.nextMonthForecast}
                   precision={0}
                   prefix="$"
                   valueStyle={{ color: 'rgba(0, 0, 0, 0.85)' }}
@@ -767,19 +994,19 @@ const ProductDetail: React.FC = () => {
               <Col xs={24} sm={8}>
                 <Statistic
                   title="Growth Rate"
-                  value={12.4}
+                  value={forecastMetrics.growthRate}
                   precision={1}
                   suffix="%"
-                  valueStyle={{ color: 'rgba(0, 0, 0, 0.85)' }}
-                  prefix={<ArrowUpOutlined />}
+                  valueStyle={{ color: forecastMetrics.growthRate >= 0 ? '#3f8600' : '#cf1322' }}
+                  prefix={forecastMetrics.growthRate >= 0 ? <ArrowUpOutlined /> : <ArrowDownOutlined />}
                 />
               </Col>
               <Col xs={24} sm={8}>
                 <Statistic
                   title="Forecast Accuracy"
-                  value={92}
+                  value={forecastMetrics.forecastAccuracy}
                   suffix="%"
-                  valueStyle={{ color: 'rgba(0, 0, 0, 0.85)' }}
+                  valueStyle={{ color: forecastMetrics.forecastAccuracy > 90 ? '#3f8600' : forecastMetrics.forecastAccuracy > 80 ? '#d48806' : '#cf1322' }}
                 />
               </Col>
             </Row>
@@ -789,17 +1016,7 @@ const ProductDetail: React.FC = () => {
             <div style={{ width: '100%', height: 300 }}>
               <ResponsiveContainer>
                 <LineChart
-                  data={[
-                    { month: 'Jan', actual: 1200, forecast: null },
-                    { month: 'Feb', actual: 1350, forecast: null },
-                    { month: 'Mar', actual: 1500, forecast: null },
-                    { month: 'Apr', actual: 1750, forecast: null },
-                    { month: 'May', actual: 2100, forecast: null },
-                    { month: 'Jun', actual: 2450, forecast: null },
-                    { month: 'Jul', actual: null, forecast: 2750 },
-                    { month: 'Aug', actual: null, forecast: 3050 },
-                    { month: 'Sep', actual: null, forecast: 3400 }
-                  ]}
+                  data={forecastData}
                   margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" />
@@ -844,7 +1061,7 @@ const ProductDetail: React.FC = () => {
               <Col xs={24} sm={12} md={6}>
                 <Statistic
                   title="Market Average"
-                  value={4.99}
+                  value={marketPositionData ? marketPositionData.marketAverage.toFixed(2) : '0.00'}
                   precision={2}
                   prefix="$"
                   valueStyle={{ color: 'rgba(0, 0, 0, 0.85)' }}
@@ -853,7 +1070,7 @@ const ProductDetail: React.FC = () => {
               <Col xs={24} sm={12} md={6}>
                 <Statistic
                   title="Market Low"
-                  value={3.99}
+                  value={marketPositionData ? marketPositionData.marketLow.toFixed(2) : '0.00'}
                   precision={2}
                   prefix="$"
                   valueStyle={{ color: 'rgba(0, 0, 0, 0.85)' }}
@@ -862,7 +1079,7 @@ const ProductDetail: React.FC = () => {
               <Col xs={24} sm={12} md={6}>
                 <Statistic
                   title="Market High"
-                  value={6.99}
+                  value={marketPositionData ? marketPositionData.marketHigh.toFixed(2) : '0.00'}
                   precision={2}
                   prefix="$"
                   valueStyle={{ color: 'rgba(0, 0, 0, 0.85)' }}
@@ -871,38 +1088,145 @@ const ProductDetail: React.FC = () => {
               <Col xs={24} sm={12} md={6}>
                 <Statistic
                   title="Competitors"
-                  value={12}
+                  value={competitorData ? competitorData.length : 0}
                   valueStyle={{ color: 'rgba(0, 0, 0, 0.85)' }}
                 />
               </Col>
             </Row>
             
-            <Divider>Your Market Position</Divider>
+            <Divider>Relative Market Position</Divider>
             
-            <div style={{ padding: '20px 0' }}>
-              <div style={{ position: 'relative', height: 10, background: 'linear-gradient(to right, #666, #666, #666)', borderRadius: 4 }}>
-                <div style={{ position: 'absolute', left: 0, bottom: -20, color: '#666' }}>
-                  <strong>$3.99</strong>
-                </div>
-                <div style={{ position: 'absolute', right: 0, bottom: -20, color: '#666' }}>
-                  <strong>$6.99</strong>
-                </div>
-                <div 
-                  style={{ 
-                    position: 'absolute', 
-                    left: '40%', 
-                    bottom: -40, 
-                    transform: 'translateX(-50%)',
-                    color: '#666'
-                  }}
-                >
-                  <div style={{ position: 'relative' }}>
-                    <ArrowUpOutlined style={{ fontSize: 16, position: 'absolute', top: -18, left: '50%', transform: 'translateX(-50%)' }} />
-                    <strong>Your Price: $4.99</strong>
-                  </div>
-                </div>
+            <div style={{ padding: '80px 0 80px' }}>
+              <div style={{ position: 'relative', height: 10, background: 'linear-gradient(to right, #f0f0f0, #d9d9d9, #bfbfbf)', borderRadius: 4 }}>
+                {marketPositionData && (
+                  <>
+                    {/* Our price dot */}
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: `${marketPositionData.ourPricePosition}%`,
+                        top: '50%',
+                        width: 12,
+                        height: 12,
+                        backgroundColor: '#1890ff',
+                        borderRadius: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        border: '2px solid white',
+                        zIndex: 2
+                      }}
+                    />
+                    
+                    {/* Market average dot with hover effect */}
+                    <div style={{ position: 'relative' }}>
+                      <div
+                        style={{
+                          position: 'absolute',
+                          left: `${((marketPositionData.averagePosition - 1) / 9) * 100}%`,
+                          top: 5,
+                          width: 12,
+                          height: 12,
+                          backgroundColor: '#faad14',
+                          borderRadius: '50%',
+                          transform: 'translate(-50%, -50%)',
+                          border: '2px solid white',
+                          zIndex: 2,
+                          cursor: 'pointer'
+                        }}
+                        onMouseOver={(e) => {
+                          // Find the tooltip element
+                          const tooltip = e.currentTarget.nextElementSibling as HTMLElement;
+                          if (tooltip) {
+                            tooltip.style.display = 'block';
+                          }
+                        }}
+                        onMouseOut={(e) => {
+                          // Find the tooltip element
+                          const tooltip = e.currentTarget.nextElementSibling as HTMLElement;
+                          if (tooltip) {
+                            tooltip.style.display = 'none';
+                          }
+                        }}
+                      />
+                      <div
+                        style={{
+                          position: 'absolute',
+                          left: `${((marketPositionData.averagePosition - 1) / 9) * 100}%`,
+                          top: -50,
+                          transform: 'translateX(-50%)',
+                          backgroundColor: '#fff8e6',
+                          border: '1px solid #ffe58f',
+                          borderRadius: '4px',
+                          padding: '4px 8px',
+                          zIndex: 3,
+                          display: 'none',
+                          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+                          whiteSpace: 'nowrap',
+                          textAlign: 'center',
+                          color: '#5c3c00',
+                          fontSize: '14px',
+                          fontWeight: 'bold'
+                        }}
+                      >
+                        Market Average: ${marketPositionData.marketAverage.toFixed(2)}
+                      </div>
+                    </div>
+                    
+                    {/* Scale markings - showing actual prices instead of 1-10 */}
+                    <div 
+                      style={{
+                        position: 'absolute',
+                        left: '0%',
+                        bottom: -20,
+                        color: '#666',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                        transform: 'translateX(-50%)'
+                      }}
+                    >
+                      ${marketPositionData ? marketPositionData.marketLow.toFixed(2) : '0.00'}
+                    </div>
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: '100%',
+                        bottom: -20,
+                        color: '#666',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                        transform: 'translateX(-50%)'
+                      }}
+                    >
+                      ${marketPositionData ? marketPositionData.marketHigh.toFixed(2) : '0.00'}
+                    </div>
+                    
+                    {/* Our price marker */}
+                    <div 
+                      style={{ 
+                        position: 'absolute', 
+                        left: `${marketPositionData.ourPricePosition}%`,
+                        bottom: -50, 
+                        transform: 'translateX(-50%)',
+                        color: '#1890ff',
+                        textAlign: 'center',
+                        backgroundColor: '#f0f9ff',
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        border: '1px solid #d6e4ff',
+                        minWidth: '80px'
+                      }}
+                    >
+                      <ArrowUpOutlined style={{ fontSize: 20, position: 'absolute', top: -20, left: '50%', transform: 'translateX(-50%)', color: '#1890ff' }} />
+                      <div style={{ fontWeight: 'bold' }}>Your Price: ${marketPositionData.ourPrice.toFixed(2)}</div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
+            
+            <Text type="secondary" style={{ display: 'block' }}>
+              This chart shows the relative price positioning in the market range, with the market low and high prices displayed on the ends of the scale.
+              Your price and the market average are positioned proportionally between these extremes.
+            </Text>
           </Card>
           
           {/* Competitor Data Card */}
@@ -911,17 +1235,47 @@ const ProductDetail: React.FC = () => {
             style={{ marginBottom: 24 }}
           >
             <Table
-              dataSource={[
-                { name: 'Coffee Bean', logo: '☕', price: 4.29, difference: '-$0.70', updated: '2 hours ago', distance: '0.2 mi' },
-                { name: 'Java Junction', logo: '☕', price: 4.99, difference: '$0.00', updated: '1 day ago', distance: '0.5 mi' },
-                { name: 'Bean Scene', logo: '🌱', price: 5.49, difference: '+$0.50', updated: '5 hours ago', distance: '0.8 mi' },
-                { name: 'Brew Haven', logo: '🍵', price: 4.49, difference: '-$0.50', updated: '3 hours ago', distance: '1.2 mi' },
-                { name: 'Morning Cup', logo: '☕', price: 3.99, difference: '-$1.00', updated: '12 hours ago', distance: '1.5 mi' },
-                { name: 'Star Coffee', logo: '⭐', price: 5.99, difference: '+$1.00', updated: '1 hour ago', distance: '1.8 mi' },
-                { name: 'The Roastery', logo: '🔥', price: 6.49, difference: '+$1.50', updated: '6 hours ago', distance: '2.0 mi' },
-                { name: 'Cafe Delight', logo: '✨', price: 5.29, difference: '+$0.30', updated: '2 days ago', distance: '2.3 mi' },
-                { name: 'Brew & Co', logo: '🍵', price: 6.99, difference: '+$2.00', updated: '8 hours ago', distance: '2.8 mi' }
-              ]}
+              dataSource={competitorData.map((competitor, index) => {
+                // Get the competitor name (handle both API response formats)
+                const competitorName = 'name' in competitor 
+                  ? (competitor.name as string) 
+                  : competitor.competitor_name;
+                  
+                // Calculate price difference
+                const difference = competitor.price - (product?.current_price || 0);
+                const formattedDiff = difference === 0
+                  ? '$0.00'
+                  : difference > 0
+                    ? `+$${Math.abs(difference).toFixed(2)}` 
+                    : `-$${Math.abs(difference).toFixed(2)}`;
+                
+                // Format update time - using updated_at property
+                const getRelativeTimeString = (timestamp: string): string => {
+                  const date = new Date(timestamp);
+                  const now = new Date();
+                  const diffMs = now.getTime() - date.getTime();
+                  const diffHrs = diffMs / (1000 * 60 * 60);
+                  
+                  if (diffHrs < 1) return 'Just now';
+                  if (diffHrs < 2) return '1 hour ago';
+                  if (diffHrs < 24) return `${Math.floor(diffHrs)} hours ago`;
+                  if (diffHrs < 48) return '1 day ago';
+                  return `${Math.floor(diffHrs / 24)} days ago`;
+                };
+                
+                // Calculate a relative distance based on index (simulated data)
+                const distance = ((index + 1) * 0.3).toFixed(1) + ' mi';
+                
+                return {
+                  key: index,
+                  name: competitorName,
+                  logo: '', // Coffee emoji for all competitors
+                  price: competitor.price,
+                  difference: formattedDiff,
+                  updated: getRelativeTimeString(competitor.updated_at),
+                  distance: distance
+                };
+              })}
               pagination={{ pageSize: 6 }}
               columns={[
                 {
@@ -929,9 +1283,9 @@ const ProductDetail: React.FC = () => {
                   dataIndex: 'name',
                   key: 'name',
                   render: (text, record) => (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
                       <span style={{ fontSize: '18px', marginRight: 8 }}>{record.logo}</span>
-                      <span>{text}</span>
+                      <span style={{ fontWeight: 'bold' }}>{text}</span>
                     </div>
                   )
                 },
@@ -939,34 +1293,58 @@ const ProductDetail: React.FC = () => {
                   title: 'Price',
                   dataIndex: 'price',
                   key: 'price',
-                  sorter: (a, b) => a.price - b.price,
-                  render: (price) => `$${price.toFixed(2)}`
+                  render: (price: number) => <span>${price.toFixed(2)}</span>,
+                  sorter: (a: any, b: any) => a.price - b.price
                 },
                 {
-                  title: 'Difference',
+                  title: 'Diff',
                   dataIndex: 'difference',
                   key: 'difference',
-                  sorter: (a, b) => parseFloat(a.difference.replace('$', '')) - parseFloat(b.difference.replace('$', '')),
-                  render: (diff) => {
-                    if (diff.startsWith('+')) {
-                      return <span style={{ color: '#cf1322' }}>{diff}</span>;
-                    } else if (diff.startsWith('-')) {
-                      return <span style={{ color: '#3f8600' }}>{diff}</span>;
-                    } else {
-                      return <span>{diff}</span>;
-                    }
+                  render: (diff: string) => {
+                    let color = 'black';
+                    if (diff.includes('+')) color = '#cf1322'; // Red for higher prices
+                    if (diff.includes('-')) color = '#3f8600'; // Green for lower prices
+                    return <span style={{ color, fontWeight: 'bold' }}>{diff}</span>
+                  },
+                  sorter: (a: any, b: any) => {
+                    // Extract numeric values for sorting
+                    const getNumericValue = (str: string): number => {
+                      const val = parseFloat(str.replace(/[^0-9.-]+/g, ''));
+                      return str.includes('-') ? -val : val; // Make negative if it has a minus
+                    };
+                    return getNumericValue(a.difference) - getNumericValue(b.difference);
                   }
                 },
                 {
                   title: 'Last Updated',
                   dataIndex: 'updated',
-                  key: 'updated'
+                  key: 'updated',
+                  sorter: (a: any, b: any) => {
+                    // Approximate sorting based on relative time strings
+                    const timeValue = (str: string): number => {
+                      if (str === 'Just now') return 0;
+                      const match = str.match(/(\d+)\s+(\w+)/); // Extract number and unit
+                      if (!match) return 0;
+                      
+                      const num = parseInt(match[1]);
+                      const unit = match[2];
+                      
+                      if (unit.includes('hour')) return num;
+                      if (unit.includes('day')) return num * 24;
+                      return 0;
+                    };
+                    return timeValue(a.updated) - timeValue(b.updated);
+                  }
                 },
                 {
                   title: 'Distance',
                   dataIndex: 'distance',
                   key: 'distance',
-                  sorter: (a, b) => parseFloat(a.distance) - parseFloat(b.distance)
+                  sorter: (a: any, b: any) => {
+                    const distA = parseFloat(a.distance.split(' ')[0]);
+                    const distB = parseFloat(b.distance.split(' ')[0]);
+                    return distA - distB;
+                  }
                 }
               ]}
             />
