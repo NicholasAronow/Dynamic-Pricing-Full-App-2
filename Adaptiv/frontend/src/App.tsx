@@ -12,8 +12,8 @@ import Dashboard from './components/dashboard/Dashboard';
 import BusinessProfile from './components/profile/BusinessProfile';
 import MainLayout from './components/layout/MainLayout';
 import PriceRecommendations from './components/pricing/PriceRecommendations';
-import SalesOverview from './components/sales/SalesOverview';
 import CompetitorAnalysis from './components/competitor/CompetitorAnalysis';
+import CompetitorDetail from './components/competitor/CompetitorDetail';
 import ProductDetail from './components/products/ProductDetail';
 
 // Auth context
@@ -44,8 +44,8 @@ function App() {
             <Route index element={<Dashboard />} />
             <Route path="profile" element={<BusinessProfile />} />
             <Route path="price-recommendations" element={<PriceRecommendations />} />
-            <Route path="sales-overview" element={<SalesOverview />} />
             <Route path="competitor-analysis" element={<CompetitorAnalysis />} />
+            <Route path="competitor/:competitorId" element={<CompetitorDetail />} />
             <Route path="product/:productId" element={<ProductDetail />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

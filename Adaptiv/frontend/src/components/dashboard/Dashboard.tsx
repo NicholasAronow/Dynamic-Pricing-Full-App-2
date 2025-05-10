@@ -592,30 +592,6 @@ const Dashboard: React.FC = () => {
       
       {/* Best and Worst Performing Items Card */}
       <div style={{ justifyContent: 'center', marginTop: 24, marginBottom: 24 }}>
-      
-      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col xs={24} sm={12}>
-          <Card 
-            title="Recent Price Changes" 
-            style={{ height: '100%' }}
-          >
-            <p>Premium Plan: <span style={{ color: '#3f8600' }}>$149.99 → $169.99</span> (May 1, 2025)</p>
-            <p>Basic Plan: <span style={{ color: '#3f8600' }}>$49.99 → $59.99</span> (Apr 15, 2025)</p>
-            <p>Enterprise Add-on: <span style={{ color: '#cf1322' }}>$299.99 → $279.99</span> (Apr 5, 2025)</p>
-          </Card>
-        </Col>
-        
-        <Col xs={24} sm={12}>
-          <Card 
-            title="Pricing Opportunities" 
-            style={{ height: '100%' }}
-          >
-            <p><strong>High Priority:</strong> Premium subscription has price elasticity</p>
-            <p><strong>Medium Priority:</strong> Bundle discount optimization needed</p>
-            <p><strong>Low Priority:</strong> Seasonal promotion planning</p>
-          </Card>
-        </Col>
-      </Row>
     </div>
     </div>
   );
