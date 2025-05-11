@@ -20,12 +20,8 @@ if (isVercel) {
   console.log('Using environment backend URL:', baseUrlFromEnv);
 }
 
-// Remove trailing /api if present to avoid double prefixing
-if (baseUrlFromEnv.endsWith('/api')) {
-  baseUrlFromEnv = baseUrlFromEnv.slice(0, -4); // Remove trailing /api
-}
-
-const API_BASE_URL = baseUrlFromEnv;
+// Ensure the base URL ends with /api so front-end services can call relative paths like 'items'
+const API_BASE_URL = baseUrlFromEnv.endsWith('/api') ? baseUrlFromEnv : `${baseUrlFromEnv}/api`;
 
 // Log the API URL for debugging
 console.log('API Base URL:', API_BASE_URL);
@@ -53,18 +49,27 @@ export const api = axios.create({
   }
 });
 
-// Request interceptor to add auth token
+// Request interceptor: (1) fix URL duplication, (2) add auth token
 api.interceptors.request.use(
   config => {
+    if (config.url) {
+      // Remove any leading slash to avoid double slashes
+      if (config.url.startsWith('/')) {
+        config.url = config.url.substring(1);
+      }
+      // Remove an extra 'api/' prefix if present (we already have /api in baseURL)
+      if (config.url.startsWith('api/')) {
+        config.url = config.url.substring(4);
+      }
+    }
+
     const token = localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
   },
-  error => {
-    return Promise.reject(error);
-  }
+  error => Promise.reject(error)
 );
 
 // Response interceptor to handle common errors
