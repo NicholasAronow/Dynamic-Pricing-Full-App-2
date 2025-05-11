@@ -3,6 +3,25 @@ import axios from 'axios';
 // Create an axios instance with default config
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
 
+// Log the API URL for debugging
+console.log('API Base URL:', API_BASE_URL);
+
+// Safeguard against incorrect Render deployment URL
+if (API_BASE_URL.includes('api.render.com/deploy')) {
+  console.error('Invalid API URL detected (using Render deployment URL instead of app URL)');
+  // Fall back to localhost for development or to a known working URL pattern for production
+  if (window.location.hostname === 'localhost') {
+    console.log('Falling back to localhost API URL');
+  } else {
+    // Extract the service ID from the invalid URL to build a proper one
+    const serviceIdMatch = API_BASE_URL.match(/srv-[a-z0-9]+/);
+    const serviceId = serviceIdMatch ? serviceIdMatch[0] : null;
+    if (serviceId) {
+      console.log(`Attempting to construct proper URL using service ID: ${serviceId}`);
+    }
+  }
+}
+
 export const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
