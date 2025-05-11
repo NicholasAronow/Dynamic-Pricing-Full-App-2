@@ -201,6 +201,8 @@ interface CommonItem {
   difference: string;
   diffValue: number;
   status: 'higher' | 'lower' | 'same';
+  productId: string; // Added product ID for navigation
+  ourItemName: string; // Our menu item name for reference
 }
 
 // Interface for market position visualization
@@ -262,14 +264,48 @@ const CompetitorDetail: React.FC = () => {
         // Create common items array by matching categories
         const processedCommonItems: CommonItem[] = [];
         
-        // Find common items by category
+        // Helper function to find string similarity
+        const findStringSimilarity = (str1: string, str2: string): number => {
+          // Convert both strings to lowercase for case-insensitive comparison
+          const s1 = str1.toLowerCase();
+          const s2 = str2.toLowerCase();
+          
+          // Count common words
+          const words1 = s1.split(/\s+/);
+          const words2 = s2.split(/\s+/);
+          
+          let commonWords = 0;
+          words1.forEach(w1 => {
+            if (words2.some(w2 => w2.includes(w1) || w1.includes(w2))) {
+              commonWords++;
+            }
+          });
+          
+          // Return similarity score (0 to 1)
+          return commonWords / Math.max(words1.length, words2.length);
+        };
+        
+        // Find common items by category and name similarity
         competitorItems.forEach((compItem, index) => {
           // Find our items in the same category
           const ourCategoryItems = ourItems.filter(item => item.category === compItem.category);
           
           if (ourCategoryItems.length > 0) {
-            // Use the first matching item for simplicity (could be enhanced to find closest match)
-            const ourItem = ourCategoryItems[0];
+            // Find the most similar item by name
+            let bestMatch = ourCategoryItems[0];
+            let highestSimilarity = findStringSimilarity(compItem.item_name, bestMatch.name);
+            
+            // Look for a better match among our items in the same category
+            ourCategoryItems.forEach(ourItem => {
+              const similarity = findStringSimilarity(compItem.item_name, ourItem.name);
+              if (similarity > highestSimilarity) {
+                highestSimilarity = similarity;
+                bestMatch = ourItem;
+              }
+            });
+            
+            const ourItem = bestMatch;
+            console.log(`Matched '${compItem.item_name}' with '${ourItem.name}' (similarity: ${highestSimilarity.toFixed(2)})`);
             
             // Calculate price difference
             const priceDiff = ((ourItem.current_price - compItem.price) / compItem.price) * 100;
@@ -284,7 +320,9 @@ const CompetitorDetail: React.FC = () => {
               category: compItem.category,
               difference: formattedDiff,
               diffValue: priceDiff,
-              status: status as 'higher' | 'lower' | 'same'
+              status: status as 'higher' | 'lower' | 'same',
+              productId: String(ourItem.id), // Store the actual product ID for navigation
+              ourItemName: ourItem.name // Store our item name for reference
             });
           }
         });
@@ -337,16 +375,12 @@ const CompetitorDetail: React.FC = () => {
         const categoriesSet = new Set<string>();
         competitorItems.forEach(item => categoriesSet.add(item.category));
         
-        // Calculate average price difference
-        let totalPriceDiff = 0;
-        let comparisonCount = 0;
+        // Calculate average price difference based on the same data used for market position
+        const ourAvgPrice = ourItems.reduce((acc, item) => acc + item.current_price, 0) / ourItems.length;
+        const competitorAvgPrice = competitorItems.reduce((acc, item) => acc + item.price, 0) / competitorItems.length;
         
-        processedCommonItems.forEach(item => {
-          totalPriceDiff += item.diffValue;
-          comparisonCount++;
-        });
-        
-        const avgPriceDiff = comparisonCount > 0 ? totalPriceDiff / comparisonCount : 0;
+        // Use the same calculation method for both price difference and market position
+        const avgPriceDiff = ((competitorAvgPrice - ourAvgPrice) / competitorAvgPrice) * 100;
         const formattedDiff = `${avgPriceDiff > 0 ? '+' : ''}${avgPriceDiff.toFixed(1)}%`;
         const status = avgPriceDiff > 0 ? 'higher' : avgPriceDiff < 0 ? 'lower' : 'same';
         
@@ -454,7 +488,7 @@ const CompetitorDetail: React.FC = () => {
                 }}
                 prefix={competitorData?.status === 'higher' ? <ArrowUpOutlined /> : <ArrowDownOutlined />}
               />
-              <Text type="secondary">compared to our prices</Text>
+              <Text type="secondary">compared to your prices</Text>
             </Col>
             <Col xs={24} md={8} style={{ textAlign: 'center' }}>
               <Statistic
@@ -648,14 +682,19 @@ const CompetitorDetail: React.FC = () => {
               dataSource={commonItems}
               style={{ marginTop: 20 }}
               onRow={(record) => ({
-                onClick: () => navigate(`/products/${record.key}`),
+                onClick: () => navigate(`/product/${record.productId}`),
                 style: { cursor: 'pointer' }
               })}
               columns={[
                 {
-                  title: 'Item Name',
+                  title: 'Competitor Item',
                   dataIndex: 'itemName',
                   key: 'itemName',
+                },
+                {
+                  title: 'Your Item',
+                  dataIndex: 'ourItemName',
+                  key: 'ourItemName',
                 },
                 {
                   title: 'Category',

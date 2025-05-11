@@ -65,14 +65,24 @@ const CompetitorAnalysis: React.FC = () => {
             // Use the new similarity score calculator
             const similarityData = await competitorService.calculateSimilarityScore(name);
             
-            // Format the price difference percentage
-            // Calculate from the price similarity score - convert back to a difference
-            const priceSimPercent = similarityData.priceSimScore;
-            const priceDiffSign = (priceSimPercent < 50) ? '+' : '-';
-            // Rough approximation - just for display purposes
-            const priceDiffValue = Math.abs(100 - priceSimPercent) / 4;
-            const formattedDiff = `${priceDiffSign}${priceDiffValue.toFixed(1)}%`;
-            const status = priceDiffSign === '+' ? 'higher' : priceDiffSign === '-' ? 'lower' : 'same';
+            // Get our items for price calculations
+            const ourItems = await itemService.getItems();
+            
+            // Calculate average prices directly (same approach as CompetitorDetail.tsx)
+            const ourAvgPrice = ourItems.reduce((acc, item) => acc + item.current_price, 0) / ourItems.length;
+            
+            // Get competitor items for this specific competitor
+            const competitorItems = allCompetitorItems.filter(
+              item => item.competitor_name.toLowerCase() === name.toLowerCase()
+            );
+            
+            // Calculate competitor average price
+            const competitorAvgPrice = competitorItems.reduce((acc, item) => acc + item.price, 0) / competitorItems.length;
+            
+            // Calculate price difference using the same formula as CompetitorDetail.tsx
+            const priceDiff = ((competitorAvgPrice - ourAvgPrice) / competitorAvgPrice) * 100;
+            const formattedDiff = `${priceDiff > 0 ? '+' : ''}${priceDiff.toFixed(1)}%`;
+            const status = priceDiff > 0 ? 'higher' : priceDiff < 0 ? 'lower' : 'same';
             
             competitorData.push({
               key: String(i + 1),

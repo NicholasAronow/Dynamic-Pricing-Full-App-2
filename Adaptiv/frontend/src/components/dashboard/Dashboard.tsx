@@ -19,6 +19,7 @@ import moment from 'moment';
 import itemService, { Item } from '../../services/itemService';
 import orderService, { Order } from '../../services/orderService';
 import analyticsService, { SalesAnalytics } from '../../services/analyticsService';
+import competitorService from '../../services/competitorService';
 
 const { Title } = Typography;
 
@@ -248,6 +249,8 @@ const Dashboard: React.FC = () => {
   const [productPerformance, setProductPerformance] = useState<any[]>([]);
   const [itemsTimeFrame, setItemsTimeFrame] = useState('7d');
   const [analyticsData, setAnalyticsData] = useState<SalesAnalytics | null>(null);
+  const [competitors, setCompetitors] = useState<any[]>([]);
+  const [competitorsLoading, setCompetitorsLoading] = useState(true);
   
   // Helper function to convert timeframe to dates
   const getDateRangeFromTimeFrame = (timeFrame: string) => {
@@ -355,6 +358,58 @@ const Dashboard: React.FC = () => {
     fetchProductPerformance();
   }, [itemsTimeFrame]);
   
+  // Fetch competitor data
+  useEffect(() => {
+    const fetchCompetitorData = async () => {
+      try {
+        setCompetitorsLoading(true);
+        
+        // Try to fetch competitor data
+        try {
+          // Get all competitor names
+          const competitorNames = await competitorService.getCompetitors();
+          
+          // Process each competitor
+          const competitorData = [];
+          
+          for (let i = 0; i < competitorNames.length; i++) {
+            const name = competitorNames[i];
+            
+            try {
+              // Calculate similarity score for each competitor
+              const similarityData = await competitorService.calculateSimilarityScore(name);
+              
+              competitorData.push({
+                key: String(i + 1),
+                name: name,
+                similarityScore: similarityData.similarityScore,
+                priceSimScore: similarityData.priceSimScore,
+                menuSimScore: similarityData.menuSimScore,
+                distanceScore: similarityData.distanceScore
+              });
+            } catch (err) {
+              console.error(`Error calculating similarity for ${name}:`, err);
+            }
+          }
+          
+          setCompetitors(competitorData);
+        } catch (err) {
+          console.error('Failed to fetch competitor data:', err);
+          // Fallback to empty array
+          setCompetitors([]);
+        }
+        
+        setCompetitorsLoading(false);
+      } catch (err) {
+        console.error('Error fetching competitor data:', err);
+        setCompetitors([]);
+        setCompetitorsLoading(false);
+      }
+    };
+    
+    fetchCompetitorData();
+  }, []);  // Empty dependency array means this runs once on component mount
+  
   // Extract the user's name for the welcome message
   const userName = user?.email?.split('@')[0] || 'User';
   // Capitalize the first letter of the name
@@ -377,6 +432,12 @@ const Dashboard: React.FC = () => {
   const getBottomProducts = () => {
     if (!productPerformance.length) return [];
     return [...productPerformance].sort((a, b) => a.revenue - b.revenue).slice(0, 3).sort((a, b) => b.revenue - a.revenue);
+  };
+  
+  // Get top 3 competitors by similarity score
+  const getTopCompetitors = () => {
+    if (!competitors.length) return [];
+    return [...competitors].sort((a, b) => b.similarityScore - a.similarityScore).slice(0, 3);
   };
   
   const topProducts = getTopProducts();
@@ -666,7 +727,7 @@ const Dashboard: React.FC = () => {
             {/* Competitor Analysis Card */}
             <Card 
               title="Competitor Analysis" 
-              extra={<Button type="link">View All</Button>}
+              extra={<Button type="link" onClick={() => navigate('/competitor-analysis')}>View All</Button>}
               style={{ width: '100%' }}
             >
               <Statistic
@@ -676,9 +737,45 @@ const Dashboard: React.FC = () => {
                 prefix={<TeamOutlined />}
               />
               <div style={{ marginTop: 16 }}>
-                <p>Competitors Tracked: 23</p>
+                <p>Competitors Tracked: {competitors.length || 'Loading...'}</p>
                 <p>Price Differential: <span style={{ color: '#cf1322' }}><ArrowDownOutlined /> 5.3%</span></p>
                 <p>Feature Parity: 92%</p>
+                
+                {/* Top 3 Competitors Section */}
+                <div style={{ marginTop: 16 }}>
+                  <h4 style={{ marginBottom: 12 }}>Top Competitors by Similarity</h4>
+                  {competitorsLoading ? (
+                    <div style={{ textAlign: 'center', padding: '10px 0' }}>
+                      <Spin size="small" />
+                    </div>
+                  ) : getTopCompetitors().length > 0 ? (
+                    <div>
+                      {getTopCompetitors().map((competitor, index) => (
+                        <div 
+                          key={competitor.key}
+                          onClick={() => navigate(`/competitor/${encodeURIComponent(competitor.name)}`)}
+                          className="dashboard-competitor-item"
+                          style={{ 
+                            padding: '8px 6px', 
+                            borderBottom: index < getTopCompetitors().length - 1 ? '1px solid #f0f0f0' : 'none',
+                            cursor: 'pointer',
+                            borderRadius: '4px',
+                            transition: 'all 0.3s ease'
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div style={{ fontWeight: 500 }}>{competitor.name}</div>
+                            <div>
+                              <Tag color="blue">{competitor.similarityScore}%</Tag>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <Alert message="No competitor data available" type="info" showIcon />
+                  )}
+                </div>
               </div>
             </Card>
           </Space>
