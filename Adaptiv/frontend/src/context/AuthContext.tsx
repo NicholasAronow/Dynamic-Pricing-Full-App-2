@@ -79,11 +79,42 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Log the base URL being used
       console.log('Using API base URL:', api.defaults.baseURL);
       
-      // Use /api/auth/debug-login which we know works
-      const response = await api.post('/api/auth/debug-login', {
-        email,
-        password
-      });
+      let response;
+      try {
+        // First try debug-login endpoint
+        response = await api.post('/api/auth/debug-login', {
+          email,
+          password
+        });
+        console.log('Debug login successful');
+      } catch (debugError) {
+        // If debug endpoint isn't available (404), try regular login
+        console.log('Debug login endpoint not available, trying regular login...');
+        
+        // Try the standard login endpoint
+        try {
+          response = await api.post('/api/auth/login', {
+            email,
+            password
+          });
+          console.log('Standard login successful');
+        } catch (loginError) {
+          // If that fails, try the token endpoint with form data format as a last resort
+          console.log('Standard login failed, trying token endpoint...');
+          response = await api.post('/api/auth/token', 
+            new URLSearchParams({
+              'username': email,
+              'password': password
+            }), 
+            {
+              headers: {
+                'Content-Type': 'application/x-www-form-urlencoded'
+              }
+            }
+          );
+          console.log('Token endpoint login successful');
+        }
+      }
       
       console.log('Login response:', response.data);
       
@@ -122,11 +153,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Log the base URL being used for debugging
       console.log('Using API base URL for registration:', api.defaults.baseURL);
       
-      // Try first with the debug register endpoint which we added
-      await api.post('/api/auth/debug-register', {
-        email,
-        password,
-      });
+      try {
+        // Try first with the debug register endpoint which we added
+        await api.post('/api/auth/debug-register', {
+          email,
+          password,
+        });
+        console.log('Debug registration successful');
+      } catch (debugError) {
+        // If debug endpoint isn't available (404), fall back to regular endpoint
+        console.log('Debug endpoint not available, trying regular endpoint...');
+        await api.post('/api/auth/register', {
+          email,
+          password,
+        });
+        console.log('Standard registration successful');
+      }
       
       console.log('Registration successful, attempting login...');
       
