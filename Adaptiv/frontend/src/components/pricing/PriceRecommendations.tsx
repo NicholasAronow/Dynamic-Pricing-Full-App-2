@@ -13,7 +13,8 @@ import {
   Divider,
   Statistic,
   Row,
-  Col
+  Col,
+  message
 } from 'antd';
 import type { RadioChangeEvent, TableProps, TableColumnType } from 'antd';
 import { Key } from 'rc-table/lib/interface';
@@ -24,159 +25,88 @@ import {
   DollarOutlined,
   CheckOutlined,
   CloseOutlined,
-  EditOutlined
+  EditOutlined,
+  LoadingOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import pricingService, { PriceRecommendation } from '../../services/pricingService';
 
 const { Title, Text } = Typography;
-
-// Using the same mock product data as in Dashboard
-const products = [
-  { id: 1, name: 'Small Coffee', category: 'Coffee', basePrice: 2.99, popularity: 0.9 },
-  { id: 2, name: 'Medium Coffee', category: 'Coffee', basePrice: 3.99, popularity: 1.5 },
-  { id: 3, name: 'Large Coffee', category: 'Coffee', basePrice: 4.99, popularity: 0.6 },
-  { id: 4, name: 'Cappucino', category: 'Coffee', basePrice: 5.99, popularity: 0.8 },
-  { id: 5, name: 'Latte', category: 'Coffee', basePrice: 6.99, popularity: 0.7 },
-  { id: 6, name: 'Americano', category: 'Coffee', basePrice: 7.99, popularity: 1.2 },
-  { id: 7, name: 'Espresso', category: 'Coffee', basePrice: 8.99, popularity: 1.1 },
-  { id: 8, name: 'Mocha', category: 'Coffee', basePrice: 9.99, popularity: 1.3 },
-  { id: 9, name: 'Croissant', category: 'Pastry', basePrice: 1.99, popularity: 0.85 },
-  { id: 10, name: 'Danish', category: 'Pastry', basePrice: 2.99, popularity: 0.95 },
-];
-
-// Generate price recommendation data
-const generateRecommendationData = (timeFrame: string) => {
-  // Helper functions to create varied but deterministic recommendations
-  const getVariationMultiplier = (timeFrame: string) => {
-    switch (timeFrame) {
-      case '1d': return 0.2;
-      case '7d': return 0.5;
-      case '1m': return 0.8;
-      case '6m': return 1.2;
-      case '1yr': return 2.0;
-      default: return 0.5;
-    }
-  };
-
-  const getBaseQuantity = (timeFrame: string) => {
-    switch (timeFrame) {
-      case '1d': return 5;
-      case '7d': return 50;
-      case '1m': return 200;
-      case '6m': return 800;
-      case '1yr': return 2000;
-      default: return 50;
-    }
-  };
-
-  const variationMultiplier = getVariationMultiplier(timeFrame);
-  const baseQuantity = getBaseQuantity(timeFrame);
-  
-  // Create a seed based on the timeframe for consistent randomness
-  let seed = timeFrame === '1d' ? 0.2 : 
-             timeFrame === '7d' ? 0.3 : 
-             timeFrame === '1m' ? 0.4 : 
-             timeFrame === '6m' ? 0.5 : 0.6;
-
-  return products.map(product => {
-    // Use seed to create pseudo-random but consistent values
-    seed = (seed * 9301 + 49297) % 233280;
-    const random1 = seed / 233280;
-    
-    seed = (seed * 9301 + 49297) % 233280;
-    const random2 = seed / 233280;
-    
-    seed = (seed * 9301 + 49297) % 233280;
-    const random3 = seed / 233280;
-
-    // Calculate current performance
-    const quantity = Math.round(baseQuantity * product.popularity * (1 + (random1 * variationMultiplier - variationMultiplier/2)));
-    const revenue = quantity * product.basePrice;
-    const profitMargin = 0.3 + (random2 * 0.3);
-    const profit = revenue * profitMargin;
-    const growthVariance = variationMultiplier * 30;
-    const growth = Math.round((random3 * growthVariance) - growthVariance/4);
-    
-    // Calculate price recommendation
-    const demandElasticity = 0.5 + random1 * 1.5; // 0.5 - 2.0 range
-    const currentDemandRatio = quantity / baseQuantity;
-    
-    // Recommended price change based on popularity and current demand
-    let priceChangeDirection = 1;
-    if (currentDemandRatio > 1.2 && growth > 5) {
-      // High demand and positive growth: increase price
-      priceChangeDirection = 1;
-    } else if (currentDemandRatio < 0.8 || growth < -5) {
-      // Low demand or negative growth: decrease price
-      priceChangeDirection = -1;
-    } else {
-      // Stable demand: small adjustment based on profitability
-      priceChangeDirection = profitMargin > 0.4 ? -1 : 1;
-    }
-    
-    // Calculate percentage change (1-10%)
-    const percentChange = Math.round((1 + random2 * 9) * priceChangeDirection);
-    
-    // Generate a previous price (slightly different from current to show history)
-    const previousPriceVariation = (random2 > 0.5 ? 1 : -1) * (0.02 + random1 * 0.05);
-    const previousPrice = Number((product.basePrice * (1 - previousPriceVariation)).toFixed(2));
-    
-    // Calculate measured impact from the price change
-    const priceChangeRatio = product.basePrice / previousPrice;
-    const estimatedPreviousQuantity = Math.round(quantity / (priceChangeRatio ** -demandElasticity));
-    const previousRevenue = estimatedPreviousQuantity * previousPrice;
-    const measuredRevenueDiff = revenue - previousRevenue;
-    const measuredRevenueChangePercent = Math.round((measuredRevenueDiff / previousRevenue) * 100);
-    const incrementalRevenue = measuredRevenueDiff;
-    
-    return {
-      id: product.id,
-      name: product.name,
-      category: product.category,
-      currentPrice: product.basePrice,
-      previousPrice,
-      quantity,
-      revenue,
-      growth,
-      profitMargin,
-      previousRevenue,
-      incrementalRevenue,
-      measuredRevenueChangePercent,
-      elasticity: demandElasticity.toFixed(2),
-      optimizationReason: percentChange > 0 
-        ? 'Demand exceeds supply' 
-        : percentChange < 0 
-          ? 'Increase competitiveness' 
-          : 'Maintain market position',
-      timeFrame,
-      editing: false
-    };
-  });
-};
 
 const PriceRecommendations: React.FC = () => {
   const navigate = useNavigate();
   const [timeFrame, setTimeFrame] = useState<string>('7d');
   const [loading, setLoading] = useState<boolean>(true);
-  const [recommendations, setRecommendations] = useState<any[]>([]);
+  const [recommendations, setRecommendations] = useState<PriceRecommendation[]>([]);
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [editPrice, setEditPrice] = useState<number | null>(null);
+  const [savingPrice, setSavingPrice] = useState<number | null>(null);
   
-  // Calculate summary metrics
-  const totalRevenue = recommendations.reduce((sum, item) => sum + item.revenue, 0);
-  const netRevenueImpact = recommendations.reduce((sum, item) => sum + item.incrementalRevenue, 0);
-  const percentChange = netRevenueImpact !== 0 ? (netRevenueImpact / (totalRevenue - netRevenueImpact)) * 100 : 0;
+  // Calculate summary metrics with safety checks
+  const totalRevenue = recommendations.reduce((sum, item) => sum + (item.revenue || 0), 0);
+  const netRevenueImpact = recommendations.reduce((sum, item) => sum + (item.incrementalRevenue || 0), 0);
+  const percentChange = (netRevenueImpact !== 0 && (totalRevenue - netRevenueImpact) !== 0) ? 
+    (netRevenueImpact / (totalRevenue - netRevenueImpact)) * 100 : 0;
 
-  // Fetch recommendations
+  // Fetch recommendations from the API
   useEffect(() => {
-    setLoading(true);
-    // Simulate API call delay
-    setTimeout(() => {
-      const data = generateRecommendationData(timeFrame);
-      setRecommendations(data);
-      setLoading(false);
-    }, 800);
+    const fetchRecommendations = async () => {
+      setLoading(true);
+      try {
+        let data = await pricingService.getPriceRecommendations(timeFrame);
+        console.log('Raw API data received:', data);
+        
+        // Ensure both quantity and quantitySold properties exist on each item
+        if (data && data.length > 0) {
+          // Ensure each item has the required properties
+          data = data.map(item => {
+            // Create a properly typed object
+            const processedItem: PriceRecommendation = {
+              ...item,
+              quantity: item.quantity || 0
+            };
+            
+            // Add the quantitySold property without TypeScript errors
+            (processedItem as any).quantitySold = item.quantity || 0;
+            
+            return processedItem;
+          });
+          
+          console.log('===== UNITS DATA DEBUG =====');
+          data.forEach((item, index) => {
+            console.log(`Item ${index} (${item.name}) - quantity:`, item.quantity, 
+              '- quantitySold:', item.quantity,
+              '- types:', typeof item.quantity, '/', typeof item.quantity);
+          });
+          console.log('========================');
+        }
+        
+        setRecommendations(data);
+      } catch (error) {
+        console.error('Error fetching price recommendations:', error);
+        message.error('Failed to load price recommendations');
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchRecommendations();
   }, [timeFrame]);
+
+  // Get unique categories for filtering
+  const getUniqueCategories = () => {
+    if (!recommendations.length) return [];
+    
+    // Get all categories
+    const categories = recommendations.map(item => item.category);
+    
+    // Create a unique set using Array.filter for broader compatibility
+    const uniqueCategories = categories.filter((value, index, self) => 
+      self.indexOf(value) === index
+    );
+    
+    return uniqueCategories.map(category => ({ text: category, value: category }));
+  };
 
   // Handle time frame change
   const handleTimeFrameChange = (value: string) => {
@@ -184,9 +114,30 @@ const PriceRecommendations: React.FC = () => {
   };
 
   // Handle edit mode for a row
-  const startEditing = (record: any) => {
+  const startEditing = (record: PriceRecommendation) => {
     setEditingRow(record.id);
-    setEditPrice(record.recommendedPrice);
+    setEditPrice(record.recommendedPrice || calculateRecommendedPrice(record));
+  };
+
+  // Calculate a recommended price based on performance data
+  const calculateRecommendedPrice = (record: PriceRecommendation): number => {
+    // Simple algorithm based on growth and profitability
+    const elasticity = parseFloat(record.elasticity);
+    let percentChange = 0;
+    
+    if (record.growth > 10 && record.profitMargin >= 0.3) {
+      // High growth + good margin: recommend price increase
+      percentChange = Math.min(5, Math.round(record.growth / 3));
+    } else if (record.growth < -5 || record.profitMargin < 0.2) {
+      // Negative growth or low margin: recommend price decrease
+      percentChange = Math.max(-8, Math.round(record.growth / 2));
+    } else {
+      // Stable: small adjustment based on margin
+      percentChange = record.profitMargin > 0.4 ? 2 : -2;
+    }
+    
+    const newPrice = record.currentPrice * (1 + percentChange / 100);
+    return Number(newPrice.toFixed(2));
   };
 
   // Cancel editing
@@ -196,36 +147,55 @@ const PriceRecommendations: React.FC = () => {
   };
 
   // Save edited price
-  const saveEditing = (record: any) => {
+  const saveEditing = async (record: PriceRecommendation) => {
     if (editPrice !== null) {
-      const updatedRecommendations = recommendations.map(item => {
-        if (item.id === record.id) {
-          const percentChange = Math.round(((editPrice - item.currentPrice) / item.currentPrice) * 100);
-          
-          // Recalculate projected impact
-          const demandElasticity = parseFloat(item.elasticity);
-          const projectedQuantityChange = -percentChange * demandElasticity / 100;
-          const projectedNewQuantity = Math.round(item.quantity * (1 + projectedQuantityChange));
-          const projectedRevenue = projectedNewQuantity * editPrice;
-          const revenueDiff = projectedRevenue - item.revenue;
-          const revenueChangePercent = Math.round((revenueDiff / item.revenue) * 100);
-          
-          return {
-            ...item,
-            recommendedPrice: editPrice,
-            percentChange,
-            projectedRevenue,
-            revenueChangePercent
-          };
-        }
-        return item;
-      });
+      setSavingPrice(record.id);
       
-      setRecommendations(updatedRecommendations);
+      // Calculate metrics for the UI update
+      const percentChange = Math.round(((editPrice - record.currentPrice) / record.currentPrice) * 100);
+      const demandElasticity = parseFloat(record.elasticity);
+      const projectedQuantityChange = -percentChange * demandElasticity / 100;
+      const projectedNewQuantity = Math.round(record.quantity * (1 + projectedQuantityChange));
+      const projectedRevenue = projectedNewQuantity * editPrice;
+      const revenueDiff = projectedRevenue - record.revenue;
+      const revenueChangePercent = Math.round((revenueDiff / record.revenue) * 100);
+      
+      // Apply the price change using the service
+      try {
+        const success = await pricingService.applyRecommendation(record.id, editPrice);
+        
+        if (success) {
+          // Update local state with the new price
+          const updatedRecommendations = recommendations.map(item => {
+            if (item.id === record.id) {
+              return {
+                ...item,
+                recommendedPrice: editPrice,
+                percentChange,
+                projectedRevenue,
+                revenueChangePercent
+              };
+            }
+            return item;
+          });
+          
+          setRecommendations(updatedRecommendations);
+          message.success(`Price for ${record.name} updated to $${editPrice}`);
+        } else {
+          message.error('Failed to update price. Please try again.');
+        }
+      } catch (error) {
+        console.error('Error saving price:', error);
+        message.error('Error updating price');
+      } finally {
+        setSavingPrice(null);
+        setEditingRow(null);
+        setEditPrice(null);
+      }
+    } else {
+      setEditingRow(null);
+      setEditPrice(null);
     }
-    
-    setEditingRow(null);
-    setEditPrice(null);
   };
 
   // Table columns
@@ -236,21 +206,29 @@ const PriceRecommendations: React.FC = () => {
       key: 'name',
       sorter: (a, b) => a.name.localeCompare(b.name),
       sortDirections: ['ascend', 'descend'] as TableColumnType<any>['sortDirections'],
-      render: (text: string) => (
-        <div style={{ fontWeight: 500 }}>{text}</div>
+      render: (text: string, record: PriceRecommendation) => (
+        <div 
+          style={{ fontWeight: 500, cursor: 'pointer' }} 
+          onClick={() => navigate(`/product/${record.id}`)}
+        >
+          {text}
+        </div>
       ),
     },
     {
       title: 'Tags',
       dataIndex: 'category',
       key: 'category',
-      render: (category: string) => (
-        <Tag color="#9370DB" style={{ borderRadius: 12, padding: '0 8px' }}>{category}</Tag>
+      render: (category: string, record: PriceRecommendation) => (
+        <Tag 
+          color="#9370DB" 
+          style={{ borderRadius: 12, padding: '0 8px', cursor: 'pointer' }}
+          onClick={() => navigate(`/product/${record.id}`)}
+        >
+          {category}
+        </Tag>
       ),
-      filters: [
-        { text: 'Coffee', value: 'Coffee' },
-        { text: 'Pastry', value: 'Pastry' },
-      ],
+      filters: getUniqueCategories(),
       onFilter: (value: Key | boolean, record: any) => record.category === value.toString(),
     },
     {
@@ -266,14 +244,14 @@ const PriceRecommendations: React.FC = () => {
         return a.name.localeCompare(b.name);
       },
       sortDirections: ['ascend', 'descend'] as TableColumnType<any>['sortDirections'],
-      render: (text: number) => (
-        <div>${text.toFixed(2)}</div>
+      render: (text: number | undefined) => (
+        <div>${typeof text === 'number' ? text.toFixed(2) : '0.00'}</div>
       ),
     },
     {
       title: 'Performance',
       key: 'performance',
-      sorter: (a, b) => {
+      sorter: (a: any, b: any) => {
         // Primary sort by revenue
         if (a.revenue !== b.revenue) {
           return b.revenue - a.revenue;
@@ -286,21 +264,21 @@ const PriceRecommendations: React.FC = () => {
       render: (text: string, record: any) => (
         <Space direction="vertical" size={1}>
           <div>
-            <Text strong>${formatNumberWithCommas(Number(record.revenue.toFixed(2)))}</Text>
+            <Text strong>${formatNumberWithCommas(Number((record.revenue || 0).toFixed(2)))}</Text>
             <Text type="secondary" style={{ fontSize: '0.85em', marginLeft: 4 }}>revenue</Text>
           </div>
           <div>
-            <Tooltip title="Units Sold">
-              <Text>{formatNumberWithCommas(record.quantity)} units</Text>
-            </Tooltip>
+            {/* <Tooltip title="Units Sold"> */}
+            {/* <Text>{formatNumberWithCommas(record.quantity !== undefined ? record.quantity : 0)} units</Text> */}
+            {/* </Tooltip> */}
             <span style={{ marginLeft: 8 }}>
-              {record.growth > 0 ? (
+              {(record.growth || 0) > 0 ? (
                 <Text style={{ color: '#3f8600' }}>
-                  <ArrowUpOutlined /> {record.growth}%
+                  <ArrowUpOutlined /> {record.growth || 0}%
                 </Text>
               ) : (
                 <Text style={{ color: '#cf1322' }}>
-                  <ArrowDownOutlined /> {Math.abs(record.growth)}%
+                  <ArrowDownOutlined /> {Math.abs(record.growth || 0)}%
                 </Text>
               )}
             </span>
@@ -311,22 +289,42 @@ const PriceRecommendations: React.FC = () => {
     {
       title: 'Last Price Change',
       key: 'priceChange',
-      sorter: (a, b) => {
+      sorter: (a: any, b: any) => {
         const changeA = Math.abs(a.currentPrice - a.previousPrice);
         const changeB = Math.abs(b.currentPrice - b.previousPrice);
         return changeB - changeA; // Sort by change size descending by default
       },
       sortDirections: ['descend', 'ascend'] as TableColumnType<any>['sortDirections'],
       render: (text: string, record: any) => {
-        const priceIncreased = record.currentPrice > record.previousPrice;
-        const changeAmount = Math.abs(record.currentPrice - record.previousPrice).toFixed(2);
-        const changePercent = Math.round(Math.abs(record.currentPrice - record.previousPrice) / record.previousPrice * 100);
+        const currentPrice = record.currentPrice || 0;
+        const previousPrice = record.previousPrice;
+        const isPriceNeverChanged = previousPrice === 0 || previousPrice === undefined;
+        
+        // If price has never been changed, display a special message
+        if (isPriceNeverChanged) {
+          return (
+            <Space direction="vertical" size={1}>
+              <div>
+                <Text strong>${formatNumberWithCommas(Number(currentPrice.toFixed(2)))}</Text>
+              </div>
+              <Text type="secondary" style={{ fontSize: '0.85em' }}>
+                <InfoCircleOutlined style={{ marginRight: 4 }} />
+                No previous price changes
+              </Text>
+            </Space>
+          );
+        }
+        
+        // Normal case: price has been changed before
+        const priceIncreased = currentPrice > previousPrice;
+        const changeAmount = Math.abs(currentPrice - previousPrice).toFixed(2);
+        const changePercent = Math.round(Math.abs(currentPrice - previousPrice) / previousPrice * 100);
         
         return (
           <Space direction="vertical" size={1}>
             <div>
               <Text style={{ fontSize: '0.9em' }}>
-                ${formatNumberWithCommas(Number(record.previousPrice.toFixed(2)))} → <Text strong>${formatNumberWithCommas(Number(record.currentPrice.toFixed(2)))}</Text>
+                ${formatNumberWithCommas(Number(previousPrice.toFixed(2)))} → <Text strong>${formatNumberWithCommas(Number(currentPrice.toFixed(2)))}</Text>
               </Text>
               <Text 
                 style={{ 
@@ -359,7 +357,7 @@ const PriceRecommendations: React.FC = () => {
           <div>
             <Text strong style={{ color: record.incrementalRevenue > 0 ? '#3f8600' : '#cf1322' }}>
               {record.incrementalRevenue > 0 ? '+' : ''}
-              ${formatNumberWithCommas(Number(Math.abs(record.incrementalRevenue).toFixed(2)))}
+              ${formatNumberWithCommas(Number(Math.abs(record.incrementalRevenue || 0).toFixed(2)))}
             </Text>
           </div>
           <div>
@@ -461,6 +459,10 @@ const PriceRecommendations: React.FC = () => {
           rowKey="id"
           loading={loading}
           pagination={false}
+          onRow={(record) => ({
+            onClick: () => navigate(`/product/${record.id}`),
+            style: { cursor: 'pointer' }
+          })}
         />
       </Card>
     </div>
