@@ -73,13 +73,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (email: string, password: string) => {
     try {
-      const response = await axios.post('/api/auth/token', new URLSearchParams({
-        'username': email,
-        'password': password,
-      }), {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
-        }
+      // Import api from services to use the configured base URL
+      const api = (await import('../services/api')).default;
+      
+      const response = await api.post('/api/auth/login', {
+        email,
+        password
       });
       
       const { access_token } = response.data;
