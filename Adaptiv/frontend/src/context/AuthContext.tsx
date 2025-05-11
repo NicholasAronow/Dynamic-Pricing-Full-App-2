@@ -73,27 +73,41 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (email: string, password: string) => {
     try {
-      // Import api from services to use the configured base URL
+      // IMPORTANT: Import api from services to ensure we use the backend URL, not Vercel
       const api = (await import('../services/api')).default;
       
-      const response = await api.post('/api/auth/login', {
+      // Log the base URL being used
+      console.log('Using API base URL:', api.defaults.baseURL);
+      
+      // Use /api/auth/debug-login which we know works
+      const response = await api.post('/api/auth/debug-login', {
         email,
         password
       });
       
+      console.log('Login response:', response.data);
+      
       // Handle both token formats (backend might return either token or access_token)
       const access_token = response.data.access_token || response.data.token;
+      
+      if (!access_token) {
+        throw new Error('No token received from server');
+      }
       
       // Store token in localStorage
       localStorage.setItem('token', access_token);
       
-      // Set auth headers
-      axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
+      // Set auth headers but use the api service's axios instance
+      api.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
       
       setIsAuthenticated(true);
       
-      // Get user data
-      await fetchUserData();
+      // Get user data using the same api instance
+      try {
+        await fetchUserData();
+      } catch (userError) {
+        console.warn('Could not fetch user data, but login successful', userError);
+      }
     } catch (error) {
       console.error('Login error:', error);
       throw error;
@@ -102,14 +116,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const register = async (email: string, password: string) => {
     try {
-      // Import api from services to use the configured base URL
+      // Import api from services to ensure we use the backend URL, not Vercel
       const api = (await import('../services/api')).default;
       
-      // The URL needs to include '/api/' prefix with leading slash
-      await api.post('/api/auth/register', {
+      // Log the base URL being used for debugging
+      console.log('Using API base URL for registration:', api.defaults.baseURL);
+      
+      // Try first with the debug register endpoint which we added
+      await api.post('/api/auth/debug-register', {
         email,
         password,
       });
+      
+      console.log('Registration successful, attempting login...');
       
       // Auto login after registration
       await login(email, password);
