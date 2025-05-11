@@ -81,7 +81,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         password
       });
       
-      const { access_token } = response.data;
+      // Handle both token formats (backend might return either token or access_token)
+      const access_token = response.data.access_token || response.data.token;
       
       // Store token in localStorage
       localStorage.setItem('token', access_token);
