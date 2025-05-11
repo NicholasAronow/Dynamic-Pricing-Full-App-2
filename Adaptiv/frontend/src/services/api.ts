@@ -1,7 +1,12 @@
 import axios from 'axios';
 
 // Create an axios instance with default config
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
+// Remove trailing /api if present to avoid double prefixing
+let baseUrlFromEnv = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+if (baseUrlFromEnv.endsWith('/api')) {
+  baseUrlFromEnv = baseUrlFromEnv.slice(0, -4); // Remove trailing /api
+}
+const API_BASE_URL = baseUrlFromEnv;
 
 // Log the API URL for debugging
 console.log('API Base URL:', API_BASE_URL);

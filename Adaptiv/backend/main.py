@@ -25,9 +25,15 @@ app = FastAPI(title="Adaptiv API")
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*", "https://*.vercel.app", "https://adaptiv-dynamic-pricing.vercel.app"],  # Add your Vercel domain when known
+    allow_origins=[
+        "*", 
+        "https://*.vercel.app",
+        "https://adaptiv-dynamic-pricing.vercel.app",
+        "https://adaptiv-eight.vercel.app",
+        "https://adaptiv-l9z8a1e32-nicholasaronows-projects.vercel.app"
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 

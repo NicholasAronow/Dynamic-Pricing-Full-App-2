@@ -19,7 +19,7 @@ interface TokenPayload {
 export const authService = {
   login: async (email: string, password: string): Promise<boolean> => {
     try {
-      const response = await api.post('api/auth/login', { email, password });
+      const response = await api.post('/api/auth/login', { email, password });
       const { token } = response.data;
       localStorage.setItem('token', token);
       return true;
@@ -36,7 +36,7 @@ export const authService = {
 
   register: async (userData: any): Promise<boolean> => {
     try {
-      const response = await api.post('api/auth/register', userData);
+      const response = await api.post('/api/auth/register', userData);
       const { token } = response.data;
       localStorage.setItem('token', token);
       return true;

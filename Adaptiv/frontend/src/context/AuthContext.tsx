@@ -105,8 +105,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Import api from services to use the configured base URL
       const api = (await import('../services/api')).default;
       
-      // The URL needs to include 'api/' prefix to match backend routes
-      await api.post('api/auth/register', {
+      // The URL needs to include '/api/' prefix with leading slash
+      await api.post('/api/auth/register', {
         email,
         password,
       });
