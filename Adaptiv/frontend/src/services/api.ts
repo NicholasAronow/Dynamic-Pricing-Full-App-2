@@ -20,8 +20,18 @@ if (isVercel) {
   console.log('Using environment backend URL:', baseUrlFromEnv);
 }
 
-// Ensure the base URL ends with /api so front-end services can call relative paths like 'items'
-const API_BASE_URL = baseUrlFromEnv.endsWith('/api') ? baseUrlFromEnv : `${baseUrlFromEnv}/api`;
+// Normalize base URL to always end with '/api/'
+let normalizedBase = baseUrlFromEnv;
+// Ensure trailing slash for easier concatenation
+if (!normalizedBase.endsWith('/')) {
+  normalizedBase += '/';
+}
+// Ensure it ends with 'api/'
+if (!normalizedBase.endsWith('api/')) {
+  normalizedBase += 'api/';
+}
+
+const API_BASE_URL = normalizedBase;
 
 // Log the API URL for debugging
 console.log('API Base URL:', API_BASE_URL);
