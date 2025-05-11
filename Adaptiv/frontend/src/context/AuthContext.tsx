@@ -63,11 +63,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const fetchUserData = async () => {
     try {
-      const response = await axios.get('/api/auth/me');
+      // Use the same API instance as the other methods
+      const api = (await import('../services/api')).default;
+      console.log('Fetching user data from:', api.defaults.baseURL + '/api/auth/me');
+      
+      const response = await api.get('/api/auth/me');
+      console.log('User data received:', response.data);
       setUser(response.data);
+      return response.data;
     } catch (error) {
       console.error('Error fetching user data:', error);
       logout();
+      return null;
     }
   };
 
@@ -181,14 +188,27 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const logout = () => {
+    console.log('Logging out user');
     // Clear token from localStorage
     localStorage.removeItem('token');
     
-    // Remove auth header
+    // Clear all auth headers to be safe
     delete axios.defaults.headers.common['Authorization'];
     
+    // Also clear authorization from the API service
+    import('../services/api').then(module => {
+      const api = module.default;
+      delete api.defaults.headers.common['Authorization'];
+      console.log('Cleared auth headers from API service');
+    }).catch(err => {
+      console.error('Error clearing API auth headers:', err);
+    });
+    
+    // Reset authentication state
     setIsAuthenticated(false);
     setUser(null);
+    
+    console.log('Logout complete, auth state reset');
   };
 
   return (
