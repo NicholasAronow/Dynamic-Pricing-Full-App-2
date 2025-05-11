@@ -6,6 +6,7 @@ import './App.css';
 // Auth components
 import Login from './components/auth/Login';
 import Register from './components/auth/Register';
+import AuthDebug from './components/auth/AuthDebug';
 
 // Main components
 import Dashboard from './components/dashboard/Dashboard';
@@ -36,6 +37,7 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/auth-debug" element={<AuthDebug />} />
           <Route path="/" element={
             <ProtectedRoute>
               <MainLayout />
