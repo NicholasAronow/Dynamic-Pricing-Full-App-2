@@ -1,4 +1,5 @@
 import api from './api';
+import authService from './authService';
 
 export interface Item {
   id: number;
@@ -35,7 +36,14 @@ export interface PriceHistory {
 export const itemService = {
   getItems: async (): Promise<Item[]> => {
     try {
-      const response = await api.get('items');
+      // Add account_id filter parameter to only fetch items belonging to current user
+      const currentUser = authService.getCurrentUser();
+      if (!currentUser) {
+        console.error('User not authenticated');
+        return [];
+      }
+      
+      const response = await api.get(`items?account_id=${currentUser.id}`);
       return response.data;
     } catch (error) {
       console.error('Error fetching items:', error);
@@ -45,7 +53,14 @@ export const itemService = {
   
   getPriceHistory: async (itemId: number): Promise<PriceHistory[]> => {
     try {
-      const response = await api.get(`price-history?item_id=${itemId}`);
+      const currentUser = authService.getCurrentUser();
+      if (!currentUser) {
+        console.error('User not authenticated');
+        return [];
+      }
+      
+      // Add account_id filter to ensure we only get price history for items the user owns
+      const response = await api.get(`price-history?item_id=${itemId}&account_id=${currentUser.id}`);
       return response.data;
     } catch (error) {
       console.error(`Error fetching price history for item ${itemId}:`, error);
@@ -54,22 +69,76 @@ export const itemService = {
   },
 
   getItem: async (id: number): Promise<Item> => {
-    const response = await api.get(`items/${id}`);
-    return response.data;
+    try {
+      const currentUser = authService.getCurrentUser();
+      if (!currentUser) {
+        console.error('User not authenticated');
+        throw new Error('User not authenticated');
+      }
+      
+      // The backend should verify the item belongs to the current user
+      const response = await api.get(`items/${id}?account_id=${currentUser.id}`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching item ${id}:`, error);
+      throw error;
+    }
   },
 
   createItem: async (item: ItemCreate): Promise<Item> => {
-    const response = await api.post('items', item);
-    return response.data;
+    try {
+      const currentUser = authService.getCurrentUser();
+      if (!currentUser) {
+        console.error('User not authenticated');
+        throw new Error('User not authenticated');
+      }
+      
+      // Add the account_id to the item data when creating
+      const itemWithAccount = {
+        ...item,
+        account_id: currentUser.id
+      };
+      
+      const response = await api.post('items', itemWithAccount);
+      return response.data;
+    } catch (error) {
+      console.error('Error creating item:', error);
+      throw error;
+    }
   },
 
   updateItem: async (id: number, item: Partial<ItemCreate>): Promise<Item> => {
-    const response = await api.put(`items/${id}`, item);
-    return response.data;
+    try {
+      const currentUser = authService.getCurrentUser();
+      if (!currentUser) {
+        console.error('User not authenticated');
+        throw new Error('User not authenticated');
+      }
+      
+      // The backend should verify the item belongs to the current user
+      // but we'll also add the account_id as a query parameter for extra security
+      const response = await api.put(`items/${id}?account_id=${currentUser.id}`, item);
+      return response.data;
+    } catch (error) {
+      console.error(`Error updating item ${id}:`, error);
+      throw error;
+    }
   },
 
   deleteItem: async (id: number): Promise<void> => {
-    await api.delete(`items/${id}`);
+    try {
+      const currentUser = authService.getCurrentUser();
+      if (!currentUser) {
+        console.error('User not authenticated');
+        throw new Error('User not authenticated');
+      }
+      
+      // The backend should verify the item belongs to the current user
+      await api.delete(`items/${id}?account_id=${currentUser.id}`);
+    } catch (error) {
+      console.error(`Error deleting item ${id}:`, error);
+      throw error;
+    }
   }
 };
 

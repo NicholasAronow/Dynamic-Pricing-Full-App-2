@@ -41,8 +41,12 @@ class Item(Base):
     category = Column(String, index=True)
     current_price = Column(Float)
     cost = Column(Float, nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # Add user_id for account-specific data
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Add relationship to User
+    user = relationship("User", backref="items")
     
     # Relationships
     price_history = relationship("PriceHistory", back_populates="item")
@@ -53,10 +57,14 @@ class PriceHistory(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     item_id = Column(Integer, ForeignKey("items.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # Add user_id for account-specific data
     previous_price = Column(Float)
     new_price = Column(Float)
     change_reason = Column(String, nullable=True)
     changed_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Add relationship to User
+    user = relationship("User", backref="price_history")
     
     # Relationship to Item
     item = relationship("Item", back_populates="price_history")
@@ -81,7 +89,11 @@ class Order(Base):
     id = Column(Integer, primary_key=True, index=True)
     order_date = Column(DateTime(timezone=True))
     total_amount = Column(Float)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # Add user_id for account-specific data
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Add relationship to User
+    user = relationship("User", backref="orders")
     
     # Relationship to OrderItems
     items = relationship("OrderItem", back_populates="order")

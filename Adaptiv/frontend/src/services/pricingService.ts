@@ -1,5 +1,6 @@
 import api from './api';
 import { Item } from './itemService';
+import authService from './authService';
 
 export interface PriceRecommendation {
   id: number;
@@ -28,26 +29,38 @@ export const pricingService = {
   // Get price recommendations for all items
   getPriceRecommendations: async (timeFrame: string): Promise<PriceRecommendation[]> => {
     try {
-      // Call the API endpoint for price recommendations
-      const response = await api.get(`price-recommendations?time_frame=${timeFrame}`);
+      const currentUser = authService.getCurrentUser();
+      if (!currentUser) {
+        console.error('User not authenticated');
+        throw new Error('User not authenticated');
+      }
+
+      // Call the API endpoint for price recommendations with account filtering
+      const response = await api.get(`price-recommendations?time_frame=${timeFrame}&account_id=${currentUser.id}`);
       return response.data;
     } catch (error) {
       console.error('Error fetching price recommendations:', error);
       
       // Fallback to generating recommendations based on items and sales data
       try {
-        // Get items
-        const itemsResponse = await api.get('items');
+        const currentUser = authService.getCurrentUser();
+        if (!currentUser) {
+          console.error('User not authenticated');
+          return [];
+        }
+
+        // Get items for the current user's account
+        const itemsResponse = await api.get(`items?account_id=${currentUser.id}`);
         const items = itemsResponse.data;
         
         // Get sales analytics for performance data
         const analyticsResponse = await api.get(
-          `dashboard/product-performance${timeFrame ? `?time_frame=${timeFrame}` : ''}`
+          `dashboard/product-performance?account_id=${currentUser.id}${timeFrame ? `&time_frame=${timeFrame}` : ''}`
         );
         const performanceData = analyticsResponse.data;
         
-        // Get price history data
-        const priceHistoryResponse = await api.get('price-history');
+        // Get price history data for the current user's account
+        const priceHistoryResponse = await api.get(`price-history?account_id=${currentUser.id}`);
         const priceHistoryData = priceHistoryResponse.data;
         
         // Combine data to generate recommendations
@@ -64,8 +77,15 @@ export const pricingService = {
   // Apply a price recommendation (this would update the price in a real implementation)
   applyRecommendation: async (itemId: number, newPrice: number): Promise<boolean> => {
     try {
+      const currentUser = authService.getCurrentUser();
+      if (!currentUser) {
+        console.error('User not authenticated');
+        throw new Error('User not authenticated');
+      }
+
       // In a real implementation, this would call an API to update the price
-      await api.post(`items/${itemId}/update-price`, { price: newPrice });
+      // Include account_id to ensure we're only updating prices for items that belong to the current user
+      await api.post(`items/${itemId}/update-price?account_id=${currentUser.id}`, { price: newPrice });
       return true;
     } catch (error) {
       console.error(`Error applying price recommendation for item ${itemId}:`, error);

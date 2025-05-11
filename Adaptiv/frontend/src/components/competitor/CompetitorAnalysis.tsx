@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Typography, Card, Alert, Table, Tag, Spin, Tooltip } from 'antd';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Typography, Card, Alert, Table, Tag, Spin, Tooltip, Button, Empty } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { ArrowUpOutlined, ArrowDownOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
@@ -27,6 +27,7 @@ const CompetitorAnalysis: React.FC = () => {
   const [competitors, setCompetitors] = useState<Competitor[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasData, setHasData] = useState<boolean>(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -114,14 +115,29 @@ const CompetitorAnalysis: React.FC = () => {
           }
         }
         
+        // Filter out invalid entries with 0% similarity or NaN values
+        const validCompetitors = competitorData.filter(comp => {
+          // Check if similarity score is valid (not zero, not NaN)
+          const hasValidSimilarity = comp.similarityScore > 0 && !isNaN(comp.similarityScore);
+          // Check if price scores are valid
+          const hasValidPriceScores = comp.priceSimScore > 0 && !isNaN(comp.priceSimScore);
+          // Check if menu scores are valid
+          const hasValidMenuScores = comp.menuSimScore > 0 && !isNaN(comp.menuSimScore);
+          
+          return hasValidSimilarity && hasValidPriceScores && hasValidMenuScores;
+        });
+
         // Sort competitors by overall similarity score (descending)
-        const sortedCompetitors = [...competitorData].sort((a, b) => b.similarityScore - a.similarityScore);
+        const sortedCompetitors = [...validCompetitors].sort((a, b) => b.similarityScore - a.similarityScore);
         
         setCompetitors(sortedCompetitors);
+        // Only set hasData true if we have valid competitors with meaningful data
+        setHasData(sortedCompetitors.length > 0);
         setLoading(false);
       } catch (err) {
         console.error('Error fetching competitor data:', err);
         setError('Failed to load competitor data. Please try again later.');
+        setHasData(false);
         setLoading(false);
       }
     };
@@ -214,6 +230,22 @@ const CompetitorAnalysis: React.FC = () => {
     }
   ];
 
+  // Generate sample competitor data for the blurred background
+  const sampleCompetitors = useMemo(() => {
+    return Array(5).fill(null).map((_, index) => ({
+      key: String(index + 1),
+      name: `Sample Competitor ${index + 1}`,
+      similarityScore: 85 - (index * 5),
+      priceSimScore: 80 - (index * 3),
+      menuSimScore: 85 - (index * 4),
+      distanceScore: 90 - (index * 5),
+      priceDifference: index % 2 === 0 ? '+5.2%' : '-3.8%',
+      status: index % 2 === 0 ? 'higher' : 'lower',
+      categories: ['Coffee', 'Pastry'].slice(0, index % 2 + 1),
+      distance: 0.5 + (index * 0.3)
+    }));
+  }, []);
+
   return (
     <div>
       <Title level={2}>Competitor Analysis</Title>
@@ -221,24 +253,59 @@ const CompetitorAnalysis: React.FC = () => {
         Monitor competitor pricing and features
       </Title>
       
-      <Card style={{ marginTop: 24 }}> 
-        <Title level={4} style={{ marginTop: 0, marginBottom: 16 }}>Competitor Data</Title>
-        
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: '40px 0' }}>
-            <Spin size="large" />
-            <div style={{ marginTop: 16 }}>Loading competitor data...</div>
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '40px 0' }}>
+          <Spin size="large" />
+          <div style={{ marginTop: 16 }}>Loading competitor data...</div>
+        </div>
+      ) : error ? (
+        <Alert message={error} type="error" showIcon />
+      ) : !hasData ? (
+        <div style={{ position: 'relative' }}>
+          {/* Blurred sample data in background */}
+          <div style={{ filter: 'blur(5px)', opacity: 0.5 }}>
+            <Card style={{ marginTop: 24 }}> 
+              <Title level={4} style={{ marginTop: 0, marginBottom: 16 }}>Competitor Data</Title>
+              <Table 
+                dataSource={sampleCompetitors} 
+                columns={columns} 
+                pagination={false} 
+              />
+            </Card>
           </div>
-        ) : error ? (
-          <Alert message={error} type="error" showIcon />
-        ) : competitors.length === 0 ? (
-          <Alert 
-            message="No competitors found" 
-            description="Add competitor data through the API to see competitive analysis."
-            type="info" 
-            showIcon 
-          />
-        ) : (
+          
+          {/* Overlay with message */}
+          <div style={{ 
+            position: 'absolute', 
+            top: 0, 
+            left: 0, 
+            width: '100%', 
+            height: '100%', 
+            display: 'flex', 
+            flexDirection: 'column', 
+            justifyContent: 'center', 
+            alignItems: 'center',
+            backgroundColor: 'rgba(255, 255, 255, 0.85)',
+            padding: '100px 0'
+          }}>
+            <div style={{ 
+              padding: '30px', 
+              borderRadius: '8px', 
+              textAlign: 'center',
+              maxWidth: '80%' 
+            }}>
+              <p style={{ fontSize: '22px', fontWeight: 500, marginBottom: '16px' }}>No competitor data available</p>
+              <p style={{ color: '#666', marginBottom: '24px', fontSize: '16px' }}>To view competitor analysis, please connect your POS provider</p>
+              <Button type="primary" size="large">
+                Connect POS Provider
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <Card style={{ marginTop: 24 }}> 
+          <Title level={4} style={{ marginTop: 0, marginBottom: 16 }}>Competitor Data</Title>
+          
           <Table 
             dataSource={competitors} 
             columns={columns} 
@@ -248,8 +315,8 @@ const CompetitorAnalysis: React.FC = () => {
               style: { cursor: 'pointer' }
             })}
           />
-        )}
-      </Card>
+        </Card>
+      )}
     </div>
   );
 };

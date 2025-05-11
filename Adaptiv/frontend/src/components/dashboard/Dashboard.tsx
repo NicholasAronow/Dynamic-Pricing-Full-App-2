@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Card, Row, Col, Statistic, Button, Radio, Spin, Table, Tag, Space, Tooltip as AntTooltip, Alert } from 'antd';
+import { Typography, Card, Row, Col, Statistic, Button, Radio, Spin, Table, Tag, Space, Tooltip as AntTooltip, Alert, Empty } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { 
   ArrowUpOutlined, 
@@ -251,6 +251,11 @@ const Dashboard: React.FC = () => {
   const [analyticsData, setAnalyticsData] = useState<SalesAnalytics | null>(null);
   const [competitors, setCompetitors] = useState<any[]>([]);
   const [competitorsLoading, setCompetitorsLoading] = useState(true);
+  // States to track if we have any data
+  const [hasSalesData, setHasSalesData] = useState(false);
+  const [hasProductsData, setHasProductsData] = useState(false);
+  const [hasCompetitorsData, setHasCompetitorsData] = useState(false);
+  const [hasAdaptivData, setHasAdaptivData] = useState(false);
   
   // Helper function to convert timeframe to dates
   const getDateRangeFromTimeFrame = (timeFrame: string) => {
@@ -286,6 +291,18 @@ const Dashboard: React.FC = () => {
   };
 
   // Fetch sales data from API
+  // Check if we have Adaptiv metrics data
+  useEffect(() => {
+    // This would typically be a real API call to get Adaptiv metrics
+    // For now, we're using the presence of other data as a proxy
+    const checkAdaptivData = () => {
+      // If we have sales data, assume we have Adaptiv data too
+      setHasAdaptivData(hasSalesData);
+    };
+    
+    checkAdaptivData();
+  }, [hasSalesData]);
+
   useEffect(() => {
     const fetchSalesData = async () => {
       try {
@@ -306,9 +323,11 @@ const Dashboard: React.FC = () => {
               revenue: day.revenue,
               orders: day.orders
             })));
+            setHasSalesData(true);
           } else {
             // Fallback to mock data if API doesn't provide what we need
             setSalesData(generateMockData(timeFrame));
+            setHasSalesData(false);
           }
         } catch (err) {
           console.error('Failed to fetch analytics data:', err);
@@ -338,11 +357,13 @@ const Dashboard: React.FC = () => {
         try {
           const data = await analyticsService.getItemPerformance(itemsTimeFrame);
           setProductPerformance(data);
+          setHasProductsData(data && data.length > 0);
         } catch (err) {
           console.error('Failed to fetch item performance:', err);
           // Fallback to mock data
           const mockData = generateProductPerformanceData(itemsTimeFrame);
           setProductPerformance(mockData);
+          setHasProductsData(false);
         }
         
         setProductsLoading(false);
@@ -488,6 +509,55 @@ const Dashboard: React.FC = () => {
           <div style={{ height: 300, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
             <Spin size="large" />
           </div>
+        ) : !hasSalesData ? (
+          <div style={{ width: '100%', height: 300, position: 'relative' }}>
+            {/* Blurred sample data in background */}
+            <div style={{ width: '100%', height: '100%', filter: 'blur(5px)', opacity: 0.6 }}>
+              <ResponsiveContainer>
+                <LineChart
+                  data={generateMockData(timeFrame)}
+                  margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" />
+                  <YAxis tickFormatter={(tick) => `$${formatNumberWithCommas(tick)}`} />
+                  <Line 
+                    type="monotone" 
+                    dataKey="revenue" 
+                    name="Sales" 
+                    stroke="#9370DB" 
+                    strokeWidth={2}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            {/* Overlay with message */}
+            <div style={{ 
+              position: 'absolute', 
+              top: 0, 
+              left: 0, 
+              width: '100%', 
+              height: '100%', 
+              display: 'flex', 
+              flexDirection: 'column', 
+              justifyContent: 'center', 
+              alignItems: 'center',
+              backgroundColor: 'rgba(255, 255, 255, 0.85)' 
+            }}>
+              <div style={{ 
+                padding: '20px', 
+                borderRadius: '8px', 
+                textAlign: 'center',
+                maxWidth: '80%' 
+              }}>
+                <p style={{ fontSize: '16px', fontWeight: 500, marginBottom: '8px' }}>No sales data available</p>
+                <p style={{ color: '#666', marginBottom: '20px' }}>To see your actual sales data, please connect your POS provider</p>
+                <Button type="primary" size="large">
+                  Connect POS Provider
+                </Button>
+              </div>
+            </div>
+          </div>
         ) : (
           <div style={{ width: '100%', height: 300 }}>
             <ResponsiveContainer>
@@ -574,6 +644,66 @@ const Dashboard: React.FC = () => {
             {productsLoading ? (
               <div style={{ height: 400, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                 <Spin size="large" />
+              </div>
+            ) : !hasProductsData ? (
+              <div style={{ height: 400, position: 'relative' }}>
+                {/* Blurred sample product data in background */}
+                <div style={{ width: '100%', height: '100%', filter: 'blur(5px)', opacity: 0.4 }}>
+                  <div style={{ opacity: 0.7 }}>
+                    {/* Top Products Sample */}
+                    <div>
+                      <Title level={4} style={{ color: '#3f8600', display: 'flex', alignItems: 'center', marginTop: -5, marginBottom: 16 }}>
+                        Best Selling Items
+                      </Title>
+                      <div style={{ marginBottom: 36 }}>
+                        {generateProductPerformanceData(itemsTimeFrame).slice(0, 3).map((product, index) => (
+                          <Card
+                            key={product.id}
+                            style={{ marginBottom: 8, borderRadius: 0, border: 'none'}}
+                            size="small"
+                            className="dashboard-card-item"
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              {/* Product details (simplified) */}
+                              <div>
+                                <div style={{ display: 'flex', alignItems: 'center' }}>
+                                  <strong>{product.name}</strong>
+                                </div>
+                              </div>
+                            </div>
+                          </Card>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Overlay with message */}
+                <div style={{ 
+                  position: 'absolute', 
+                  top: 0, 
+                  left: 0, 
+                  width: '100%', 
+                  height: '100%', 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  justifyContent: 'center', 
+                  alignItems: 'center',
+                  backgroundColor: 'rgba(255, 255, 255, 0.85)' 
+                }}>
+                  <div style={{ 
+                    padding: '20px', 
+                    borderRadius: '8px', 
+                    textAlign: 'center',
+                    maxWidth: '80%' 
+                  }}>
+                    <p style={{ fontSize: '16px', fontWeight: 500, marginBottom: '8px' }}>No menu items available</p>
+                    <p style={{ color: '#666', marginBottom: '20px' }}>To view your item performance, please connect your POS provider</p>
+                    <Button type="primary" size="large">
+                      Connect POS Provider
+                    </Button>
+                  </div>
+                </div>
               </div>
             ) : (
               <div>
@@ -705,23 +835,79 @@ const Dashboard: React.FC = () => {
               extra={<Button type="link">View All</Button>}
               style={{ width: '100%' }}
             >
-              <Statistic
-                title="Revenue Increase from Adaptiv"
-                value={12750}
-                precision={0}
-                formatter={(value) => {
-                  const numValue = typeof value === 'number' ? value : Number(value);
-                  return formatNumberWithCommas(Number(numValue.toFixed(0)));
-                }}
-                valueStyle={{ color: '#3f8600' }}
-                prefix={<DollarOutlined />}
-                suffix="/mo"
-              />
-              <div style={{ marginTop: 16 }}>
-                <p><strong>Margin Improvement:</strong> <span style={{ color: '#3f8600' }}><ArrowUpOutlined /> 4.3%</span></p>
-                <p><strong>Price Optimization Score:</strong> <span style={{ fontWeight: 'bold' }}>92/100</span></p>
-                <p><strong>ROI:</strong> <span style={{ color: '#3f8600' }}>428%</span> (6-month trailing)</p>
-              </div>
+              {!hasProductsData ? (
+                <div style={{ position: 'relative' }}>
+                  {/* Blurred sample data in background */}
+                  <div style={{ filter: 'blur(4px)', opacity: 0.5 }}>
+                    <Statistic
+                      title="Revenue Increase from Adaptiv"
+                      value={12750}
+                      precision={0}
+                      formatter={(value) => {
+                        const numValue = typeof value === 'number' ? value : Number(value);
+                        return formatNumberWithCommas(Number(numValue.toFixed(0)));
+                      }}
+                      valueStyle={{ color: '#3f8600' }}
+                      prefix={<DollarOutlined />}
+                      suffix="/mo"
+                    />
+                    <div style={{ marginTop: 16 }}>
+                      <p><strong>Margin Improvement:</strong> <span style={{ color: '#3f8600' }}><ArrowUpOutlined /> 4.3%</span></p>
+                      <p><strong>Price Optimization Score:</strong> <span style={{ fontWeight: 'bold' }}>92/100</span></p>
+                      <p><strong>ROI:</strong> <span style={{ color: '#3f8600' }}>428%</span> (6-month trailing)</p>
+                    </div>
+                  </div>
+                  
+                  {/* Overlay with message */}
+                  <div style={{ 
+                    position: 'absolute', 
+                    top: 0, 
+                    left: 0, 
+                    width: '100%', 
+                    height: '100%', 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    justifyContent: 'center', 
+                    alignItems: 'center',
+                    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+                    padding: '20px 0',
+                    minHeight: '150px'
+                  }}>
+                    <div style={{ 
+                      padding: '15px', 
+                      borderRadius: '8px', 
+                      textAlign: 'center',
+                      maxWidth: '90%' 
+                    }}>
+                      <p style={{ fontSize: '16px', fontWeight: 500, marginBottom: '8px' }}>No Adaptiv data available</p>
+                      <p style={{ color: '#666', marginBottom: '15px', fontSize: '14px' }}>To view your optimization metrics, please connect your POS provider</p>
+                      <Button type="primary">
+                        Connect POS Provider
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <Statistic
+                    title="Revenue Increase from Adaptiv"
+                    value={12750}
+                    precision={0}
+                    formatter={(value) => {
+                      const numValue = typeof value === 'number' ? value : Number(value);
+                      return formatNumberWithCommas(Number(numValue.toFixed(0)));
+                    }}
+                    valueStyle={{ color: '#3f8600' }}
+                    prefix={<DollarOutlined />}
+                    suffix="/mo"
+                  />
+                  <div style={{ marginTop: 16 }}>
+                    <p><strong>Margin Improvement:</strong> <span style={{ color: '#3f8600' }}><ArrowUpOutlined /> 4.3%</span></p>
+                    <p><strong>Price Optimization Score:</strong> <span style={{ fontWeight: 'bold' }}>92/100</span></p>
+                    <p><strong>ROI:</strong> <span style={{ color: '#3f8600' }}>428%</span> (6-month trailing)</p>
+                  </div>
+                </>
+              )}
             </Card>
             
             {/* Competitor Analysis Card */}
@@ -730,61 +916,127 @@ const Dashboard: React.FC = () => {
               extra={<Button type="link" onClick={() => navigate('/competitor-analysis')}>View All</Button>}
               style={{ width: '100%' }}
             >
-              <Statistic
-                title="Market Position"
-                value="Top 15%"
-                valueStyle={{ color: '#9370DB' }}
-                prefix={<TeamOutlined />}
-              />
-              <div style={{ marginTop: 16 }}>
-                <p>Competitors Tracked: {competitors.length || 'Loading...'}</p>
-                <p>Price Differential: <span style={{ color: '#cf1322' }}><ArrowDownOutlined /> 5.3%</span></p>
-                <p>Feature Parity: 92%</p>
-                
-                {/* Top 3 Competitors Section */}
-                <div style={{ marginTop: 16 }}>
-                  <h4 style={{ marginBottom: 12 }}>Top Competitors by Similarity</h4>
-                  {competitorsLoading ? (
-                    <div style={{ textAlign: 'center', padding: '10px 0' }}>
-                      <Spin size="small" />
-                    </div>
-                  ) : getTopCompetitors().length > 0 ? (
-                    <div>
-                      {getTopCompetitors().map((competitor, index) => (
-                        <div 
-                          key={competitor.key}
-                          onClick={() => navigate(`/competitor/${encodeURIComponent(competitor.name)}`)}
-                          className="dashboard-competitor-item"
-                          style={{ 
-                            padding: '8px 6px', 
-                            borderBottom: index < getTopCompetitors().length - 1 ? '1px solid #f0f0f0' : 'none',
-                            cursor: 'pointer',
-                            borderRadius: '4px',
-                            transition: 'all 0.3s ease'
-                          }}
-                        >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <div style={{ fontWeight: 500 }}>{competitor.name}</div>
-                            <div>
-                              <Tag color="blue">{competitor.similarityScore}%</Tag>
+              {!hasProductsData ? (
+                <div style={{ position: 'relative' }}>
+                  {/* Blurred sample data in background */}
+                  <div style={{ filter: 'blur(4px)', opacity: 0.5 }}>
+                    <Statistic
+                      title="Market Position"
+                      value="Top 15%"
+                      valueStyle={{ color: '#9370DB' }}
+                      prefix={<TeamOutlined />}
+                    />
+                    <div style={{ marginTop: 16 }}>
+                      <p>Competitors Tracked: 5</p>
+                      <p>Price Differential: <span style={{ color: '#cf1322' }}><ArrowDownOutlined /> 5.3%</span></p>
+                      <p>Feature Parity: 92%</p>
+                      
+                      {/* Sample top competitors */}
+                      <div style={{ marginTop: 16 }}>
+                        <h4 style={{ marginBottom: 12 }}>Top Competitors by Similarity</h4>
+                        {[1, 2, 3].map((i) => (
+                          <div 
+                            key={i}
+                            style={{ 
+                              padding: '8px 6px', 
+                              borderBottom: i < 3 ? '1px solid #f0f0f0' : 'none',
+                              borderRadius: '4px'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div style={{ fontWeight: 500 }}>Competitor {i}</div>
+                              <div>
+                                <Tag color="blue">{85 - (i * 5)}%</Tag>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  ) : (
-                    <Alert message="No competitor data available" type="info" showIcon />
-                  )}
+                  </div>
+                  
+                  {/* Overlay with message */}
+                  <div style={{ 
+                    position: 'absolute', 
+                    top: 0, 
+                    left: 0, 
+                    width: '100%', 
+                    height: '100%', 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    justifyContent: 'center', 
+                    alignItems: 'center',
+                    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+                    padding: '30px 0',
+                    minHeight: '220px'
+                  }}>
+                    <div style={{ 
+                      padding: '15px', 
+                      borderRadius: '8px', 
+                      textAlign: 'center',
+                      maxWidth: '90%' 
+                    }}>
+                      <p style={{ fontSize: '16px', fontWeight: 500, marginBottom: '8px' }}>No competitor data available</p>
+                      <p style={{ color: '#666', marginBottom: '15px', fontSize: '14px' }}>To view competitor analysis, please connect your POS provider</p>
+                      <Button type="primary">
+                        Connect POS Provider
+                      </Button>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <>
+                  <Statistic
+                    title="Market Position"
+                    value="Top 15%"
+                    valueStyle={{ color: '#9370DB' }}
+                    prefix={<TeamOutlined />}
+                  />
+                  <div style={{ marginTop: 16 }}>
+                    <p>Competitors Tracked: {competitors.length || 'Loading...'}</p>
+                    <p>Price Differential: <span style={{ color: '#cf1322' }}><ArrowDownOutlined /> 5.3%</span></p>
+                    <p>Feature Parity: 92%</p>
+                    
+                    {/* Top 3 Competitors Section */}
+                    <div style={{ marginTop: 16 }}>
+                      <h4 style={{ marginBottom: 12 }}>Top Competitors by Similarity</h4>
+                      {competitorsLoading ? (
+                        <div style={{ textAlign: 'center', padding: '10px 0' }}>
+                          <Spin size="small" />
+                        </div>
+                      ) : (
+                        <div>
+                          {getTopCompetitors().map((competitor, index) => (
+                            <div 
+                              key={competitor.key}
+                              onClick={() => navigate(`/competitor/${encodeURIComponent(competitor.name)}`)}
+                              className="dashboard-competitor-item"
+                              style={{ 
+                                padding: '8px 6px', 
+                                borderBottom: index < getTopCompetitors().length - 1 ? '1px solid #f0f0f0' : 'none',
+                                cursor: 'pointer',
+                                borderRadius: '4px',
+                                transition: 'all 0.3s ease'
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div style={{ fontWeight: 500 }}>{competitor.name}</div>
+                                <div>
+                                  <Tag color="blue">{competitor.similarityScore}%</Tag>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </Card>
           </Space>
         </Col>
       </Row>
-      
-      {/* Best and Worst Performing Items Card */}
-      <div style={{ justifyContent: 'center', marginTop: 24, marginBottom: 24 }}>
-    </div>
     </div>
   );
 };

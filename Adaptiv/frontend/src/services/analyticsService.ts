@@ -1,6 +1,7 @@
 import api from './api';
 import { Item } from './itemService';
 import { Order } from './orderService';
+import authService from './authService';
 
 export interface CompetitorData {
   item: {
@@ -67,10 +68,20 @@ export const analyticsService = {
   // Get sales data for dashboard
   getSalesAnalytics: async (startDate?: string, endDate?: string): Promise<SalesAnalytics> => {
     try {
+      const currentUser = authService.getCurrentUser();
+      if (!currentUser) {
+        console.error('User not authenticated');
+        throw new Error('User not authenticated');
+      }
+
+      // Add account_id to filter data by user's account
+      let queryParams = `account_id=${currentUser.id}`;
+      if (startDate && endDate) {
+        queryParams += `&start_date=${startDate}&end_date=${endDate}`;
+      }
+
       // Use our new dashboard endpoint which returns data in the exact format we need
-      const response = await api.get(
-        `dashboard/sales-data${startDate && endDate ? `?start_date=${startDate}&end_date=${endDate}` : ''}`
-      );
+      const response = await api.get(`dashboard/sales-data?${queryParams}`);
       
       // The data is already in the correct format for the frontend
       return response.data;
@@ -91,18 +102,34 @@ export const analyticsService = {
   // Get item performance data
   getItemPerformance: async (timeFrame?: string): Promise<any[]> => {
     try {
-      // Use the new dashboard/product-performance endpoint with time frame parameter
-      const response = await api.get(
-        `dashboard/product-performance${timeFrame ? `?time_frame=${timeFrame}` : ''}`
-      );
+      const currentUser = authService.getCurrentUser();
+      if (!currentUser) {
+        console.error('User not authenticated');
+        throw new Error('User not authenticated');
+      }
+
+      // Add account_id to filter data by user's account
+      let queryParams = `account_id=${currentUser.id}`;
+      if (timeFrame) {
+        queryParams += `&time_frame=${timeFrame}`;
+      }
+
+      // Use the new dashboard/product-performance endpoint with account_id and time frame parameter
+      const response = await api.get(`dashboard/product-performance?${queryParams}`);
       return response.data;
     } catch (error) {
       console.error('Error fetching item performance:', error);
       
       // Fallback to the old approach if the new endpoint fails
       try {
-        // Fetch all items as a backup
-        const itemsResponse = await api.get('items');
+        const currentUser = authService.getCurrentUser();
+        if (!currentUser) {
+          console.error('User not authenticated');
+          return [];
+        }
+        
+        // Fetch all items as a backup, filtered by account
+        const itemsResponse = await api.get(`items?account_id=${currentUser.id}`);
         const items = itemsResponse.data;
         
         return items.map((item: Item) => ({
@@ -137,9 +164,16 @@ export const analyticsService = {
   // Get price elasticity data for a specific product
   getPriceElasticity: async (itemId: number): Promise<PriceElasticityData[]> => {
     try {
+      const currentUser = authService.getCurrentUser();
+      if (!currentUser) {
+        console.error('User not authenticated');
+        throw new Error('User not authenticated');
+      }
+
       // This would call a specialized endpoint in a real implementation
       // For now, we'll generate simulated data based on price history
-      const priceHistoryResponse = await api.get(`price-history?item_id=${itemId}`);
+      // Include account_id to ensure we're only getting price history for the current user's items
+      const priceHistoryResponse = await api.get(`price-history?item_id=${itemId}&account_id=${currentUser.id}`);
       const priceHistory = priceHistoryResponse.data;
       
       // Use price history to generate elasticity data points 
@@ -181,8 +215,17 @@ export const analyticsService = {
   // Get real sales data for a specific item over time
   getItemSalesData: async (itemId: number, timeFrame: string): Promise<any[]> => {
     try {
+      const currentUser = authService.getCurrentUser();
+      if (!currentUser) {
+        console.error('User not authenticated');
+        throw new Error('User not authenticated');
+      }
+
       const response = await api.get(`item-analytics/sales/${itemId}`, {
-        params: { time_frame: timeFrame }
+        params: { 
+          time_frame: timeFrame,
+          account_id: currentUser.id
+        }
       });
       return response.data;
     } catch (error) {
@@ -194,7 +237,15 @@ export const analyticsService = {
   // Get real hourly sales data for a specific item
   getItemHourlySales: async (itemId: number, date?: string): Promise<any[]> => {
     try {
-      const params: any = {};
+      const currentUser = authService.getCurrentUser();
+      if (!currentUser) {
+        console.error('User not authenticated');
+        throw new Error('User not authenticated');
+      }
+
+      const params: any = {
+        account_id: currentUser.id
+      };
       if (date) {
         params.date = date;
       }
