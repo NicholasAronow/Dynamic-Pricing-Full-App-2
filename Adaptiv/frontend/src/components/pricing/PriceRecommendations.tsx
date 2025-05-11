@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Typography, 
   Card, 
@@ -41,6 +41,7 @@ const PriceRecommendations: React.FC = () => {
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [editPrice, setEditPrice] = useState<number | null>(null);
   const [savingPrice, setSavingPrice] = useState<number | null>(null);
+  const [hasData, setHasData] = useState<boolean>(false);
   
   // Calculate summary metrics with safety checks
   const totalRevenue = recommendations.reduce((sum, item) => sum + (item.revenue || 0), 0);
@@ -82,9 +83,11 @@ const PriceRecommendations: React.FC = () => {
         }
         
         setRecommendations(data);
+        setHasData(data && data.length > 0);
       } catch (error) {
         console.error('Error fetching price recommendations:', error);
         message.error('Failed to load price recommendations');
+        setHasData(false);
       } finally {
         setLoading(false);
       }
@@ -385,6 +388,26 @@ const PriceRecommendations: React.FC = () => {
     return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   };
 
+  // Generate sample recommendations data for the blurred background
+  const sampleRecommendations = useMemo(() => {
+    return Array(3).fill(null).map((_, index) => ({
+      id: index + 1,
+      name: `Sample Product ${index + 1}`,
+      category: index % 3 === 0 ? 'Coffee' : index % 3 === 1 ? 'Pastry' : 'Merchandise',
+      currentPrice: 5.99 + (index * 0.5),
+      recommendedPrice: 6.49 + (index * 0.5),
+      revenue: 500 + (index * 100),
+      growth: index % 2 === 0 ? 5 : -3,
+      quantity: 50 + (index * 5),
+      elasticity: '0.3',
+      profitMargin: 0.35,
+      incrementalRevenue: index % 2 === 0 ? 50 : -30,
+      previousPrice: 5.49 + (index * 0.5),
+      measuredRevenueChangePercent: index % 2 === 0 ? 10 : -5,
+      optimizationReason: 'Sample optimization reason'
+    }));
+  }, []);
+
   return (
     <div>
       <Title level={2}>Price Recommendations</Title>
@@ -392,13 +415,93 @@ const PriceRecommendations: React.FC = () => {
         Optimize your product pricing strategy with AI-driven insights
       </Title>
       
-      {/* Summary Card */}
-      <Card style={{ marginTop: 24, marginBottom: 24 }}>
-        <Row gutter={24}>
-          <Col span={8}>
-            <Statistic
-              title="Net Revenue Impact"
-              value={netRevenueImpact}
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '100px 0' }}>
+          <LoadingOutlined style={{ fontSize: 24 }} spin />
+        </div>
+      ) : !hasData ? (
+        <div style={{ position: 'relative' }}>
+          {/* Blurred sample data in background */}
+          <div style={{ filter: 'blur(5px)', opacity: 0.5 }}>
+            {/* Summary Card with sample data */}
+            <Card style={{ marginTop: 24, marginBottom: 24 }}>
+              <Row gutter={24}>
+                <Col span={8}>
+                  <Statistic
+                    title="Net Revenue Impact"
+                    value={1250.00}
+                    precision={2}
+                    formatter={(value) => formatNumberWithCommas(Number(value))}
+                    valueStyle={{ color: '#3f8600' }}
+                    prefix="$"
+                  />
+                </Col>
+                <Col span={8}>
+                  <Statistic
+                    title="Price Changes"
+                    value={10}
+                    valueStyle={{ color: '#9370DB' }}
+                    suffix="products"
+                  />
+                </Col>
+                <Col span={8}>
+                  <Statistic
+                    title="Analysis Period"
+                    value="Last 7 days"
+                    valueStyle={{ color: '#1890ff' }}
+                  />
+                </Col>
+              </Row>
+            </Card>
+            
+            {/* Sample recommendations table */}
+            <Card>
+              <Table
+                columns={columns}
+                dataSource={sampleRecommendations}
+                rowKey="id"
+                pagination={false}
+              />
+            </Card>
+          </div>
+          
+          {/* Overlay with message */}
+          <div style={{ 
+            position: 'absolute', 
+            top: 0, 
+            left: 0, 
+            width: '100%', 
+            height: '100%', 
+            display: 'flex', 
+            flexDirection: 'column', 
+            justifyContent: 'center', 
+            alignItems: 'center',
+            backgroundColor: 'rgba(255, 255, 255, 0.85)',
+            padding: '150px 0'
+          }}>
+            <div style={{ 
+              padding: '30px', 
+              borderRadius: '8px', 
+              textAlign: 'center',
+              maxWidth: '80%' 
+            }}>
+              <p style={{ fontSize: '24px', fontWeight: 500, marginBottom: '16px' }}>No price recommendation data available</p>
+              <p style={{ color: '#666', marginBottom: '30px', fontSize: '16px' }}>To view AI-powered price recommendations, please connect your POS provider</p>
+              <Button type="primary" size="large">
+                Connect POS Provider
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Summary Card with real data */}
+          <Card style={{ marginTop: 24, marginBottom: 24 }}>
+            <Row gutter={24}>
+              <Col span={8}>
+                <Statistic
+                  title="Net Revenue Impact"
+                  value={netRevenueImpact}
               precision={2}
               formatter={(value) => {
                 // Handle both number and string cases safely
@@ -465,6 +568,8 @@ const PriceRecommendations: React.FC = () => {
           })}
         />
       </Card>
+        </>
+      )}
     </div>
   );
 };

@@ -59,9 +59,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
+        user_id: int = payload.get("user_id")
         if email is None:
             raise credentials_exception
-        token_data = schemas.TokenData(email=email)
+        token_data = schemas.TokenData(email=email, user_id=user_id)
     except JWTError:
         raise credentials_exception
         
@@ -70,7 +71,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         raise credentials_exception
     return user
 
-@auth_router.post("/register", response_model=schemas.User)
+@auth_router.post("/register", response_model=schemas.Token)
 async def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     # Check if user already exists
     db_user = get_user(db, email=user.email)
@@ -88,7 +89,18 @@ async def register_user(user: schemas.UserCreate, db: Session = Depends(get_db))
     db.commit()
     db.refresh(db_user)
     
-    return db_user
+    # Generate access token for the new user
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={
+            "sub": db_user.email,
+            "user_id": db_user.id
+        },
+        expires_delta=access_token_expires
+    )
+    
+    # Return token information similar to login endpoint
+    return {"access_token": access_token, "token_type": "bearer"}
 
 @auth_router.post("/token", response_model=schemas.Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
@@ -101,8 +113,13 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
         )
     
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    # Include both user_id and email in the token payload
     access_token = create_access_token(
-        data={"sub": user.email}, expires_delta=access_token_expires
+        data={
+            "sub": user.email,
+            "user_id": user.id
+        }, 
+        expires_delta=access_token_expires
     )
     
     return {"access_token": access_token, "token_type": "bearer"}

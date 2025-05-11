@@ -12,14 +12,19 @@ def get_items(
     skip: int = 0, 
     limit: int = 100, 
     category: Optional[str] = None,
-    db: Session = Depends(get_db)
-    # Temporarily removed authentication for testing
-    # current_user: models.User = Depends(get_current_user)
+    account_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
 ):
     """
-    Get all items, with optional category filter
+    Get all items, with optional category filter, filtered by user's account
     """
     query = db.query(models.Item)
+    
+    # Filter by the current user's ID unless specifically requesting another account's data
+    # (would need admin privileges for that in a real app)
+    user_id = account_id if account_id else current_user.id
+    query = query.filter(models.Item.user_id == user_id)
     
     if category:
         query = query.filter(models.Item.category == category)
@@ -29,13 +34,21 @@ def get_items(
 @items_router.get("/{item_id}", response_model=schemas.Item)
 def get_item(
     item_id: int, 
+    account_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Get a specific item by ID
+    Get a specific item by ID, ensuring it belongs to the user's account
     """
-    item = db.query(models.Item).filter(models.Item.id == item_id).first()
+    # Filter by the current user's ID unless specifically requesting another account's data
+    user_id = account_id if account_id else current_user.id
+    
+    item = db.query(models.Item).filter(
+        models.Item.id == item_id,
+        models.Item.user_id == user_id
+    ).first()
+    
     if item is None:
         raise HTTPException(status_code=404, detail="Item not found")
     return item
@@ -47,9 +60,13 @@ def create_item(
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Create a new item
+    Create a new item associated with the current user's account
     """
-    db_item = models.Item(**item.dict())
+    # Create a dict from the item and add the user_id
+    item_data = item.dict()
+    item_data["user_id"] = current_user.id
+    
+    db_item = models.Item(**item_data)
     db.add(db_item)
     db.commit()
     db.refresh(db_item)
@@ -59,15 +76,23 @@ def create_item(
 def update_item(
     item_id: int, 
     item: schemas.ItemUpdate, 
+    account_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Update an item
+    Update an item, ensuring it belongs to the user's account
     """
-    db_item = db.query(models.Item).filter(models.Item.id == item_id).first()
+    # Filter by the current user's ID unless specifically requesting another account's data
+    user_id = account_id if account_id else current_user.id
+    
+    db_item = db.query(models.Item).filter(
+        models.Item.id == item_id,
+        models.Item.user_id == user_id
+    ).first()
+    
     if db_item is None:
-        raise HTTPException(status_code=404, detail="Item not found")
+        raise HTTPException(status_code=404, detail="Item not found or you don't have permission to update it")
         
     # Update only fields that are provided (not None)
     item_data = item.dict(exclude_unset=True)
@@ -79,6 +104,7 @@ def update_item(
     if "current_price" in item_data and item_data["current_price"] != db_item.current_price:
         price_history = models.PriceHistory(
             item_id=item_id,
+            user_id=current_user.id,  # Associate with the current user
             previous_price=db_item.current_price,
             new_price=item_data["current_price"],
             change_reason="Manual price update"
@@ -92,15 +118,23 @@ def update_item(
 @items_router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_item(
     item_id: int, 
+    account_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Delete an item
+    Delete an item, ensuring it belongs to the user's account
     """
-    db_item = db.query(models.Item).filter(models.Item.id == item_id).first()
+    # Filter by the current user's ID unless specifically requesting another account's data
+    user_id = account_id if account_id else current_user.id
+    
+    db_item = db.query(models.Item).filter(
+        models.Item.id == item_id,
+        models.Item.user_id == user_id
+    ).first()
+    
     if db_item is None:
-        raise HTTPException(status_code=404, detail="Item not found")
+        raise HTTPException(status_code=404, detail="Item not found or you don't have permission to delete it")
         
     db.delete(db_item)
     db.commit()
@@ -108,11 +142,19 @@ def delete_item(
 
 @items_router.get("/categories", response_model=List[str])
 def get_categories(
+    account_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Get all unique categories
+    Get all unique categories for the user's items
     """
-    categories = db.query(models.Item.category).distinct().all()
+    # Filter by the current user's ID unless specifically requesting another account's data
+    user_id = account_id if account_id else current_user.id
+    
+    categories = db.query(models.Item.category)\
+        .filter(models.Item.user_id == user_id)\
+        .distinct()\
+        .all()
+        
     return [category[0] for category in categories]

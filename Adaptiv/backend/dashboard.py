@@ -7,6 +7,7 @@ from sqlalchemy import func, text
 from datetime import datetime, timedelta
 import traceback
 import logging
+from auth import get_current_user
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -18,7 +19,9 @@ dashboard_router = APIRouter()
 def get_sales_data(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    db: Session = Depends(get_db)
+    account_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
 ):
     """
     Get sales data for the dashboard without strict Pydantic validation
@@ -53,8 +56,12 @@ def get_sales_data(
             logger.info(f"Limiting start date to 365 days ago (available data constraint)")
             start_date_obj = min_date
         
+        # Filter by the current user's ID unless specifically requesting another account's data
+        user_id = account_id if account_id else current_user.id
+        logger.info(f"Filtering dashboard data for user_id: {user_id}")
+        
         # Basic stats using simpler queries with date filter
-        orders_query = db.query(models.Order)
+        orders_query = db.query(models.Order).filter(models.Order.user_id == user_id)
         if start_date or end_date:
             orders_query = orders_query.filter(
                 models.Order.order_date >= start_date_obj,
@@ -87,7 +94,8 @@ def get_sales_data(
                 models.OrderItem.order_id == models.Order.id
             ).filter(
                 models.Order.order_date >= start_date_obj,
-                models.Order.order_date <= end_date_obj
+                models.Order.order_date <= end_date_obj,
+                models.Order.user_id == user_id  # Filter by user ID
             ).group_by(
                 models.Item.id
             ).order_by(text('order_count DESC')).limit(5).all()
@@ -146,7 +154,8 @@ def get_sales_data(
                 func.sum(models.Order.total_amount).label('revenue')
             ).filter(
                 models.Order.order_date >= start_date_obj,
-                models.Order.order_date <= end_date_obj
+                models.Order.order_date <= end_date_obj,
+                models.Order.user_id == user_id  # Filter by user ID
             ).group_by(date_group).order_by(date_group).all()
             
             # Format the output
@@ -181,7 +190,8 @@ def get_sales_data(
                 models.OrderItem.order_id == models.Order.id
             ).filter(
                 models.Order.order_date >= start_date_obj,
-                models.Order.order_date <= end_date_obj
+                models.Order.order_date <= end_date_obj,
+                models.Order.user_id == user_id  # Filter by user ID
             ).group_by(models.Item.category).all()
             
             for cat in category_sales:
@@ -217,7 +227,9 @@ def get_sales_data(
 @dashboard_router.get("/product-performance")
 def get_product_performance(
     time_frame: Optional[str] = None,
-    db: Session = Depends(get_db)
+    account_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
 ):
     """
     Get performance data for all products
@@ -250,6 +262,10 @@ def get_product_performance(
         if start_date < min_date:
             logger.info(f"Limiting start date to 365 days ago (available data constraint)")
             start_date = min_date
+            
+        # Filter by the current user's ID unless specifically requesting another account's data
+        user_id = account_id if account_id else current_user.id
+        logger.info(f"Filtering product performance data for user_id: {user_id}")
         
         # Basic query to get products and their order metrics with time range filter
         item_query = db.query(
@@ -268,9 +284,13 @@ def get_product_performance(
             models.Order,
             models.OrderItem.order_id == models.Order.id
         ).filter(
+            # Filter items by user_id
+            models.Item.user_id == user_id,
             # Only include orders within the time frame
             (models.Order.order_date >= start_date) | (models.Order.order_date.is_(None)),
-            (models.Order.order_date <= end_date) | (models.Order.order_date.is_(None))
+            (models.Order.order_date <= end_date) | (models.Order.order_date.is_(None)),
+            # If there are orders, ensure they belong to this user too
+            (models.Order.user_id == user_id) | (models.Order.id.is_(None))
         ).group_by(
             models.Item.id
         ).all()

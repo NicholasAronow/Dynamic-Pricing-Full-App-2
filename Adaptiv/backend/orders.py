@@ -13,27 +13,45 @@ orders_router = APIRouter()
 def get_orders(
     skip: int = 0, 
     limit: int = 100, 
+    account_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Get all orders
+    Get all orders for the current user's account
     """
-    orders = db.query(models.Order).offset(skip).limit(limit).all()
+    # Filter by the current user's ID unless specifically requesting another account's data
+    user_id = account_id if account_id else current_user.id
+    
+    orders = db.query(models.Order)\
+        .filter(models.Order.user_id == user_id)\
+        .offset(skip)\
+        .limit(limit)\
+        .all()
+        
     return orders
 
 @orders_router.get("/{order_id}", response_model=schemas.Order)
 def get_order(
     order_id: int, 
+    account_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Get a specific order by ID
+    Get a specific order by ID, ensuring it belongs to the user's account
     """
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
+    # Filter by the current user's ID unless specifically requesting another account's data
+    user_id = account_id if account_id else current_user.id
+    
+    order = db.query(models.Order).filter(
+        models.Order.id == order_id,
+        models.Order.user_id == user_id
+    ).first()
+    
     if order is None:
-        raise HTTPException(status_code=404, detail="Order not found")
+        raise HTTPException(status_code=404, detail="Order not found or you don't have permission to view it")
+        
     return order
 
 @orders_router.post("/", response_model=schemas.Order, status_code=status.HTTP_201_CREATED)
@@ -43,23 +61,27 @@ def create_order(
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Create a new order with items
+    Create a new order with items, associated with the current user's account
     """
     # Calculate total amount from items
     total_amount = sum(item.unit_price * item.quantity for item in order.items)
     
-    # Create order
+    # Create order with user_id
     db_order = models.Order(
         order_date=order.order_date,
-        total_amount=total_amount
+        total_amount=total_amount,
+        user_id=current_user.id  # Associate with current user
     )
     db.add(db_order)
     db.flush()  # Flush to get the order ID
     
     # Create order items
     for item in order.items:
-        # Verify item exists
-        db_item = db.query(models.Item).filter(models.Item.id == item.item_id).first()
+        # Verify item exists and belongs to the user
+        db_item = db.query(models.Item).filter(
+            models.Item.id == item.item_id,
+            models.Item.user_id == current_user.id
+        ).first()
         if not db_item:
             db.rollback()
             raise HTTPException(status_code=404, detail=f"Item with ID {item.item_id} not found")
@@ -80,11 +102,12 @@ def create_order(
 def get_orders_by_date_range(
     start_date: str,
     end_date: str,
+    account_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Get orders within a date range
+    Get orders within a date range for the user's account
     """
     try:
         start = datetime.fromisoformat(start_date)
@@ -95,9 +118,13 @@ def get_orders_by_date_range(
             detail="Invalid date format. Use ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"
         )
     
+    # Filter by the current user's ID unless specifically requesting another account's data
+    user_id = account_id if account_id else current_user.id
+    
     orders = db.query(models.Order).filter(
         models.Order.order_date >= start,
-        models.Order.order_date <= end
+        models.Order.order_date <= end,
+        models.Order.user_id == user_id
     ).all()
     
     return orders
@@ -106,14 +133,18 @@ def get_orders_by_date_range(
 def get_order_analytics(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    db: Session = Depends(get_db)
-    # Temporarily disabled for testing
-    # current_user: models.User = Depends(get_current_user)
+    account_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
 ):
     """
     Get order analytics data
     """
-    query = db.query(models.Order)
+    # Filter by the current user's ID unless specifically requesting another account's data
+    user_id = account_id if account_id else current_user.id
+    
+    # Start with query filtered by user_id
+    query = db.query(models.Order).filter(models.Order.user_id == user_id)
     
     # Apply date filters if provided
     if start_date and end_date:
@@ -156,6 +187,10 @@ def get_order_analytics(
         models.OrderItem, models.Item.id == models.OrderItem.item_id
     ).join(
         models.Order, models.OrderItem.order_id == models.Order.id
+    ).filter(
+        # Ensure only items belonging to current user are included
+        models.Item.user_id == user_id,
+        models.Order.user_id == user_id
     )
     
     # Apply date filters if provided

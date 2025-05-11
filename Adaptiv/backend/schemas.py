@@ -18,6 +18,7 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     email: Optional[str] = None
+    user_id: Optional[int] = None
 
 class User(UserBase):
     id: int
