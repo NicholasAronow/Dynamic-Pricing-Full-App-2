@@ -25,8 +25,11 @@ export interface PriceRecommendation {
   editing?: boolean;
 }
 
+// Track whether the last fetch used mock data
+let _usingMock = false;
+
 export const pricingService = {
-  // Get price recommendations for all items
+  // Get price recommendations (actually returns summaries for ALL items)
   getPriceRecommendations: async (timeFrame: string): Promise<PriceRecommendation[]> => {
     try {
       const currentUser = authService.getCurrentUser();
@@ -35,42 +38,34 @@ export const pricingService = {
         throw new Error('User not authenticated');
       }
 
-      // Call the API endpoint for price recommendations with account filtering
-      const response = await api.get(`price-recommendations?time_frame=${timeFrame}&account_id=${currentUser.id}`);
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching price recommendations:', error);
-      
-      // Fallback to generating recommendations based on items and sales data
-      try {
-        const currentUser = authService.getCurrentUser();
-        if (!currentUser) {
-          console.error('User not authenticated');
-          return [];
-        }
+      // Fetch the core datasets in parallel so every menu item is represented
+      const [itemsResponse, analyticsResponse, priceHistoryResponse] = await Promise.all([
+        api.get(`items?account_id=${currentUser.id}`),
+        api.get(
+          `dashboard/product-performance?account_id=${currentUser.id}${
+            timeFrame ? `&time_frame=${timeFrame}` : ''
+          }`
+        ),
+        api.get(`price-history?account_id=${currentUser.id}`)
+      ]);
 
-        // Get items for the current user's account
-        const itemsResponse = await api.get(`items?account_id=${currentUser.id}`);
-        const items = itemsResponse.data;
-        
-        // Get sales analytics for performance data
-        const analyticsResponse = await api.get(
-          `dashboard/product-performance?account_id=${currentUser.id}${timeFrame ? `&time_frame=${timeFrame}` : ''}`
-        );
-        const performanceData = analyticsResponse.data;
-        
-        // Get price history data for the current user's account
-        const priceHistoryResponse = await api.get(`price-history?account_id=${currentUser.id}`);
-        const priceHistoryData = priceHistoryResponse.data;
-        
-        // Combine data to generate recommendations
-        return generateRecommendationsFromData(items, performanceData, priceHistoryData, timeFrame);
-      } catch (fallbackError) {
-        console.error('Fallback recommendation generation failed:', fallbackError);
-        
-        // Use mock data if all API calls fail
-        return generateMockRecommendations(timeFrame);
-      }
+      const items = itemsResponse.data;
+      const performanceData = analyticsResponse.data;
+      const priceHistoryData = priceHistoryResponse.data;
+
+      // Build a full list of item summaries (no recommendation filtering)
+      _usingMock = false;
+      return generateRecommendationsFromData(
+        items,
+        performanceData,
+        priceHistoryData,
+        timeFrame
+      );
+    } catch (error) {
+      console.error('Error fetching item summaries:', error);
+      // Fallback to mock data so the UI still renders
+      _usingMock = true;
+      return generateMockRecommendations(timeFrame);
     }
   },
   
@@ -91,7 +86,10 @@ export const pricingService = {
       console.error(`Error applying price recommendation for item ${itemId}:`, error);
       return false;
     }
-  }
+  },
+  
+  // Accessor to let components know whether mock data was returned in the last call
+  wasMock: (): boolean => _usingMock
 };
 
 // Helper function to generate recommendations from real data

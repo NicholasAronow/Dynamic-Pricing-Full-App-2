@@ -4,6 +4,7 @@ import models
 from datetime import datetime, timedelta
 import random
 from passlib.context import CryptContext
+import argparse
 
 # Password hashing utility
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -11,18 +12,18 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 def get_password_hash(password):
     return pwd_context.hash(password)
 
-def seed_test_account():
+def seed_test_account(target_email: str):
     db = next(get_db())
     
     print("Seeding database with test account data...")
     
-    # Create test user account
-    test_email = "test@adaptiv.com"
+    # Create / fetch account for the requested email
+    test_email = target_email.lower()
     
     # Check if user already exists
     existing_user = db.query(models.User).filter(models.User.email == test_email).first()
     if existing_user:
-        print(f"Test user {test_email} already exists with ID: {existing_user.id}")
+        print(f"User {test_email} already exists with ID: {existing_user.id}")
         user_id = existing_user.id
     else:
         # Create new user
@@ -303,23 +304,20 @@ def seed_test_account():
                     order.total_amount = total_amount
     
     db.commit()
-    print("Test account data seeded successfully!")
+    print("Account data seeded successfully!")
     print(f"Login with email: {test_email} and password: adaptiv123")
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Seed menu / order data for a given account e-mail")
+    parser.add_argument("--email", default="test@adaptiv.com", help="Target account email")
+    args = parser.parse_args()
+
     # If running locally and using the remote DATABASE_URL, switch to SQLite temporarily
     import os
-    
-    # Check if we need to switch to SQLite for local testing
+
     if 'dpg-' in os.getenv("DATABASE_URL", "") and not os.getenv("RENDER"):
         print("Detected Render PostgreSQL URL but running locally.")
-        print("To run this script locally, either:")
-        print("1. Temporarily change .env to use SQLite: DATABASE_URL=sqlite:///./adaptiv.db")
-        print("2. Upload and run this script directly on Render using the Shell tab")
-        print("\nRecommendation: Run this on Render where the database is accessible.")
+        print("Run on Render or point DATABASE_URL to a local DB.")
     else:
-        # Create tables if they don't exist
         models.Base.metadata.create_all(bind=engine)
-        
-        # Seed database with test account data
-        seed_test_account()
+        seed_test_account(args.email)
