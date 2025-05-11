@@ -102,7 +102,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const register = async (email: string, password: string) => {
     try {
-      await axios.post('/api/auth/register', {
+      // Import api from services to use the configured base URL
+      const api = (await import('../services/api')).default;
+      
+      await api.post('auth/register', {
         email,
         password,
       });
