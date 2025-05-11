@@ -41,7 +41,7 @@ const PriceRecommendations: React.FC = () => {
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [editPrice, setEditPrice] = useState<number | null>(null);
   const [savingPrice, setSavingPrice] = useState<number | null>(null);
-  const [hasData, setHasData] = useState<boolean>(false);
+  const [usingMock, setUsingMock] = useState<boolean>(false);
   
   // Calculate summary metrics with safety checks
   const totalRevenue = recommendations.reduce((sum, item) => sum + (item.revenue || 0), 0);
@@ -83,11 +83,11 @@ const PriceRecommendations: React.FC = () => {
         }
         
         setRecommendations(data);
-        setHasData(data && data.length > 0);
+        setUsingMock(pricingService.wasMock());
       } catch (error) {
         console.error('Error fetching price recommendations:', error);
         message.error('Failed to load price recommendations');
-        setHasData(false);
+        setUsingMock(true);
       } finally {
         setLoading(false);
       }
@@ -419,7 +419,7 @@ const PriceRecommendations: React.FC = () => {
         <div style={{ display: 'flex', justifyContent: 'center', padding: '100px 0' }}>
           <LoadingOutlined style={{ fontSize: 24 }} spin />
         </div>
-      ) : !hasData ? (
+      ) : usingMock ? (
         <div style={{ position: 'relative' }}>
           {/* Blurred sample data in background */}
           <div style={{ filter: 'blur(5px)', opacity: 0.5 }}>

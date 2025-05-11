@@ -6,6 +6,58 @@ import { useNavigate } from 'react-router-dom';
 import competitorService, { CompetitorItem } from '../../services/competitorService';
 import itemService, { Item } from '../../services/itemService';
 
+// Mock competitor data for empty state visualization
+const MOCK_COMPETITORS = [
+  {
+    key: '1',
+    name: 'Coffee Republic',
+    similarityScore: 87,
+    priceSimScore: 92,
+    menuSimScore: 85,
+    distanceScore: 78,
+    priceDifference: '-4.2%',
+    status: 'lower',
+    categories: ['Coffee', 'Pastry', 'Breakfast'],
+    distance: 0.8
+  },
+  {
+    key: '2',
+    name: 'Beans & Brews',
+    similarityScore: 76,
+    priceSimScore: 82,
+    menuSimScore: 74,
+    distanceScore: 65,
+    priceDifference: '+7.8%',
+    status: 'higher',
+    categories: ['Coffee', 'Tea', 'Sandwiches'],
+    distance: 1.2
+  },
+  {
+    key: '3',
+    name: 'Morning Brew',
+    similarityScore: 92,
+    priceSimScore: 95,
+    menuSimScore: 94,
+    distanceScore: 88,
+    priceDifference: '-2.1%',
+    status: 'lower',
+    categories: ['Coffee', 'Pastry', 'Sandwiches', 'Desserts'],
+    distance: 0.5
+  },
+  {
+    key: '4',
+    name: 'Urban Grind',
+    similarityScore: 68,
+    priceSimScore: 72,
+    menuSimScore: 58,
+    distanceScore: 82,
+    priceDifference: '+5.3%',
+    status: 'higher',
+    categories: ['Coffee', 'Breakfast', 'Lunch'],
+    distance: 1.7
+  },
+];
+
 const { Title } = Typography;
 
 // Define competitor type for better type safety
@@ -28,11 +80,16 @@ const CompetitorAnalysis: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [hasData, setHasData] = useState<boolean>(false);
+  const [hasMenuItems, setHasMenuItems] = useState<boolean>(false);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
+        
+        // First check if user has menu items (indicates POS is connected)
+        const menuItems = await itemService.getItems();
+        setHasMenuItems(menuItems && menuItems.length > 0);
         
         // Get all unique competitor names from the API
         const competitorNames = await competitorService.getCompetitors();
@@ -134,10 +191,13 @@ const CompetitorAnalysis: React.FC = () => {
         // Only set hasData true if we have valid competitors with meaningful data
         setHasData(sortedCompetitors.length > 0);
         setLoading(false);
-      } catch (err) {
-        console.error('Error fetching competitor data:', err);
-        setError('Failed to load competitor data. Please try again later.');
-        setHasData(false);
+      } catch (error: any) {
+        console.error('Error fetching competitor data:', error);
+        setError(error.message || 'Failed to load competitor data. Please try again later.');
+        
+        // Even with an error, don't show error message, we'll show blurred mock data instead
+        // This is consistent with the UX where we show blurred sample data with an overlay
+      } finally {
         setLoading(false);
       }
     };
@@ -254,28 +314,27 @@ const CompetitorAnalysis: React.FC = () => {
       </Title>
       
       {loading ? (
-        <div style={{ textAlign: 'center', padding: '40px 0' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '40px 0' }}>
           <Spin size="large" />
-          <div style={{ marginTop: 16 }}>Loading competitor data...</div>
         </div>
-      ) : error ? (
-        <Alert message={error} type="error" showIcon />
-      ) : !hasData ? (
-        <div style={{ position: 'relative' }}>
-          {/* Blurred sample data in background */}
-          <div style={{ filter: 'blur(5px)', opacity: 0.5 }}>
-            <Card style={{ marginTop: 24 }}> 
-              <Title level={4} style={{ marginTop: 0, marginBottom: 16 }}>Competitor Data</Title>
-              <Table 
-                dataSource={sampleCompetitors} 
-                columns={columns} 
-                pagination={false} 
-              />
-            </Card>
-          </div>
+      ) : !hasData || !hasMenuItems ? (
+        <div style={{ position: 'relative', minHeight: '400px' }}>
+          {/* Only show blurred sample data when user has menu items but no competitor data */}
+          {hasMenuItems && (
+            <div style={{ width: '100%', filter: 'blur(5px)', opacity: 0.6 }}>
+              <Card>
+                <Title level={4} style={{ marginTop: 0, marginBottom: 16 }}>Competitor Data</Title>
+                <Table 
+                  dataSource={MOCK_COMPETITORS} 
+                  columns={columns} 
+                  pagination={false} 
+                />
+              </Card>
+            </div>
+          )}
           
           {/* Overlay with message */}
-          <div style={{ 
+          <div className="empty-state-overlay" style={{ 
             position: 'absolute', 
             top: 0, 
             left: 0, 
@@ -294,10 +353,16 @@ const CompetitorAnalysis: React.FC = () => {
               textAlign: 'center',
               maxWidth: '80%' 
             }}>
-              <p style={{ fontSize: '22px', fontWeight: 500, marginBottom: '16px' }}>No competitor data available</p>
-              <p style={{ color: '#666', marginBottom: '24px', fontSize: '16px' }}>To view competitor analysis, please connect your POS provider</p>
+              <p style={{ fontSize: '22px', fontWeight: 500, marginBottom: '16px' }}>
+                {!hasMenuItems ? 'Please connect your POS first' : 'No competitor data available'}
+              </p>
+              <p style={{ color: '#666', marginBottom: '24px', fontSize: '16px' }}>
+                {!hasMenuItems 
+                  ? 'Connect your POS provider to enable menu and competitor analysis' 
+                  : 'To view competitor analysis, please set up competitor tracking'}
+              </p>
               <Button type="primary" size="large">
-                Connect POS Provider
+                {!hasMenuItems ? 'Connect POS Provider' : 'Set Up Competitor Tracking'}
               </Button>
             </div>
           </div>
