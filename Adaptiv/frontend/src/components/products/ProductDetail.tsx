@@ -470,6 +470,13 @@ const ProductDetail: React.FC = () => {
           const realSalesData = await analyticsService.getItemSalesData(numericProductId, salesTimeFrame);
           setSalesData(realSalesData);
           
+          // Fetch hourly sales data for today
+          console.log('Fetching hourly sales data for item:', numericProductId);
+          const today = moment().format('YYYY-MM-DD');
+          const hourlyData = await analyticsService.getItemHourlySales(numericProductId, today);
+          console.log('Received hourly sales data:', hourlyData);
+          setIntradayData(hourlyData);
+          
           // Fetch weekly sales data
           console.log('Fetching weekly sales data for item:', numericProductId);
           const weekData = await analyticsService.getItemWeeklySales(numericProductId);
