@@ -368,7 +368,7 @@ def get_item_hourly_sales(
             for order in order_data:
                 # Extract hour from the datetime
                 hour = order.order_date.hour
-                hour_str = f"{hour:02d}"
+                hour_str = f"{hour:02d}:00"
                 
                 # Initialize if not exists
                 if hour_str not in hourly_totals:
@@ -380,12 +380,22 @@ def get_item_hourly_sales(
             
             # Convert to the expected format
             hourly_sales = []
-            for hour, data in sorted(hourly_totals.items()):
-                hourly_sales.append(type('HourData', (), {
-                    'hour': hour,
-                    'units': data['units'],
-                    'sales': data['sales']
-                }))
+            # Ensure we have all 24 hours in the result
+            for hour in range(24):
+                hour_str = f"{hour:02d}:00"
+                if hour_str in hourly_totals:
+                    hourly_sales.append(type('HourData', (), {
+                        'hour': hour_str,
+                        'units': hourly_totals[hour_str]['units'],
+                        'sales': hourly_totals[hour_str]['sales']
+                    }))
+                else:
+                    # Add empty data for hours with no sales
+                    hourly_sales.append(type('HourData', (), {
+                        'hour': hour_str,
+                        'units': 0,
+                        'sales': 0.0
+                    }))
             
             logger.info(f"Processed {len(hourly_sales)} hourly data points")
         else:
@@ -407,7 +417,21 @@ def get_item_hourly_sales(
         # Format the results
         result = []
         for hour_data in hourly_sales:
-            hour_str = str(hour_data.hour).zfill(2) + ":00"
+            # Handle different database backends returning different formats
+            if hasattr(hour_data, 'hour'):
+                # PostgreSQL might already have the :00 format
+                if isinstance(hour_data.hour, str) and ":00" in hour_data.hour:
+                    hour_str = hour_data.hour
+                else:
+                    # Ensure consistent hour formatting
+                    hour_str = str(hour_data.hour).zfill(2) + ":00"
+            else:
+                # Fallback for unexpected cases
+                hour_str = "00:00"
+                logger.warning(f"Unexpected hour data format: {hour_data}")
+                
+            # Log what hour we're processing
+            logger.info(f"Processing hour: '{hour_str}' with units={hour_data.units} and sales={hour_data.sales}")
             
             result.append({
                 "hour": hour_str,
@@ -415,8 +439,16 @@ def get_item_hourly_sales(
                 "sales": float(hour_data.sales) if hour_data.sales is not None else 0.0
             })
         
-        # Fill in missing hours with zeros
+        # Always fill in all 24 hours with proper formatting
+        # This ensures consistency across database types
         filled_result = []
+        
+        # Log the raw result before filling
+        logger.info(f"Raw result before filling: {len(result)} hours with data")
+        for r in result:
+            logger.info(f"  Hour: {r['hour']}, Units: {r['units']}, Sales: {r['sales']}")
+        
+        # Create a complete 24-hour array
         for hour in range(24):
             hour_str = f"{hour:02d}:00"
             
@@ -425,12 +457,17 @@ def get_item_hourly_sales(
             
             if hour_data:
                 filled_result.append(hour_data)
+                logger.info(f"Using existing data for hour {hour_str}")
             else:
                 filled_result.append({
                     "hour": hour_str,
                     "units": 0,
                     "sales": 0.0
                 })
+                logger.info(f"Added empty data for hour {hour_str}")
+        
+        # Log the final result size
+        logger.info(f"Final result: {len(filled_result)} hours of data")
         
         return filled_result
     except Exception as e:
