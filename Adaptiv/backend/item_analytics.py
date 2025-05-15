@@ -286,8 +286,8 @@ def get_item_hourly_sales(
     Get hourly sales data for a specific item on a specific date
     """
     try:
-        # Parse date or use default (yesterday)
-        target_date = datetime.now() - timedelta(days=1)
+        # Parse date or use default (today)
+        target_date = datetime.now()
         if date:
             try:
                 target_date = datetime.fromisoformat(date.replace('Z', '+00:00'))
