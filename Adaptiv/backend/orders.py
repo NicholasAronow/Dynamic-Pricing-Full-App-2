@@ -31,6 +31,27 @@ def get_orders(
         
     return orders
 
+@orders_router.get("/has-orders", response_model=dict)
+def check_has_orders(
+    account_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Check if a user has ever had any orders in the system.
+    Used by the dashboard to determine if the "Connect POS provider" prompt should be shown.
+    """
+    # Filter by the current user's ID unless specifically requesting another account's data
+    user_id = account_id if account_id else current_user.id
+    
+    # Check if there's at least one order in the database for this user
+    has_orders = db.query(func.count(models.Order.id)).filter(
+        models.Order.user_id == user_id
+    ).scalar() > 0
+    
+    return {"has_orders": has_orders}
+
+
 @orders_router.get("/{order_id}", response_model=schemas.Order)
 def get_order(
     order_id: int, 

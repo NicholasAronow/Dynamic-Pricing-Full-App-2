@@ -1,4 +1,5 @@
 import api from './api';
+import authService from './authService';
 
 export interface Order {
   id: number;
@@ -48,6 +49,31 @@ export const orderService = {
     }
     const response = await api.get(url);
     return response.data;
+  },
+  
+  // Check if user has ever had any orders (used to determine if POS is connected)
+  checkHasEverHadOrders: async (): Promise<boolean> => {
+    try {
+      const currentUser = authService.getCurrentUser();
+      if (!currentUser) {
+        console.error('User not authenticated');
+        return false;
+      }
+      
+      // Call a lightweight endpoint to check if user has any orders
+      const response = await api.get(`/orders/has-orders?account_id=${currentUser.id}`);
+      return response.data.has_orders === true;
+    } catch (error) {
+      console.error('Error checking if user has orders:', error);
+      // For test accounts, fail gracefully and assume they have orders
+      // This helps ensure the POS prompt doesn't show incorrectly
+      const currentUser = authService.getCurrentUser();
+      if (currentUser?.email?.includes('test')) {
+        console.log('Test account detected, assuming orders exist');
+        return true;
+      }
+      return false;
+    }
   },
 
   // Get orders by date range

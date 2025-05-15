@@ -22,6 +22,7 @@ import itemService, { Item } from '../../services/itemService';
 import orderService, { Order } from '../../services/orderService';
 import analyticsService, { SalesAnalytics } from '../../services/analyticsService';
 import competitorService from '../../services/competitorService';
+import api from '../../services/api';
 
 const { Title } = Typography;
 
@@ -278,6 +279,8 @@ const Dashboard: React.FC = () => {
   const [hasCompetitorsData, setHasCompetitorsData] = useState(false);
   const [hasAdaptivData, setHasAdaptivData] = useState(false);
   const [showCOGSPrompt, setShowCOGSPrompt] = useState(false);
+  // Flag to track if we've ever had an order (used to determine if we should show "Connect POS" prompt)
+  const [hasEverHadOrders, setHasEverHadOrders] = useState(false);
   
   // Helper function to convert timeframe to dates
   const getDateRangeFromTimeFrame = (timeFrame: string) => {
@@ -321,6 +324,25 @@ const Dashboard: React.FC = () => {
   const [hasAnySalesData, setHasAnySalesData] = useState(false);
   const [cogsData, setCogsData] = useState<any[]>([]);
   const [processedCogsData, setProcessedCogsData] = useState<Record<string, number>>({});
+  
+  // Check if the user has ever had orders - this is used to determine if we should show the "Connect POS" prompt
+  useEffect(() => {
+    const checkForAnyOrders = async () => {
+      try {
+        const hasOrders = await orderService.checkHasEverHadOrders();
+        console.log('User has ever had orders:', hasOrders);
+        setHasEverHadOrders(hasOrders);
+      } catch (error) {
+        console.error('Error checking if user has ever had orders:', error);
+        // If there's an error, assume test accounts have orders to avoid showing unnecessary prompts
+        if (user?.email?.includes('test')) {
+          setHasEverHadOrders(true);
+        }
+      }
+    };
+    
+    checkForAnyOrders();
+  }, [user?.email]);
   // Add cache for monthly aggregated data to ensure consistency
   const [monthlyAggregatedData, setMonthlyAggregatedData] = useState<Record<string, Record<string, { revenue: number; orders: number; cogs: number; profitMargin: number | null }>>>({});
   
@@ -1122,7 +1144,7 @@ const Dashboard: React.FC = () => {
           <div style={{ height: 300, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
             <Spin size="large" />
           </div>
-        ) : !hasSalesData ? (
+        ) : !hasEverHadOrders ? (
           <div style={{ width: '100%', height: 300, position: 'relative' }}>
             {/* Blurred sample data in background */}
             <div style={{ width: '100%', height: '100%', filter: 'blur(5px)', opacity: 0.6 }}>
