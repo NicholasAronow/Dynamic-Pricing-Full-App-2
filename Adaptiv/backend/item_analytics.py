@@ -295,21 +295,48 @@ def get_item_hourly_sales(
                 try:
                     target_date = datetime.strptime(date, '%Y-%m-%d')
                 except ValueError:
-                    logger.warning(f"Could not parse date {date}, using yesterday")
+                    logger.warning(f"Could not parse date {date}, using today")
+        
+        # Log the target date we're querying for
+        logger.info(f"Fetching hourly sales for item {item_id} on date {target_date.date()}")
         
         # Set the date range for the entire day
         start_date = datetime.combine(target_date.date(), datetime.min.time())
         end_date = datetime.combine(target_date.date(), datetime.max.time())
         
+        logger.info(f"Date range: {start_date} to {end_date}")
+        
+        # Check if we have any orders at all for this time period
+        orders_count = db.query(models.Order).filter(
+            models.Order.order_date >= start_date,
+            models.Order.order_date <= end_date
+        ).count()
+        
+        logger.info(f"Found {orders_count} total orders for this date range")
+        
+        # Check if we have any order items for this specific product
+        order_items_count = db.query(models.OrderItem).join(
+            models.Order, models.OrderItem.order_id == models.Order.id
+        ).filter(
+            models.OrderItem.item_id == item_id,
+            models.Order.order_date >= start_date,
+            models.Order.order_date <= end_date
+        ).count()
+        
+        logger.info(f"Found {order_items_count} order items for product {item_id} in this date range")
+        
         # Build hour grouping based on database type
-        if 'sqlite' in db.bind.dialect.name:
+        database_type = db.bind.dialect.name
+        logger.info(f"Using database type: {database_type}")
+        
+        if 'sqlite' in database_type:
             # For SQLite
             hour_group = func.strftime('%H', models.Order.order_date)
         else:
             # For PostgreSQL or others 
             hour_group = func.date_part('hour', models.Order.order_date)
         
-        # Query for hourly sales
+        # Query for hourly sales with additional debug info
         hourly_sales = db.query(
             hour_group.label('hour'),
             func.sum(models.OrderItem.quantity).label('units'),
