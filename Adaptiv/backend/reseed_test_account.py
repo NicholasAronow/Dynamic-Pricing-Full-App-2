@@ -297,6 +297,60 @@ def create_price_history_with_orders(db: Session, user_id: int):
     today = end_date.replace(hour=0, minute=0, second=0, microsecond=0)
     last_week_dates = [today - datetime.timedelta(days=i) for i in range(7)]
     
+    # Create detailed intraday data for today
+    logger.info("Creating detailed hourly intraday data for today...")
+    # Current datetime with hour, minute
+    now = datetime.datetime.now()
+    business_start = today.replace(hour=8, minute=0)  # 8:00 AM
+    
+    # Generate hourly data from business start until current time
+    current_hour = business_start
+    while current_hour < now:
+        # Create 2-5 orders for each hour of today
+        orders_this_hour = random.randint(2, 5)
+        logger.info(f"Adding {orders_this_hour} orders for hour {current_hour.hour}:00")
+        
+        # Distribute orders within the hour
+        for i in range(orders_this_hour):
+            # Random minute within the hour
+            minute = random.randint(0, 59)
+            order_time = current_hour.replace(minute=minute)
+            
+            # Create order
+            order = Order(
+                user_id=user_id,
+                order_date=order_time,
+                total_amount=0.0
+            )
+            db.add(order)
+            db.flush()
+            
+            # Add 1-4 items to the order for varied data
+            num_items = random.randint(1, 4)
+            random_items = random.sample(items, min(num_items, len(items)))
+            
+            order_total = 0.0
+            for item in random_items:
+                # More realistic quantity distribution
+                quantity = random.choices([1, 2, 3, 4], weights=[60, 25, 10, 5])[0]
+                
+                order_item = OrderItem(
+                    order_id=order.id,
+                    item_id=item.id,
+                    quantity=quantity,
+                    unit_price=item.current_price
+                )
+                db.add(order_item)
+                
+                # Add to order total
+                order_total += order_item.subtotal
+            
+            # Update order total
+            order.total_amount = order_total
+        
+        # Move to next hour
+        current_hour = current_hour + datetime.timedelta(hours=1)
+    
     # Check which days have orders
     for day in last_week_dates:
         day_start = day
@@ -423,6 +477,20 @@ def create_action_items(db: Session, user_id: int):
     
     # First, use the built-in seed function to add default action items
     seed_default_action_items(user_id, db)
+    
+    # Since we've added COGS data for the current week, mark the corresponding action item as completed
+    logger.info("Marking 'Enter COGS for current week' action item as completed")
+    cogs_action_item = db.query(ActionItem).filter(
+        ActionItem.user_id == user_id,
+        ActionItem.title == "Enter COGS for current week"
+    ).first()
+    
+    if cogs_action_item:
+        cogs_action_item.status = "completed"
+        cogs_action_item.completed_at = datetime.datetime.now()
+        logger.info("Successfully marked COGS action item as completed")
+    else:
+        logger.info("COGS action item not found, may have been deleted already")
     
     # Add some additional action items specific to the test account
     additional_items = [
