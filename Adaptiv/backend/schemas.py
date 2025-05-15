@@ -196,3 +196,100 @@ class OrderAnalytics(BaseModel):
     total_revenue: float
     average_order_value: float
     top_selling_items: List[dict]
+
+# COGS Schemas
+class COGSBase(BaseModel):
+    week_start_date: datetime
+    week_end_date: datetime
+    amount: float
+    
+    @validator('amount')
+    def validate_positive_amount(cls, v):
+        if v < 0:
+            raise ValueError('Amount must be non-negative')
+        return v
+
+class COGSCreate(COGSBase):
+    pass
+
+class COGSUpdate(BaseModel):
+    amount: float
+    
+    @validator('amount')
+    def validate_positive_amount(cls, v):
+        if v < 0:
+            raise ValueError('Amount must be non-negative')
+        return v
+
+class COGS(COGSBase):
+    id: int
+    user_id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    
+    class Config:
+        orm_mode = True
+
+# Action Item Schemas
+class ActionItemBase(BaseModel):
+    title: str
+    description: Optional[str] = None
+    priority: str = "medium"  # low, medium, high
+    status: str = "pending"  # pending, in_progress, completed
+    action_type: str = "other"  # integration, data_entry, analysis, configuration, other
+    
+    @validator('priority')
+    def validate_priority(cls, v):
+        if v not in ["low", "medium", "high"]:
+            raise ValueError('Priority must be one of: low, medium, high')
+        return v
+        
+    @validator('status')
+    def validate_status(cls, v):
+        if v not in ["pending", "in_progress", "completed"]:
+            raise ValueError('Status must be one of: pending, in_progress, completed')
+        return v
+        
+    @validator('action_type')
+    def validate_action_type(cls, v):
+        if v not in ["integration", "data_entry", "analysis", "configuration", "other"]:
+            raise ValueError('Action type must be one of: integration, data_entry, analysis, configuration, other')
+        return v
+
+class ActionItemCreate(ActionItemBase):
+    pass
+
+class ActionItemUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    priority: Optional[str] = None
+    status: Optional[str] = None
+    action_type: Optional[str] = None
+    
+    @validator('priority')
+    def validate_priority(cls, v):
+        if v is not None and v not in ["low", "medium", "high"]:
+            raise ValueError('Priority must be one of: low, medium, high')
+        return v
+        
+    @validator('status')
+    def validate_status(cls, v):
+        if v is not None and v not in ["pending", "in_progress", "completed"]:
+            raise ValueError('Status must be one of: pending, in_progress, completed')
+        return v
+        
+    @validator('action_type')
+    def validate_action_type(cls, v):
+        if v is not None and v not in ["integration", "data_entry", "analysis", "configuration", "other"]:
+            raise ValueError('Action type must be one of: integration, data_entry, analysis, configuration, other')
+        return v
+
+class ActionItem(ActionItemBase):
+    id: int
+    user_id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    
+    class Config:
+        orm_mode = True

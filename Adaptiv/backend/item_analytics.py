@@ -14,6 +14,112 @@ logger = logging.getLogger(__name__)
 
 item_analytics_router = APIRouter()
 
+@item_analytics_router.get("/elasticity/{item_id}")
+def get_elasticity_data(item_id: int, db: Session = Depends(get_db)):
+    """
+    Get elasticity data for a specific item:
+    - Number of price changes with sales data
+    - Calculated elasticity value if enough data exists
+    - Sales before and after price changes
+    """
+    try:
+        # Get item to verify it exists
+        item = db.query(models.Item).filter(models.Item.id == item_id).first()
+        if not item:
+            raise HTTPException(status_code=404, detail="Item not found")
+            
+        # Get all price changes for this item
+        price_changes = db.query(models.PriceHistory).filter(
+            models.PriceHistory.item_id == item_id
+        ).order_by(models.PriceHistory.changed_at.asc()).all()
+        
+        if not price_changes:
+            return {
+                "price_changes_count": 0,
+                "required_changes": 5,
+                "has_enough_data": False,
+                "elasticity": None,
+                "price_change_data": []
+            }
+        
+        # Process each price change to find sales data before and after
+        price_change_data = []
+        changes_with_sales_data = 0
+        elasticity_values = []
+        
+        for change in price_changes:
+            # Calculate 2 weeks before and 2 weeks after the price change
+            before_start = change.changed_at - timedelta(days=14)
+            before_end = change.changed_at - timedelta(days=1)
+            after_start = change.changed_at
+            after_end = change.changed_at + timedelta(days=14)
+            
+            # Get sales volume before price change
+            before_sales = db.query(func.sum(models.OrderItem.quantity)).join(
+                models.Order, models.OrderItem.order_id == models.Order.id
+            ).filter(
+                models.OrderItem.item_id == item_id,
+                models.Order.order_date.between(before_start, before_end)
+            ).scalar() or 0
+            
+            # Get sales volume after price change
+            after_sales = db.query(func.sum(models.OrderItem.quantity)).join(
+                models.Order, models.OrderItem.order_id == models.Order.id
+            ).filter(
+                models.OrderItem.item_id == item_id,
+                models.Order.order_date.between(after_start, after_end)
+            ).scalar() or 0
+            
+            # Store sales data for this price change
+            price_change_entry = {
+                "date": change.changed_at.isoformat(),
+                "previous_price": change.previous_price,
+                "new_price": change.new_price,
+                "sales_before": before_sales,
+                "sales_after": after_sales,
+                "has_sales_data": before_sales > 0 and after_sales > 0
+            }
+            
+            price_change_data.append(price_change_entry)
+            
+            # If we have sales data on both sides, count it and calculate elasticity
+            if before_sales > 0 and after_sales > 0:
+                changes_with_sales_data += 1
+                
+                # Calculate elasticity: (% change in quantity) / (% change in price)
+                pct_price_change = (change.new_price - change.previous_price) / change.previous_price
+                if pct_price_change != 0:  # Avoid division by zero
+                    pct_quantity_change = (after_sales - before_sales) / before_sales
+                    elasticity = pct_quantity_change / pct_price_change
+                    elasticity_values.append(elasticity)
+        
+        # Calculate average elasticity if we have enough data points
+        avg_elasticity = None
+        if len(elasticity_values) >= 3:  # Need at least 3 for a reasonable average
+            avg_elasticity = sum(elasticity_values) / len(elasticity_values)
+            # Ensure it's negative (as price elasticity typically is)
+            if avg_elasticity > 0:
+                avg_elasticity = -avg_elasticity
+        
+        return {
+            "price_changes_count": changes_with_sales_data,
+            "required_changes": 5,
+            "has_enough_data": changes_with_sales_data >= 5,
+            "elasticity": avg_elasticity,
+            "price_change_data": price_change_data
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting elasticity data: {e}")
+        logger.error(traceback.format_exc())
+        return {
+            "price_changes_count": 0,
+            "required_changes": 5,
+            "has_enough_data": False,
+            "elasticity": None,
+            "error": str(e)
+        }
+
 @item_analytics_router.get("/sales/{item_id}")
 def get_item_sales(
     item_id: int,

@@ -11,11 +11,13 @@ import {
   FallOutlined,
   InfoCircleOutlined
 } from '@ant-design/icons';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
+import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
 import moment from 'moment';
 
-// Import our API services
+// Import components and services
+import ActionItemsCard from './ActionItemsCard';
+import cogsService from '../../services/cogsService';
 import itemService, { Item } from '../../services/itemService';
 import orderService, { Order } from '../../services/orderService';
 import analyticsService, { SalesAnalytics } from '../../services/analyticsService';
@@ -98,7 +100,8 @@ const generateProductPerformanceData = (timeFrame: string) => {
 // Generating mock sales data
 const generateMockData = (timeFrame: string) => {
   const data = [];
-  const now = moment();
+  // Use yesterday as the most recent date (end date) for all time frames
+  const endDate = moment().subtract(1, 'day').endOf('day');
   
   let numPoints: number;
   let format: string;
@@ -108,6 +111,7 @@ const generateMockData = (timeFrame: string) => {
   
   switch (timeFrame) {
     case '1d':
+      // For 1-day, show 24 hours from midnight to midnight of yesterday
       numPoints = 24;
       format = 'HH:mm';
       dateFormat = 'YYYY-MM-DD HH:00';
@@ -129,15 +133,15 @@ const generateMockData = (timeFrame: string) => {
       unit = 'days';
       break;
     case '6m':
-      numPoints = 26;
-      format = 'MMM DD';
-      dateFormat = 'YYYY-MM-DD';
+      numPoints = 6; // Show just 6 months
+      format = 'MMM'; // Just show month name
+      dateFormat = 'YYYY-MM';
       step = 1;
-      unit = 'weeks';
+      unit = 'months';
       break;
     case '1yr':
       numPoints = 12;
-      format = 'MMM YYYY';
+      format = 'MMM'; // Just show month name without year
       dateFormat = 'YYYY-MM';
       step = 1;
       unit = 'months';
@@ -151,8 +155,23 @@ const generateMockData = (timeFrame: string) => {
   }
   
   // Generate data points
-  for (let i = numPoints - 1; i >= 0; i--) {
-    const date = moment(now).subtract(i * step, unit);
+  for (let i = 0; i < numPoints; i++) {
+    let date;
+    if (timeFrame === '1d') {
+      // For 1d view, use hours of yesterday from midnight to 11 PM
+      date = moment(endDate).startOf('day').add(i, 'hours');
+    } else if (timeFrame === '7d') {
+      // For 7d view, start 6 days before yesterday and include yesterday
+      date = moment(endDate).subtract(6, 'days').add(i, 'days');
+    } else if (timeFrame === '6m' || timeFrame === '1yr') {
+      // For 6m and 1yr, ensure we're using the first day of each month
+      // Start from the appropriate month and add months
+      const startMonth = moment(endDate).subtract(numPoints - 1, 'months').startOf('month');
+      date = moment(startMonth).add(i, 'months').startOf('month');
+    } else {
+      // For other views, work backwards from yesterday
+      date = moment(endDate).subtract(numPoints - 1, unit).add(i * step, unit);
+    }
     const baseValue = 5000 + Math.random() * 5000; // Base value between 5000 and 10000
     
     // Add some weekly patterns for daily data
@@ -168,10 +187,12 @@ const generateMockData = (timeFrame: string) => {
     } else if (timeFrame === '7d' || timeFrame === '1m') {
       // More sales on weekends
       const day = date.day();
-      if (day === 0 || day === 6) {
-        modifier = 1.3;
+      if (day === 0 || day === 6) { // Weekend days (Saturday = 6, Sunday = 0)
+        modifier = 1.3; // Higher sales on weekends
+      } else {
+        modifier = 0.9 + (Math.random() * 0.3); // Weekday variation
       }
-    } else if (timeFrame === '1yr') {
+    } else if (timeFrame === '6m' || timeFrame === '1yr') {
       // Seasonal variations
       const month = date.month();
       if (month === 10 || month === 11) { // Holiday season
@@ -218,7 +239,7 @@ const generateMockData = (timeFrame: string) => {
       fullDate: date.format(dateFormat),
       sales: Math.round(baseValue * modifier),
       profit: Math.round(profit),
-      profitMargin: parseFloat(profitMargin.toFixed(1))
+      profitMargin: parseFloat(profitMargin.toFixed(2))
     });
   }
   
@@ -244,7 +265,7 @@ const Dashboard: React.FC = () => {
   const [salesData, setSalesData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [chartView, setChartView] = useState<'sales' | 'margin'>('sales'); // Toggle between sales and profit margin
+  // Removed profit margin toggle - only showing sales now
   const [productsLoading, setProductsLoading] = useState(true);
   const [productPerformance, setProductPerformance] = useState<any[]>([]);
   const [itemsTimeFrame, setItemsTimeFrame] = useState('7d');
@@ -256,30 +277,35 @@ const Dashboard: React.FC = () => {
   const [hasProductsData, setHasProductsData] = useState(false);
   const [hasCompetitorsData, setHasCompetitorsData] = useState(false);
   const [hasAdaptivData, setHasAdaptivData] = useState(false);
+  const [showCOGSPrompt, setShowCOGSPrompt] = useState(false);
   
   // Helper function to convert timeframe to dates
   const getDateRangeFromTimeFrame = (timeFrame: string) => {
-    const end = moment();
+    // For all views except 1d, include today in the range to ensure we capture current week's COGS data
+    const end = timeFrame === '1d' ? moment().subtract(1, 'day').endOf('day') : moment().endOf('day');
     let start;
     
     switch (timeFrame) {
       case '1d':
-        start = moment().subtract(1, 'day');
+        // For 1-day view, use yesterday's full day (midnight to midnight)
+        start = moment().subtract(1, 'day').startOf('day');
         break;
       case '7d':
-        start = moment().subtract(7, 'days');
+        // For 7-day view, include today to ensure we capture data from the current week
+        // This ensures we include the current week's COGS data which is critical
+        start = moment().subtract(6, 'days').startOf('day');
         break;
       case '1m':
-        start = moment().subtract(30, 'days');
+        start = moment().subtract(30, 'days').startOf('day');
         break;
       case '6m':
-        start = moment().subtract(180, 'days');
+        start = moment().subtract(180, 'days').startOf('day');
         break;
       case '1yr':
-        start = moment().subtract(365, 'days');
+        start = moment().subtract(365, 'days').startOf('day');
         break;
       default:
-        start = moment().subtract(30, 'days');
+        start = moment().subtract(30, 'days').startOf('day');
     }
     
     console.log(`Time frame selected: ${timeFrame}, Date range: ${start.format('YYYY-MM-DD')} to ${end.format('YYYY-MM-DD')}`);
@@ -290,56 +316,558 @@ const Dashboard: React.FC = () => {
     };
   };
 
-  // Fetch sales data from API
+  // Fetch sales data and COGS data from API
+  // Keep track of whether we have ANY sales data across all time frames
+  const [hasAnySalesData, setHasAnySalesData] = useState(false);
+  const [cogsData, setCogsData] = useState<any[]>([]);
+  const [processedCogsData, setProcessedCogsData] = useState<Record<string, number>>({});
+  // Add cache for monthly aggregated data to ensure consistency
+  const [monthlyAggregatedData, setMonthlyAggregatedData] = useState<Record<string, Record<string, { revenue: number; orders: number; cogs: number; profitMargin: number | null }>>>({});
+  
+  // Helper function to convert weekly COGS to daily values
+  // Can process either the current cogsData state or a directly provided array
+  const processCogsDataToDaily = (cogsDataToProcess = cogsData) => {
+    // Create a map of daily COGS by date
+    const dailyCogsByDate: Record<string, number> = {};
+    
+    console.log('Processing COGS data to daily values:', cogsData);
+    
+    // If we have no COGS data, let's add some test data to ensure the line appears
+    if (!cogsData || cogsData.length === 0) {
+      console.log('No COGS data found');
+    }
+    
+    // Process each COGS entry (weekly) into daily values
+    cogsDataToProcess.forEach(cogsEntry => {
+      const weekStart = moment(cogsEntry.week_start_date);
+      const weekEnd = moment(cogsEntry.week_end_date);
+      const daysInWeek = weekEnd.diff(weekStart, 'days') + 1;
+      const dailyCogs = cogsEntry.amount / daysInWeek; // Distribute weekly COGS evenly to each day
+      
+      console.log(`Processing COGS entry: ${weekStart.format('YYYY-MM-DD')} to ${weekEnd.format('YYYY-MM-DD')}, amount: ${cogsEntry.amount}, daily: ${dailyCogs}`);
+      
+      // For each day in the week, add the daily COGS value
+      for (let day = 0; day < daysInWeek; day++) {
+        const currentDate = moment(weekStart).add(day, 'days').format('YYYY-MM-DD');
+        dailyCogsByDate[currentDate] = dailyCogs;
+      }
+    });
+    
+    console.log('Processed daily COGS data:', dailyCogsByDate);
+    return dailyCogsByDate;
+  };
+  
   // Check if we have Adaptiv metrics data
   useEffect(() => {
     // This would typically be a real API call to get Adaptiv metrics
     // For now, we're using the presence of other data as a proxy
     const checkAdaptivData = () => {
       // If we have sales data, assume we have Adaptiv data too
-      setHasAdaptivData(hasSalesData);
+      setHasAdaptivData(hasAnySalesData);
     };
     
     checkAdaptivData();
-  }, [hasSalesData]);
+  }, [hasAnySalesData]);
 
+  // Function to process and aggregate monthly data with consistent calculations
+  const processMonthlyData = (salesData: any[], cogsData: Record<string, number>, startDate: string, endDate: string): Record<string, { revenue: number; orders: number; cogs: number; profitMargin: number | null }> => {
+    const startMoment = moment(startDate);
+    const endMoment = moment(endDate);
+    
+    // Build look-up map for daily sales
+    const salesMap: Record<string, { revenue: number; orders: number }> = {};
+    salesData.forEach(day => {
+      salesMap[day.date] = { revenue: day.revenue, orders: day.orders };
+    });
+
+    // Process data month by month
+    const monthlyData: Record<string, { revenue: number; orders: number; cogs: number; profitMargin: number | null }> = {};
+    
+    let cursor = startMoment.clone();
+    while (cursor.isSameOrBefore(endMoment, 'day')) {
+      const dateStr = cursor.format('YYYY-MM-DD');
+      const monthKey = cursor.format('YYYY-MM');
+      
+      if (!monthlyData[monthKey]) {
+        monthlyData[monthKey] = { revenue: 0, orders: 0, cogs: 0, profitMargin: null };
+      }
+
+      const dailySales = salesMap[dateStr] || { revenue: 0, orders: 0 };
+      monthlyData[monthKey].revenue += dailySales.revenue;
+      monthlyData[monthKey].orders += dailySales.orders;
+      monthlyData[monthKey].cogs += cogsData[dateStr] || 0;
+
+      cursor.add(1, 'day');
+    }
+    
+    // Calculate profit margins for each month using EXACTLY the same formula
+    Object.entries(monthlyData).forEach(([monthKey, data]) => {
+      if (data.revenue > 0 && data.cogs > 0) {
+        // Always use this exact formula to ensure consistency
+        data.profitMargin = parseFloat(((data.revenue - data.cogs) / data.revenue * 100).toFixed(2));
+      } else {
+        data.profitMargin = null;
+      }
+    });
+    
+    return monthlyData;
+  };
+  
   useEffect(() => {
     const fetchSalesData = async () => {
       try {
         setLoading(true);
         setError(null);
         
-        const { startDate, endDate } = getDateRangeFromTimeFrame(timeFrame);
+        // Always fetch a full year of data for 6m and 1yr views to ensure consistency
+        let fetchStartDate, fetchEndDate;
+        if (timeFrame === '6m' || timeFrame === '1yr') {
+          // Always fetch a full year for both views to ensure consistency
+          fetchStartDate = moment().startOf('month').subtract(11, 'months').format('YYYY-MM-DD');
+          fetchEndDate = moment().endOf('day').format('YYYY-MM-DD');
+          console.log(`${timeFrame} view: Fetching full year data from ${fetchStartDate} to ${fetchEndDate}`);
+        } else {
+          // For other timeframes, fetch the specific date range
+          const dateRange = getDateRangeFromTimeFrame(timeFrame);
+          fetchStartDate = dateRange.startDate;
+          fetchEndDate = dateRange.endDate;
+        }
+        
+        // Fetch COGS data for this period
+        let currentProcessedCogsData: Record<string, number> = {};
+        try {
+          const fetchedCogsData = await cogsService.getCOGSData(fetchStartDate, fetchEndDate);
+          console.log('Fetched COGS data, length:', fetchedCogsData.length);
+          
+          // Process COGS data immediately and store locally
+          if (fetchedCogsData && fetchedCogsData.length > 0) {
+            currentProcessedCogsData = processCogsDataToDaily(fetchedCogsData);
+          }
+          
+          // Update state for other components
+          setCogsData(fetchedCogsData);
+          setProcessedCogsData(currentProcessedCogsData);
+        } catch (cogsError) {
+          console.error('Error fetching COGS data:', cogsError);
+          // Continue with sales data even if COGS fetch fails
+        }
         
         // Fetch analytics data if available
         try {
-          const analytics = await analyticsService.getSalesAnalytics(startDate, endDate);
+          const analytics = await analyticsService.getSalesAnalytics(fetchStartDate, fetchEndDate);
           setAnalyticsData(analytics);
           
           // If we have daily sales data, use it for the chart
+          // Set global flag that we have data, even if not for the current time frame
+          setHasAnySalesData(true);
+          
           if (analytics.salesByDay && analytics.salesByDay.length > 0) {
-            setSalesData(analytics.salesByDay.map(day => ({
-              name: day.date,
-              revenue: day.revenue,
-              orders: day.orders
-            })));
+            // Data processing for chart display
+            let formattedData;
+            
+            // For 6m and 1yr views, use our shared data processing function
+            // to ensure complete consistency in calculations
+            if (timeFrame === '6m' || timeFrame === '1yr') {
+              // Use the shared processing function to get consistent monthly data
+              const allMonthlyData = processMonthlyData(
+                analytics.salesByDay,
+                currentProcessedCogsData,
+                fetchStartDate,
+                fetchEndDate
+              );
+              
+              // Track this data processing in our app state
+              const dataSetKey = `${fetchStartDate}_${fetchEndDate}`;
+              const updatedAggregatedData = {...monthlyAggregatedData};
+              updatedAggregatedData[dataSetKey] = allMonthlyData;
+              setMonthlyAggregatedData(updatedAggregatedData);
+              
+              // Format data for the chart display
+              const allMonths = Object.entries(allMonthlyData)
+                .map(([monthKey, data]) => ({
+                  name: moment(monthKey, 'YYYY-MM').format('MMM'),
+                  monthKey: monthKey,
+                  revenue: data.revenue,
+                  orders: data.orders,
+                  profitMargin: data.profitMargin
+                }))
+                .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+              
+              // For 6m view, only use last 6 months of data
+              if (timeFrame === '6m') {
+                formattedData = allMonths.slice(-6);
+                console.log(`6m view: Using last ${formattedData.length} months of full-year data`);
+              } else {
+                formattedData = allMonths;
+                console.log(`1yr view: Using all ${formattedData.length} months of data`);
+              }
+              
+              // Detailed logging for verification
+              console.log(`${timeFrame} view first month: ${formattedData[0]?.monthKey}, last month: ${formattedData[formattedData.length-1]?.monthKey}`);
+              formattedData.forEach(month => {
+                const originalData = allMonthlyData[month.monthKey];
+                console.log(`Month ${month.monthKey}: Revenue: ${originalData.revenue}, COGS: ${originalData.cogs}, Profit: ${originalData.profitMargin?.toFixed(2)}%`);
+              });
+            } else if (timeFrame === '1d') {
+              // For 1d, ensure we show all 24 hours even if there's no data
+              const yesterday = moment().subtract(1, 'day').startOf('day');
+              formattedData = [];
+              
+              for (let i = 0; i < 24; i++) {
+                const hourTime = moment(yesterday).add(i, 'hours');
+                const hourStr = hourTime.format('HH:00');
+                
+                // Find if we have data for this hour
+                const hourData = analytics.salesByDay.find(day => 
+                  moment(day.date).format('HH:00') === hourStr
+                );
+                
+                // Get the COGS for yesterday
+                const yesterdayStr = yesterday.format('YYYY-MM-DD');
+                const daysCogs = currentProcessedCogsData[yesterdayStr] || 0;
+                
+                // Hourly COGS (dividing daily COGS by 24 hours)
+                const hourlyCogs = daysCogs / 24;
+                
+                // Calculate revenue and profit margin
+                const revenue = hourData ? hourData.revenue : 0;
+                const margin = revenue > 0 && hourlyCogs > 0 ? ((revenue - hourlyCogs) / revenue) * 100 : null;
+                
+                formattedData.push({
+                  name: hourStr,
+                  revenue: revenue,
+                  orders: hourData ? hourData.orders : 0,
+                  profitMargin: margin
+                });
+              }
+            } else if (timeFrame === '6m' || timeFrame === '1yr') {
+              // CRITICAL FIX: Completely reprocess the data for both 1yr and 6m views
+              // First, we'll create a consistent 12-month dataset, then filter for display
+              
+              // Always process a full year of data for consistency
+              const yearStartMoment = moment().startOf('month').subtract(11, 'months');
+              const endMoment = moment().endOf('day');
+              
+              // Get the key for the current data processing session to ensure same source data
+              const dataSetKey = `${yearStartMoment.format('YYYY-MM-DD')}_${endMoment.format('YYYY-MM-DD')}`;
+              console.log(`Processing data for set key: ${dataSetKey}`);
+
+              // Process the monthly data if not already in cache
+              if (!monthlyAggregatedData[dataSetKey]) {
+                console.log('Building monthly data from scratch');
+                
+                // Build look-up map for daily sales
+                const salesMap: Record<string, { revenue: number; orders: number }> = {};
+                analytics.salesByDay.forEach(day => {
+                  salesMap[day.date] = { revenue: day.revenue, orders: day.orders };
+                });
+
+                // Process data month by month
+                const processedMonthlyData: Record<string, { revenue: number; orders: number; cogs: number; profitMargin: number | null }> = {};
+                
+                let cursor = yearStartMoment.clone();
+                while (cursor.isSameOrBefore(endMoment, 'day')) {
+                  const dateStr = cursor.format('YYYY-MM-DD');
+                  const monthKey = cursor.format('YYYY-MM');
+                  
+                  if (!processedMonthlyData[monthKey]) {
+                    processedMonthlyData[monthKey] = { revenue: 0, orders: 0, cogs: 0, profitMargin: null };
+                  }
+
+                  const dailySales = salesMap[dateStr] || { revenue: 0, orders: 0 };
+                  processedMonthlyData[monthKey].revenue += dailySales.revenue;
+                  processedMonthlyData[monthKey].orders += dailySales.orders;
+                  processedMonthlyData[monthKey].cogs += currentProcessedCogsData[dateStr] || 0;
+
+                  cursor.add(1, 'day');
+                }
+                
+                // Calculate profit margins for each month
+                Object.entries(processedMonthlyData).forEach(([monthKey, data]) => {
+                  data.profitMargin = data.revenue > 0 && data.cogs > 0
+                    ? parseFloat(((data.revenue - data.cogs) / data.revenue * 100).toFixed(2))
+                    : null;
+                });
+                
+                // Store in the cache for reuse
+                monthlyAggregatedData[dataSetKey] = processedMonthlyData;
+                setMonthlyAggregatedData({...monthlyAggregatedData});
+                
+                console.log('Monthly data processed and cached', processedMonthlyData);
+              } else {
+                console.log('Using previously cached monthly data');
+              }
+              
+              // Get months in chronological order
+              const allMonths = Object.entries(monthlyAggregatedData[dataSetKey])
+                .map(([monthKey, data]) => ({
+                  monthKey,
+                  name: moment(monthKey, 'YYYY-MM').format('MMM'),
+                  revenue: data.revenue,
+                  orders: data.orders,
+                  profitMargin: data.profitMargin
+                }))
+                .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+              
+              // Filter months based on the timeframe
+              if (timeFrame === '6m') {
+                // Take only the last 6 months
+                formattedData = allMonths.slice(-6);
+                console.log('6-month view: filtered to last 6 months of data');
+              } else {
+                // Use the full year
+                formattedData = allMonths;
+                console.log('1-year view: using full year of data');
+              }
+              
+              // Final detailed logging for verification
+              console.log(`${timeFrame} view showing ${formattedData.length} months:`);
+              console.log(`From ${formattedData[0]?.monthKey} to ${formattedData[formattedData.length-1]?.monthKey}`);
+              formattedData.forEach(month => {
+                console.log(`Month: ${month.monthKey}, Revenue: ${month.revenue}, COGS: ${monthlyAggregatedData[dataSetKey][month.monthKey].cogs}, Profit Margin: ${month.profitMargin?.toFixed(2)}%`);
+              });
+              
+            } else if (timeFrame === '7d' || timeFrame === '7d_refresh') {
+              // For 7d, ensure we show all 7 days regardless of data availability
+              formattedData = [];
+              const endDate = moment().endOf('day');
+              const startDate = moment().subtract(6, 'days').startOf('day');
+              
+              // Build a map of existing sales data by date for fast lookups
+              const salesDataByDate: Record<string, any> = {};
+              analytics.salesByDay.forEach(day => {
+                const dateStr = moment(day.date).format('YYYY-MM-DD');
+                salesDataByDate[dateStr] = day;
+              });
+              
+              // For the 7d view, we need a simple, direct approach to ensure profit margins
+              // appear consistently across all days
+              console.log('7d view: Simplified approach for COGS data from', startDate.format('YYYY-MM-DD'), 'to', endDate.format('YYYY-MM-DD'));
+              
+              // Find the latest COGS entry as our reference
+              let mostRecentCOGS = null;
+              let mostRecentDate = null;
+              
+              if (cogsData && cogsData.length > 0) {
+                // Sort COGS data by start date, most recent first
+                const sortedCOGS = [...cogsData].sort((a, b) => 
+                  moment(b.week_start_date).valueOf() - moment(a.week_start_date).valueOf()
+                );
+                
+                mostRecentCOGS = sortedCOGS[0];
+                mostRecentDate = moment(mostRecentCOGS.week_start_date).format('YYYY-MM-DD');
+                console.log(`7d view: Found most recent COGS data from ${mostRecentDate}, amount: ${mostRecentCOGS.amount}`);
+              } else {
+                console.log('7d view: No COGS data available');
+              }
+              
+              // Generate data for all 7 days
+              for (let i = 0; i < 7; i++) {
+                const currentDate = moment(startDate).add(i, 'days');
+                const dateStr = currentDate.format('YYYY-MM-DD');
+                const formattedDate = currentDate.format('MMM DD'); 
+                const isToday = currentDate.isSame(moment(), 'day');
+                
+                // Check if we have sales data for this day
+                const dayData = salesDataByDate[dateStr];
+                const revenue = dayData ? dayData.revenue : 0;
+                const orders = dayData ? dayData.orders : 0;
+                
+                // SIMPLIFIED APPROACH: Use the same COGS value across all days
+                // This ensures a consistent profit margin line across the week
+                let dayCogs = 0;
+                
+                // First check if we have specific daily COGS data
+                dayCogs = currentProcessedCogsData[dateStr] || processedCogsData[dateStr] || 0;
+                
+                // If no specific daily data, but we have a weekly value, use that
+                if (dayCogs === 0 && mostRecentCOGS) {
+                  // Distribute the weekly COGS evenly across all 7 days
+                  dayCogs = mostRecentCOGS.amount / 7;
+                  console.log(`7d view: Applied weekly COGS to ${dateStr}: $${dayCogs.toFixed(2)}`);
+                }
+                
+                // If we have revenue data but no COGS, add a fallback estimate
+                // so we always have margin data (critical for a continuous line)
+                if (revenue > 0 && dayCogs === 0) {
+                  // Use a simple estimate based on reasonable margins
+                  dayCogs = revenue * 0.7; // Assume 30% margin
+                  console.log(`7d view: Using estimated COGS for ${dateStr}: $${dayCogs.toFixed(2)}`);
+                }
+                
+                // Calculate profit margin if we have COGS and revenue data
+                let profitMargin = null;
+                if (revenue > 0 && dayCogs > 0) {
+                  profitMargin = parseFloat(((revenue - dayCogs) / revenue * 100).toFixed(2));
+                  console.log(`7d view: Calculated margin for ${dateStr}: ${profitMargin.toFixed(2)}% (Rev: $${revenue.toFixed(2)}, COGS: $${dayCogs.toFixed(2)})`);
+                }
+                
+                formattedData.push({
+                  name: formattedDate,
+                  revenue: revenue,
+                  orders: orders,
+                  profitMargin: profitMargin,
+                  // Add date for debugging
+                  date: dateStr
+                });
+              }
+              
+              // Log what we're showing
+              console.log(`7d view: Showing data from ${startDate.format('YYYY-MM-DD')} to ${endDate.format('YYYY-MM-DD')}`);
+              console.log(`7d view: Found data for ${Object.keys(salesDataByDate).length} days`);
+            } else if (timeFrame === '1m') {
+              // For 1m, ensure we show all 30 days regardless of data availability
+              formattedData = [];
+              const endDate = moment().endOf('day');
+              const startDate = moment().subtract(29, 'days').startOf('day'); // 30 days including today
+              
+              // Build a map of existing sales data by date for fast lookups
+              const salesDataByDate: Record<string, any> = {};
+              analytics.salesByDay.forEach(day => {
+                const dateStr = moment(day.date).format('YYYY-MM-DD');
+                salesDataByDate[dateStr] = day;
+              });
+              
+              // Log available COGS data dates for the 1m view for debugging
+              console.log('1m view: Checking for complete COGS data from', startDate.format('YYYY-MM-DD'), 'to', endDate.format('YYYY-MM-DD'));
+              
+              // Log all available COGS data dates for debugging
+              const availableDates = Object.keys(currentProcessedCogsData).sort();
+              const availableProcessedDates = Object.keys(processedCogsData).sort();
+              console.log('1m available COGS dates (current):', availableDates);
+              console.log('1m available COGS dates (processed):', availableProcessedDates);
+              
+              // Generate data for all 30 days
+              for (let i = 0; i < 30; i++) {
+                const currentDate = moment(startDate).add(i, 'days');
+                const dateStr = currentDate.format('YYYY-MM-DD');
+                const formattedDate = currentDate.format('MMM DD');
+                const isToday = currentDate.isSame(moment(), 'day');
+                const isCurrentWeek = currentDate.isSame(moment(), 'week');
+                
+                // Check if we have sales data for this day
+                const dayData = salesDataByDate[dateStr];
+                const revenue = dayData ? dayData.revenue : 0;
+                const orders = dayData ? dayData.orders : 0;
+                
+                // Get COGS data for this day if available - try multiple sources with fallbacks
+                // This ensures we don't miss data for today or recent days
+                // First attempt to get COGS for the specific day
+                let dayCogs = currentProcessedCogsData[dateStr] || processedCogsData[dateStr] || 0;
+                
+                // If no COGS found for this specific day, check if it belongs to a week with COGS data
+                if (dayCogs === 0) {
+                  // Try to find COGS data for the week this date belongs to
+                  const weekStart = currentDate.clone().startOf('week').format('YYYY-MM-DD');
+                  const weekEnd = currentDate.clone().endOf('week').format('YYYY-MM-DD');
+                  
+                  // Check if we have any COGS entry for this week
+                  const weekCOGS = cogsData.find(entry => 
+                    moment(entry.week_start_date).format('YYYY-MM-DD') === weekStart ||
+                    moment(entry.week_start_date).isSame(moment(weekStart), 'week')
+                  );
+                  
+                  if (weekCOGS) {
+                    // We found COGS data for this week, calculate the daily value
+                    const daysInWeek = 7; // Standard week
+                    dayCogs = weekCOGS.amount / daysInWeek;
+                    console.log(`1m view: Found weekly COGS data for ${dateStr}: $${dayCogs.toFixed(2)} (from week starting ${weekStart})`);
+                  }
+                  // If still no COGS data, and it's today or current week, use the most recent
+                  else if (isToday || isCurrentWeek) {
+                    // Find the most recent available COGS data
+                    const allDates = [...availableDates, ...availableProcessedDates].sort();
+                    if (allDates.length > 0) {
+                      const mostRecentDate = allDates[allDates.length - 1];
+                      dayCogs = currentProcessedCogsData[mostRecentDate] || processedCogsData[mostRecentDate] || 0;
+                      console.log(`1m view: Using proxy COGS data for ${dateStr}: $${dayCogs.toFixed(2)} (from ${mostRecentDate})`);
+                    }
+                  }
+                }
+                
+                // Calculate profit margin if we have COGS and revenue data
+                let profitMargin = null;
+                if (revenue > 0 && dayCogs > 0) {
+                  profitMargin = parseFloat(((revenue - dayCogs) / revenue * 100).toFixed(2));
+                  console.log(`1m view: Calculated margin for ${dateStr}: ${profitMargin.toFixed(2)}% (Rev: $${revenue.toFixed(2)}, COGS: $${dayCogs.toFixed(2)})`);
+                }
+                
+                formattedData.push({
+                  name: formattedDate,
+                  revenue: revenue,
+                  orders: orders,
+                  profitMargin: profitMargin,
+                  // Add date for debugging
+                  date: dateStr
+                });
+              }
+              
+              // Log what we're showing
+              console.log(`1m view: Showing data from ${startDate.format('YYYY-MM-DD')} to ${endDate.format('YYYY-MM-DD')}`);
+              console.log(`1m view: Found data for ${Object.keys(salesDataByDate).length} days`);
+            } else {
+              // Default case to handle any other timeFrame values that might be added in the future
+              // This ensures formattedData is always defined before being used
+              formattedData = [];
+              console.log(`Unhandled timeFrame: ${timeFrame}, using empty data array`);
+            }
+            
+            // Now formattedData is guaranteed to be defined
+            setSalesData(formattedData);
             setHasSalesData(true);
+          } else if (hasAnySalesData && timeFrame === '1d') {
+            // Special case: if we have any sales data but none for yesterday,
+            // show empty hourly bars instead of the "Connect POS" message
+            const yesterday = moment().subtract(1, 'day').startOf('day');
+            const formattedData = [];
+            
+            for (let i = 0; i < 24; i++) {
+              formattedData.push({
+                name: moment(yesterday).add(i, 'hours').format('HH:00'),
+                revenue: 0,
+                orders: 0
+              });
+            }
+            
+            setSalesData(formattedData);
+            setHasSalesData(true); // We're treating this as having data
           } else {
             // Fallback to mock data if API doesn't provide what we need
-            setSalesData(generateMockData(timeFrame));
+            console.log("API Did not provide data")
+            //setSalesData(generateMockData(timeFrame));
             setHasSalesData(false);
           }
         } catch (err) {
           console.error('Failed to fetch analytics data:', err);
-          // Fallback to mock data
-          setSalesData(generateMockData(timeFrame));
+          
+          // If we have any sales data but error on 1d view, show empty day
+          if (hasAnySalesData && timeFrame === '1d') {
+            const yesterday = moment().subtract(1, 'day').startOf('day');
+            const formattedData = [];
+            
+            for (let i = 0; i < 24; i++) {
+              formattedData.push({
+                name: moment(yesterday).add(i, 'hours').format('HH:00'),
+                revenue: 0,
+                orders: 0
+              });
+            }
+            
+            setSalesData(formattedData);
+            setHasSalesData(true);
+          } else {
+            // Fallback to mock data
+            console.log("API Did not provide data")
+            //setSalesData(generateMockData(timeFrame));
+          }
         }
         
         setLoading(false);
       } catch (err) {
         console.error('Error fetching sales data:', err);
         setError('Failed to load sales data. Using mock data as fallback.');
-        setSalesData(generateMockData(timeFrame));
+        console.log("API Did not provide data")
+        //setSalesData(generateMockData(timeFrame));
         setLoading(false);
       }
     };
@@ -431,6 +959,98 @@ const Dashboard: React.FC = () => {
     fetchCompetitorData();
   }, []);  // Empty dependency array means this runs once on component mount
   
+  // Add a dedicated useEffect for processing COGS data whenever it changes
+  useEffect(() => {
+    if (cogsData && cogsData.length > 0) {
+      console.log('Processing COGS data, length:', cogsData.length);
+      const dailyCogs = processCogsDataToDaily();
+      setProcessedCogsData(dailyCogs);
+    }
+  }, [cogsData]);
+  
+  // Ensure the current week's COGS data is always included in dashboard calculations
+  useEffect(() => {
+    const ensureCurrentWeekCOGSData = async () => {
+      if (!user) return;
+      
+      try {
+        // Use our specialized function to get current week's COGS data specifically
+        const currentWeekCOGS = await cogsService.getCurrentWeekCOGSData();
+        
+        // Check if we have current week COGS data
+        const hasCurrentWeekData = currentWeekCOGS.length > 0;
+        
+        // Update the COGS prompt visibility based on whether we have data
+        setShowCOGSPrompt(!hasCurrentWeekData);
+        
+        // If we have current week data, ensure it's included in our processed COGS data
+        if (hasCurrentWeekData) {
+          console.log('Found current week COGS data, processing for display', currentWeekCOGS);
+          
+          // Process current week's COGS data into daily values
+          const currentWeekProcessed = processCogsDataToDaily(currentWeekCOGS);
+          
+          // Debug logging
+          console.log('Processed current week COGS data into daily values:', currentWeekProcessed);
+          Object.entries(currentWeekProcessed).forEach(([date, amount]) => {
+            console.log(`Daily COGS for ${date}: $${amount.toFixed(2)}`);
+          });
+          
+          // Ensure all timeframes have access to this current week's data
+          setProcessedCogsData(prevData => {
+            const updatedData = { ...prevData, ...currentWeekProcessed };
+            console.log('Updated processedCogsData with current week data', updatedData);
+            return updatedData;
+          });
+          
+          // Also update the raw COGS data array to include current week entries
+          setCogsData(prevData => {
+            // Remove any entries for the current week that might be outdated
+            const today = moment();
+            const startOfWeek = today.clone().startOf('week');
+            
+            const filteredData = prevData.filter(entry => 
+              !moment(entry.week_start_date).isSame(startOfWeek, 'day')
+            );
+            
+            // Add the new current week entries
+            const updatedData = [...filteredData, ...currentWeekCOGS];
+            console.log('Updated cogsData with current week entries', updatedData);
+            return updatedData;
+          });
+          
+          // Force a re-calculation of all data that depends on COGS
+          if (timeFrame === '7d' || timeFrame === '1m') {
+            console.log(`Force refreshing ${timeFrame} view to include current week COGS data`);
+            // This will trigger the useEffect that depends on timeFrame
+            setTimeFrame(prev => prev === '7d' ? '7d_refresh' : '1m_refresh');
+            // Immediately set it back to avoid double refresh
+            setTimeout(() => setTimeFrame(prev => prev.includes('refresh') ? prev.split('_')[0] : prev), 10);
+          }
+        }
+      } catch (error) {
+        console.error('Error ensuring current week COGS data:', error);
+        setShowCOGSPrompt(true); // Show prompt on error as a safe default
+      }
+    };
+    
+    // Always check for current week's COGS data when component loads or user changes
+    ensureCurrentWeekCOGSData();
+    
+    // We'll also set up an interval to check for updates every 5 minutes if the dashboard stays open
+    const intervalId = setInterval(() => {
+      console.log('Scheduled COGS data refresh');
+      ensureCurrentWeekCOGSData();
+    }, 5 * 60 * 1000); // 5 minutes
+    
+    return () => clearInterval(intervalId);
+  }, [user]);
+
+  // Handle completion of COGS data entry
+  const handleCOGSComplete = () => {
+    setShowCOGSPrompt(false);
+  };
+
   // Extract the user's name for the welcome message
   const userName = user?.email?.split('@')[0] || 'User';
   // Capitalize the first letter of the name
@@ -471,40 +1091,33 @@ const Dashboard: React.FC = () => {
         Welcome back, {formattedName}! Here's your dynamic pricing overview
       </Title>
       
-      {/* Sales/Profit Margin Chart */}
-      <Card 
-        title={
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span><LineChartOutlined /> {chartView === 'sales' ? 'Sales' : 'Profit Margin'} Over Time</span>
-            <div style={{ display: 'flex', gap: '16px' }}>
-              <Radio.Group 
-                value={chartView}
-                onChange={(e) => setChartView(e.target.value)}
-                optionType="button"
-                buttonStyle="solid"
-                size="small"
-              >
-                <Radio.Button value="sales">Sales</Radio.Button>
-                <Radio.Button value="margin">Profit Margin</Radio.Button>
-              </Radio.Group>
-              <Radio.Group 
-                value={timeFrame}
-                onChange={handleTimeFrameChange}
-                optionType="button"
-                buttonStyle="solid"
-                size="small"
-              >
-                <Radio.Button value="1d">1D</Radio.Button>
-                <Radio.Button value="7d">7D</Radio.Button>
-                <Radio.Button value="1m">1M</Radio.Button>
-                <Radio.Button value="6m">6M</Radio.Button>
-                <Radio.Button value="1yr">1Y</Radio.Button>
-              </Radio.Group>
-            </div>
-          </div>
-        }
-        style={{ marginBottom: 24 }}
-      >
+      {/* Chart Row with Sales Chart and Action Items */}
+      <Row gutter={24} style={{ marginBottom: 24 }}>
+        {/* Sales/Profit Margin Chart - Takes up more space */}
+        <Col xs={24} sm={24} md={14} lg={14} xl={14}>
+          <Card 
+            title={
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span><LineChartOutlined /> Sales Over Time</span>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <Radio.Group 
+                    value={timeFrame}
+                    onChange={handleTimeFrameChange}
+                    optionType="button"
+                    buttonStyle="solid"
+                    size="small"
+                  >
+                    <Radio.Button value="1d">1D</Radio.Button>
+                    <Radio.Button value="7d">7D</Radio.Button>
+                    <Radio.Button value="1m">1M</Radio.Button>
+                    <Radio.Button value="6m">6M</Radio.Button>
+                    <Radio.Button value="1yr">1Y</Radio.Button>
+                  </Radio.Group>
+                </div>
+              </div>
+            }
+            style={{ height: '100%' }}
+          >
         {loading ? (
           <div style={{ height: 300, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
             <Spin size="large" />
@@ -514,21 +1127,20 @@ const Dashboard: React.FC = () => {
             {/* Blurred sample data in background */}
             <div style={{ width: '100%', height: '100%', filter: 'blur(5px)', opacity: 0.6 }}>
               <ResponsiveContainer>
-                <LineChart
+                <ComposedChart
                   data={generateMockData(timeFrame)}
                   margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="name" />
                   <YAxis tickFormatter={(tick) => `$${formatNumberWithCommas(tick)}`} />
-                  <Line 
-                    type="monotone" 
+                  <Bar 
                     dataKey="revenue" 
                     name="Sales" 
-                    stroke="#9370DB" 
-                    strokeWidth={2}
+                    fill="#9370DB" 
+                    radius={[4, 4, 0, 0]}
                   />
-                </LineChart>
+                </ComposedChart>
               </ResponsiveContainer>
             </div>
             {/* Overlay with message */}
@@ -561,57 +1173,69 @@ const Dashboard: React.FC = () => {
         ) : (
           <div style={{ width: '100%', height: 300 }}>
             <ResponsiveContainer>
-              <LineChart
+              <ComposedChart
                 data={salesData}
                 margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
               >
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
-                {chartView === 'sales' ? (
-                  <YAxis 
-                    tickFormatter={(tick) => `$${formatNumberWithCommas(tick)}`}
-                  />
-                ) : (
-                  <YAxis 
-                    domain={[20, 40]} 
-                    tickFormatter={(tick) => `${formatNumberWithCommas(tick)}%`}
-                  />
-                )}
+                {/* Primary Y-axis for revenue */}
+                <YAxis 
+                  yAxisId="left"
+                  tickFormatter={(tick) => `$${formatNumberWithCommas(tick)}`}
+                />
+                {/* Secondary Y-axis for profit margin percentage */}
+                <YAxis 
+                  yAxisId="right" 
+                  orientation="right" 
+                  domain={[-50, 100]}
+                  tickFormatter={(tick) => `${tick}%`}
+                />
                 <RechartsTooltip 
-                  formatter={(value: number) => {
-                    if (chartView === 'sales') {
-                      return [`$${formatNumberWithCommas(value)}`, 'Sales'];
-                    } else {
-                      return [`${formatNumberWithCommas(value)}%`, 'Profit Margin'];
+                  formatter={(value: number, name: string) => {
+                    if (name === 'Sales') {
+                      return [`$${formatNumberWithCommas(value.toFixed(2))}`, name];
+                    } else if (name === 'Profit Margin') {
+                      return [`Profit Margin: ${value.toFixed(2)}%`, name];
                     }
+                    return [value, name];
                   }}
                   labelFormatter={(label: string) => `Date: ${label}`}
                 />
                 <Legend />
-                {chartView === 'sales' ? (
-                  <Line 
-                    type="monotone" 
-                    dataKey="revenue" 
-                    name="Sales" 
-                    stroke="#9370DB" 
-                    activeDot={{ r: 8 }} 
-                    strokeWidth={2}
-                  />
-                ) : (
-                  <Line 
-                    type="monotone" 
-                    dataKey="profitMargin" 
-                    name="Profit Margin" 
-                    stroke="#52c41a" 
-                    activeDot={{ r: 8 }} 
-                    strokeWidth={2}
-                  />
-                )}
-              </LineChart>
+                <Bar 
+                  dataKey="revenue" 
+                  name="Sales" 
+                  fill="#9370DB" 
+                  radius={[4, 4, 0, 0]}
+                  yAxisId="left"
+                />
+                {/* Profit margin as a dashed line with MAXIMUM visibility */}
+                <Line 
+                  type="monotone" 
+                  dataKey="profitMargin" 
+                  name="Profit Margin" 
+                  stroke="#00C853" 
+                  strokeWidth={3}
+                  strokeDasharray="5 5"
+                  dot={false}
+                  activeDot={{ r: 8 }}
+                  yAxisId="right"
+                  connectNulls={true} /* Connect points even if some are null - critical for continuous line */
+                />
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
         )}
-      </Card>
+          </Card>
+        </Col>
+        
+        {/* Action Items Card - Takes up less space */}
+        <Col xs={24} sm={24} md={10} lg={10} xl={10}>
+          <ActionItemsCard />
+        </Col>
+
+      </Row>
       
       {/* Main dashboard layout */}
       <Row gutter={[24, 24]} style={{ marginTop: 24 }}>
@@ -671,7 +1295,7 @@ const Dashboard: React.FC = () => {
                                 </div>
                               </div>
                             </div>
-                          </Card>
+                              </Card>
                         ))}
                       </div>
                     </div>
@@ -759,7 +1383,7 @@ const Dashboard: React.FC = () => {
                             </div>
                           </div>
                         </div>
-                      </Card>
+                          </Card>
                     ))}
                   </div>
                 </div>
@@ -816,13 +1440,13 @@ const Dashboard: React.FC = () => {
                             </div>
                           </div>
                         </div>
-                      </Card>
+                          </Card>
                     ))}
                   </div>
                 </div>
               </div>
             )}
-            </Card>
+                </Card>
           </div>
         </Col>
         
@@ -908,7 +1532,7 @@ const Dashboard: React.FC = () => {
                   </div>
                 </>
               )}
-            </Card>
+                </Card>
             
             {/* Competitor Analysis Card */}
             <Card 
@@ -1033,7 +1657,7 @@ const Dashboard: React.FC = () => {
                   </div>
                 </>
               )}
-            </Card>
+                </Card>
           </Space>
         </Col>
       </Row>

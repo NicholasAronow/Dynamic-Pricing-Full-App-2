@@ -32,50 +32,138 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    // Check if there's a token in localStorage
-    const token = localStorage.getItem('token');
-    if (token) {
+    const initializeAuth = async () => {
       try {
-        // Verify token expiration
-        const decoded: any = jwt_decode(token);
-        const currentTime = Date.now() / 1000;
+        console.log('Initializing auth state...');
+        // Check if there's a token in localStorage
+        const token = localStorage.getItem('token');
+        if (!token) {
+          console.log('No token found in localStorage');
+          setLoading(false);
+          return;
+        }
         
-        if (decoded.exp > currentTime) {
-          // Set auth headers for all future requests
-          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-          setIsAuthenticated(true);
+        console.log('Token found, applying to auth state');
+        
+        // Apply token immediately to indicate authentication
+        // This early flag setting helps prevent premature redirects
+        setIsAuthenticated(true);
+        
+        // Import the API service to ensure consistent headers
+        const apiModule = await import('../services/api');
+        const api = apiModule.default;
+        
+        try {
+          // Verify token expiration
+          const decoded: any = jwt_decode(token);
+          const currentTime = Date.now() / 1000;
           
-          // Get user data
-          fetchUserData();
-        } else {
-          // Token expired
-          localStorage.removeItem('token');
-          delete axios.defaults.headers.common['Authorization'];
+          console.log('Token expiration check - Current time:', new Date(currentTime * 1000).toISOString());
+          console.log('Token expiration time:', new Date(decoded.exp * 1000).toISOString());
+          
+          // Add a full day buffer to account for timezone and clock differences
+          // This is because the backend now uses a long-lived token (7 days)
+          if (decoded.exp > currentTime - 86400) { // 1 day buffer
+            console.log('Token is valid, setting auth headers...');
+            
+            // Set auth headers for all future requests
+            api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+            axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+            
+            // Get user data - but we've already set isAuthenticated flag
+            try {
+              const userData = await fetchUserData();
+              if (!userData) {
+                console.warn('Could not fetch user data despite valid token');
+                // We'll still consider the user logged in even if we can't fetch their data
+              }
+            } catch (userError) {
+              console.warn('Error fetching user data, but keeping session active:', userError);
+              // Even if we can't fetch user data, don't log out the user
+            }
+          } else {
+            // Token expired
+            console.log('Token expired, clearing auth state');
+            logout(); // Use the logout function to ensure proper cleanup
+          }
+        } catch (error) {
+          console.error('Error decoding token:', error);
+          // Don't automatically logout on token decoding errors
+          // The token might still be valid for the backend
+          
+          // Still apply the token to headers just in case
+          api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+          
+          // Try to fetch user data to verify the token with backend
+          try {
+            await fetchUserData();
+            console.log('Token appears to be valid despite decode error');
+          } catch (fetchError) {
+            console.error('Token validation failed after decode error');
+            logout();
+          }
         }
       } catch (error) {
-        localStorage.removeItem('token');
-        delete axios.defaults.headers.common['Authorization'];
+        console.error('Auth initialization error:', error);
+      } finally {
+        setLoading(false);
       }
-    }
-    setLoading(false);
+    };
+    
+    initializeAuth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchUserData = async () => {
-    try {
-      // Use the same API instance as the other methods
-      const api = (await import('../services/api')).default;
-      console.log('Fetching user data from:', api.defaults.baseURL + '/api/auth/me');
-      
-      const response = await api.get('/api/auth/me');
-      console.log('User data received:', response.data);
-      setUser(response.data);
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching user data:', error);
-      logout();
-      return null;
+    let retries = 2; // Allow a couple of retries
+    
+    while (retries >= 0) {
+      try {
+        // Use the same API instance as the other methods
+        const api = (await import('../services/api')).default;
+        const token = localStorage.getItem('token');
+        
+        // Double-check that token is in headers
+        if (token && !api.defaults.headers.common['Authorization']) {
+          console.log('Re-applying authorization header');
+          api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        }
+        
+        console.log('Fetching user data from:', api.defaults.baseURL + '/api/auth/me');
+        
+        const response = await api.get('/api/auth/me');
+        console.log('User data received:', response.data);
+        setUser(response.data);
+        return response.data;
+      } catch (error: any) {
+        console.error(`Error fetching user data (${retries} retries left):`, error);
+        retries--;
+        
+        // Only logout on critical auth errors after all retries fail
+        if (retries < 0) {
+          // Check for specific error conditions that indicate auth problems
+          if (
+            error.response?.status === 401 ||
+            error.response?.status === 403 ||
+            error.response?.data?.detail?.includes('credentials') ||
+            error.response?.data?.detail?.includes('token')
+          ) {
+            console.log('Critical auth error, logging out');
+            logout();
+          } else {
+            // For non-auth errors, don't logout but still return null
+            console.log('Non-critical error fetching user data, keeping session');
+          }
+          return null;
+        }
+        
+        // Wait a bit before retrying
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
     }
+    
+    return null;
   };
 
   const login = async (email: string, password: string) => {

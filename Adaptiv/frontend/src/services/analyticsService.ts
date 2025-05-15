@@ -62,9 +62,54 @@ export interface PriceElasticityData {
   price: number;
   sales_volume: number;
   revenue: number;
+  isCurrentPrice?: boolean;
+}
+
+export interface ElasticityCalculationData {
+  price_changes_count: number;
+  required_changes: number;
+  has_enough_data: boolean;
+  elasticity: number | null;
+  price_change_data: Array<{
+    date: string;
+    previous_price: number;
+    new_price: number;
+    sales_before: number;
+    sales_after: number;
+    has_sales_data: boolean;
+  }>;
 }
 
 export const analyticsService = {
+  // Market boundary information for current item
+  marketBoundaries: {
+    marketLow: 0,
+    marketHigh: 0
+  },
+  
+  // Get elasticity calculation data for a specific item
+  getElasticityCalculation: async (itemId: number): Promise<ElasticityCalculationData> => {
+    try {
+      const currentUser = authService.getCurrentUser();
+      if (!currentUser) {
+        console.error('User not authenticated');
+        throw new Error('User not authenticated');
+      }
+      
+      const response = await api.get(`item-analytics/elasticity/${itemId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error getting elasticity calculation data:', error);
+      // Return default empty data structure
+      return {
+        price_changes_count: 0,
+        required_changes: 5,
+        has_enough_data: false,
+        elasticity: null,
+        price_change_data: []
+      };
+    }
+  },
   // Get sales data for dashboard
   getSalesAnalytics: async (startDate?: string, endDate?: string): Promise<SalesAnalytics> => {
     try {
@@ -154,6 +199,15 @@ export const analyticsService = {
   getCompetitorData: async (itemId: number): Promise<CompetitorData | null> => {
     try {
       const response = await api.get(`competitor-items/similar-to/${itemId}`);
+      
+      // Store market boundaries for use in other functions
+      if (response.data && response.data.marketStats) {
+        analyticsService.marketBoundaries = {
+          marketLow: response.data.marketStats.low || 0,
+          marketHigh: response.data.marketStats.high || 0
+        };
+      }
+      
       return response.data;
     } catch (error) {
       console.error('Error fetching competitor data:', error);
@@ -169,39 +223,83 @@ export const analyticsService = {
         console.error('User not authenticated');
         throw new Error('User not authenticated');
       }
-
-      // This would call a specialized endpoint in a real implementation
-      // For now, we'll generate simulated data based on price history
-      // Include account_id to ensure we're only getting price history for the current user's items
+      
+      // Fetch elasticity calculation to get the actual elasticity value
+      const elasticityCalc = await analyticsService.getElasticityCalculation(itemId);
+      
+      // Get the base price from elasticity calculation or price history
       const priceHistoryResponse = await api.get(`price-history?item_id=${itemId}&account_id=${currentUser.id}`);
       const priceHistory = priceHistoryResponse.data;
       
-      // Use price history to generate elasticity data points 
-      // In a real system, this would be calculated from actual sales data
-      const basePrice = priceHistory.length > 0 
-        ? priceHistory[0].new_price 
-        : 10.0;
+      // Get the item to find the current price
+      const itemResponse = await api.get(`items/${itemId}?account_id=${currentUser.id}`);
+      const item = itemResponse.data;
+      const currentPrice = item.current_price;
       
-      const maxVariation = 2.0; // Maximum price variation in either direction
-      const numberOfPoints = 7; // Number of data points to generate
+      // Get a reasonable base price from price history or current price
+      const basePrice = priceHistory.length > 0 ? priceHistory[0].new_price : currentPrice || 10.0;
       
-      const step = (maxVariation * 2) / (numberOfPoints - 1);
+      // Cap the base sales volume to a reasonable value (10-1000 units depending on price)
+      // For more expensive items, typical sales volumes are lower
+      const MAX_BASE_VOLUME = 1000;
+      const MAX_REVENUE = 50000; // Cap maximum revenue to prevent unrealistic numbers
+      const baseSalesVolume = Math.min(Math.max(10, 5000 / Math.max(1, basePrice)), MAX_BASE_VOLUME);
+      
+      // Use the calculated elasticity or a default value, with reasonable bounds
+      let elasticity = elasticityCalc.elasticity !== null ? elasticityCalc.elasticity : -1.5;
+      
+      // Bound elasticity to reasonable values (-0.1 to -3.0)
+      // Most real-world price elasticities are between -0.5 and -2.0
+      if (elasticity < -3.0) elasticity = -3.0; // Cap extremely elastic products
+      if (elasticity > -0.1) elasticity = -0.1; // Cap extremely inelastic products
+      
+      // Set a price range centered around current price with a ±100% range
+      const pricePoints = 15; // More points for a smoother curve
+      
+      // Always center around current price with ±100% range (minimum of 0)
+      const minPrice = Math.max(0, currentPrice - currentPrice); // Equivalent to 0 but more explicit
+      const maxPrice = currentPrice + currentPrice; // 2x current price
+      
+      console.log('Using current price centered range for elasticity chart:', minPrice, maxPrice);
       
       const elasticityData: PriceElasticityData[] = [];
       
-      // Generate price elasticity data points
-      for (let i = 0; i < numberOfPoints; i++) {
-        const priceMultiplier = 1 - maxVariation + (step * i);
-        const price = basePrice * priceMultiplier;
+      // Generate a smooth curve of price elasticity data
+      for (let i = 0; i < pricePoints; i++) {
+        // Generate price points from min to max price (evenly distributed)
+        const price = minPrice + (i / (pricePoints - 1)) * (maxPrice - minPrice);
         
-        // Elasticity curve formula (simplified for simulation)
-        // Higher demand at lower prices, with diminishing returns
-        const salesVolume = basePrice / price * (Math.random() * 0.2 + 0.9) * 100;
+        // Calculate sales volume using the elasticity formula with bounded output
+        // Q2 = Q1 * (P2/P1)^elasticity
+        // For example, if elasticity is -1.5:
+        // - 10% price increase → ~15% sales volume decrease
+        // - 10% price decrease → ~15% sales volume increase
+        const priceRatio = price / basePrice; // Calculate the price ratio from absolute prices
+        let salesVolume = baseSalesVolume * Math.pow(priceRatio, elasticity);
+        
+        // Cap the maximum possible sales increase/decrease to prevent unrealistic values
+        // No matter how elastic, volume shouldn't increase/decrease by more than 3x from base
+        const MAX_VOLUME_RATIO = 3.0;
+        if (salesVolume > baseSalesVolume * MAX_VOLUME_RATIO) {
+          salesVolume = baseSalesVolume * MAX_VOLUME_RATIO;
+        }
+        
+        // Ensure sales volume is positive and not unrealistically large
+        const MAX_POSSIBLE_VOLUME = 10000; // Cap to prevent unrealistic numbers
+        const adjustedSalesVolume = Math.min(Math.max(salesVolume, 0), MAX_POSSIBLE_VOLUME);
+        
+        // Calculate revenue as price × sales volume and cap it to prevent unrealistic values
+        let revenue = price * adjustedSalesVolume;
+        revenue = Math.min(revenue, MAX_REVENUE); // Cap revenue to prevent wildly unrealistic values
+        
+        // Check if this price point is close to the current price (within 1%)
+        const isCurrentPrice = Math.abs(price - currentPrice) / currentPrice < 0.01;
         
         elasticityData.push({
           price,
-          sales_volume: salesVolume,
-          revenue: price * salesVolume
+          sales_volume: adjustedSalesVolume,
+          revenue: revenue,
+          isCurrentPrice: isCurrentPrice
         });
       }
       

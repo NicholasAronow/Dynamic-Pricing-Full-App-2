@@ -16,6 +16,8 @@ from competitor_items import competitor_items_router
 from orders import orders_router
 from dashboard import dashboard_router
 from item_analytics import item_analytics_router
+from cogs import cogs_router
+from action_items import action_items_router
 
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
@@ -48,6 +50,8 @@ app.include_router(competitor_items_router, prefix="/api/competitor-items", tags
 app.include_router(orders_router, prefix="/api/orders", tags=["Orders"])
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(item_analytics_router, prefix="/api/item-analytics", tags=["Item Analytics"])
+app.include_router(cogs_router, prefix="/api/cogs", tags=["COGS"])
+app.include_router(action_items_router, prefix="/api/action-items", tags=["Action Items"])
 
 @app.get("/")
 async def root():
