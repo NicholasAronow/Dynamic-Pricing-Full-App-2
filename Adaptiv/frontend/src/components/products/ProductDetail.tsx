@@ -1202,26 +1202,42 @@ const ProductDetail: React.FC = () => {
                 <Divider>Top Competitors</Divider>
                 
                 <Table
-                  dataSource={competitorData.map((competitor, index) => {
-                    // Get the competitor name (handle both API response formats)
-                    const competitorName = 'name' in competitor 
-                      ? (competitor.name as string) 
-                      : competitor.competitor_name;
+                  dataSource={(() => {
+                    // Create a map to store unique competitors by name
+                    const competitorMap = new Map();
                     
-                    // Calculate price difference
-                    const difference = competitor.price - (product?.current_price || 0);
-                    const formattedDiff = difference > 0 ? 
-                      `+$${Math.abs(difference).toFixed(2)}` : 
-                      `-$${Math.abs(difference).toFixed(2)}`;
+                    // Process each competitor, keeping only one entry per competitor
+                    competitorData.forEach((competitor) => {
+                      // Get the competitor name (handle both API response formats)
+                      const competitorName = 'name' in competitor 
+                        ? (competitor.name as string) 
+                        : competitor.competitor_name;
+                      
+                      // Skip if we already have this competitor (first one wins)
+                      if (competitorMap.has(competitorName)) {
+                        return;
+                      }
+                      
+                      // Calculate price difference
+                      const difference = competitor.price - (product?.current_price || 0);
+                      const formattedDiff = difference > 0 ? 
+                        `+$${Math.abs(difference).toFixed(2)}` : 
+                        `-$${Math.abs(difference).toFixed(2)}`;
+                      
+                      // Add to our map
+                      competitorMap.set(competitorName, {
+                        key: competitorName,
+                        name: competitorName,
+                        logo: '☕', // Simple coffee icon for all competitors
+                        price: competitor.price,
+                        difference: formattedDiff,
+                        item_name: competitor.item_name // Include item name for reference
+                      });
+                    });
                     
-                    return {
-                      key: index,
-                      name: competitorName,
-                      logo: '☕', // Simple coffee icon for all competitors
-                      price: competitor.price,
-                      difference: formattedDiff
-                    };
-                  }).slice(0, 5)} // Show top 5 competitors
+                    // Convert map to array and take top 5
+                    return Array.from(competitorMap.values()).slice(0, 5);
+                  })()}
                   pagination={false}
                   size="small"
                   columns={[
