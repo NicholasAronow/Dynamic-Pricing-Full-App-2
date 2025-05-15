@@ -332,23 +332,77 @@ def get_item_hourly_sales(
         if 'sqlite' in database_type:
             # For SQLite
             hour_group = func.strftime('%H', models.Order.order_date)
+        elif 'postgresql' in database_type:
+            # For PostgreSQL - explicitly cast to timestamp
+            # This ensures consistent behavior regardless of timezone settings
+            hour_group = func.extract('hour', func.cast(models.Order.order_date, db.Text))
         else:
-            # For PostgreSQL or others 
-            hour_group = func.date_part('hour', models.Order.order_date)
+            # For any other database type
+            hour_group = func.extract('hour', models.Order.order_date)
         
-        # Query for hourly sales with additional debug info
-        hourly_sales = db.query(
-            hour_group.label('hour'),
-            func.sum(models.OrderItem.quantity).label('units'),
-            func.sum(models.OrderItem.quantity * models.OrderItem.unit_price).label('sales')
-        ).join(
-            models.Order,
-            models.OrderItem.order_id == models.Order.id
-        ).filter(
-            models.OrderItem.item_id == item_id,
-            models.Order.order_date >= start_date,
-            models.Order.order_date <= end_date
-        ).group_by(hour_group).order_by(hour_group).all()
+        # For PostgreSQL, sometimes the timezone handling can cause issues with date filtering
+        # Let's add additional logging and use a different approach for PostgreSQL
+        if 'postgresql' in database_type:
+            logger.info("Using PostgreSQL-specific approach for hourly data")
+            
+            # First, get all matching orders with their order items for this date range
+            # This ensures we have the right data regardless of time zone issues
+            order_data = db.query(
+                models.Order.id,
+                models.Order.order_date,
+                models.OrderItem.quantity,
+                models.OrderItem.unit_price
+            ).join(
+                models.OrderItem,
+                models.Order.id == models.OrderItem.order_id
+            ).filter(
+                models.OrderItem.item_id == item_id,
+                models.Order.order_date >= start_date,
+                models.Order.order_date <= end_date
+            ).all()
+            
+            logger.info(f"Raw query found {len(order_data)} order items")
+            
+            # Process the data in Python to ensure correct hour binning
+            hourly_totals = {}
+            for order in order_data:
+                # Extract hour from the datetime
+                hour = order.order_date.hour
+                hour_str = f"{hour:02d}"
+                
+                # Initialize if not exists
+                if hour_str not in hourly_totals:
+                    hourly_totals[hour_str] = {'units': 0, 'sales': 0.0}
+                
+                # Add data
+                hourly_totals[hour_str]['units'] += order.quantity
+                hourly_totals[hour_str]['sales'] += order.quantity * order.unit_price
+            
+            # Convert to the expected format
+            hourly_sales = []
+            for hour, data in sorted(hourly_totals.items()):
+                hourly_sales.append(type('HourData', (), {
+                    'hour': hour,
+                    'units': data['units'],
+                    'sales': data['sales']
+                }))
+            
+            logger.info(f"Processed {len(hourly_sales)} hourly data points")
+        else:
+            # For SQLite and other DBs, use the original query approach
+            logger.info(f"Using standard DB approach for {database_type}")
+            hourly_sales = db.query(
+                hour_group.label('hour'),
+                func.sum(models.OrderItem.quantity).label('units'),
+                func.sum(models.OrderItem.quantity * models.OrderItem.unit_price).label('sales')
+            ).join(
+                models.Order,
+                models.OrderItem.order_id == models.Order.id
+            ).filter(
+                models.OrderItem.item_id == item_id,
+                models.Order.order_date >= start_date,
+                models.Order.order_date <= end_date
+            ).group_by(hour_group).order_by(hour_group).all()
         
         # Format the results
         result = []
