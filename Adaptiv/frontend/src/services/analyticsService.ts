@@ -348,10 +348,20 @@ export const analyticsService = {
         params.date = date;
       }
       
+      console.log(`Fetching hourly sales data for item ${itemId} on date ${date || 'today'}`);
       const response = await api.get(`item-analytics/hourly-sales/${itemId}`, { params });
+      
+      // Log what we got from the API for debugging
+      if (response.data && Array.isArray(response.data)) {
+        const nonZeroEntries = response.data.filter(item => (item.sales > 0 || item.units > 0));
+        console.log(`API returned ${response.data.length} hourly data points, ${nonZeroEntries.length} with non-zero values`);
+      }
+      
+      // Always return exactly what the API gives us, no fallbacks
       return response.data;
     } catch (error) {
       console.error('Error fetching item hourly sales data:', error);
+      // Just return an empty array on error, no mock data
       return [];
     }
   },

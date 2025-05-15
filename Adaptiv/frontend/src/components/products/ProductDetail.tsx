@@ -586,7 +586,8 @@ const ProductDetail: React.FC = () => {
             setIntradayData(hourlySales);
           } catch (err) {
             console.error('Failed to fetch hourly data, falling back to mock data', err);
-            setIntradayData(generateIntradayData(productId || '1', selectedDate));
+            // Don't use mock data
+            setIntradayData([]);
           }
           
           // Fetch elasticity calculation data from backend
@@ -661,7 +662,8 @@ const ProductDetail: React.FC = () => {
           }
           
           // Generate mock intraday data
-          setIntradayData(generateIntradayData(productId || '1', selectedDate));
+          // Don't use mock data
+          setIntradayData([]);
           
           // Generate mock elasticity data
           setElasticityData(generateElasticityData(productId || '1'));
@@ -717,12 +719,12 @@ const ProductDetail: React.FC = () => {
         const hourlyData = await analyticsService.getItemHourlySales(numericProductId, formattedDate);
         console.log('Fetched hourly data:', hourlyData);
         
-        // Set the data
+        // Set the data - never fallback to mock data
         setIntradayData(hourlyData);
       } catch (error) {
         console.error('Error fetching hourly data:', error);
-        // Fallback to mock data if API fails
-        setIntradayData(generateIntradayData(productId || '1', date));
+        // Set empty array on error, no fallbacks
+        setIntradayData([]);
       }
     }
   };
