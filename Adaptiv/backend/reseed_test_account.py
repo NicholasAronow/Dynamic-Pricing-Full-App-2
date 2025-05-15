@@ -231,15 +231,16 @@ def create_price_history_with_orders(db: Session, user_id: int):
                 quantity = max(1, quantity)  # Ensure at least 1 unit
                 
                 # Create order item
-                subtotal = round(quantity * price, 2)
                 order_item = OrderItem(
                     order_id=order.id,
                     item_id=item.id,
                     quantity=quantity,
-                    unit_price=price,
-                    subtotal=subtotal
+                    unit_price=price
                 )
                 db.add(order_item)
+                
+                # Subtotal is automatically calculated
+                subtotal = order_item.subtotal
                 
                 # Update order total
                 order.total_amount = subtotal
