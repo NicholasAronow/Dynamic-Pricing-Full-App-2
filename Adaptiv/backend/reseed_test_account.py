@@ -297,9 +297,9 @@ def create_cogs_data(db: Session, user_id: int):
         # Create COGS record
         cogs = COGS(
             user_id=user_id,
-            week_starting=week_start.date(),
-            cogs_value=cogs_value,
-            week_number=week_number
+            week_start_date=week_start,
+            week_end_date=week_end,
+            amount=cogs_value
         )
         db.add(cogs)
         
