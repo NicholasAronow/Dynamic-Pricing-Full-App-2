@@ -19,9 +19,17 @@ import logging
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_, desc, delete
 from sqlalchemy.sql import text
-from models import Base, Item, PriceHistory, User, Order, OrderItem, COGS
+from models import Base, Item, PriceHistory, User, Order, OrderItem, COGS, ActionItem
 from database import get_db
-from dateutil.relativedelta import relativedelta
+from action_items import seed_default_action_items
+
+# Adding this helper function to replace relativedelta functionality
+def add_months(sourcedate, months):
+    month = sourcedate.month - 1 + months
+    year = sourcedate.year + month // 12
+    month = month % 12 + 1
+    day = min(sourcedate.day, [31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month-1])
+    return sourcedate.replace(year=year, month=month, day=day)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -51,7 +59,7 @@ def get_test_user(db: Session):
     return test_user
 
 def clear_existing_data(db: Session, user_id: int):
-    """Clear existing orders, price history, and COGS data for this user"""
+    """Clear existing orders, price history, COGS data, and action items for this user"""
     logger.info(f"Clearing existing data for user ID {user_id}")
     
     # Get all items for this user to identify related orders
@@ -95,6 +103,13 @@ def clear_existing_data(db: Session, user_id: int):
     ).delete(synchronize_session=False)
     
     logger.info(f"Deleted {cogs_deleted} COGS records")
+    
+    # Delete existing action items
+    action_items_deleted = db.query(ActionItem).filter(
+        ActionItem.user_id == user_id
+    ).delete(synchronize_session=False)
+    
+    logger.info(f"Deleted {action_items_deleted} action items")
     
     # Commit the deletions
     db.commit()
@@ -295,6 +310,56 @@ def create_cogs_data(db: Session, user_id: int):
     db.commit()
     logger.info(f"Successfully created {week_number-1} weeks of COGS data")
 
+def create_action_items(db: Session, user_id: int):
+    """Create action items (to-dos) for the test user"""
+    logger.info(f"Creating action items for user {user_id}")
+    
+    # First, use the built-in seed function to add default action items
+    seed_default_action_items(user_id, db)
+    
+    # Add some additional action items specific to the test account
+    additional_items = [
+        ActionItem(
+            user_id=user_id,
+            title="Review price elasticity on bestsellers",
+            description="Analyze price elasticity for your top 5 bestselling items to optimize pricing",
+            priority="high",
+            action_type="analysis",
+            status="pending"
+        ),
+        ActionItem(
+            user_id=user_id,
+            title="Set up competitor price alerts",
+            description="Configure alerts for when competitor prices change significantly",
+            priority="medium",
+            action_type="configuration",
+            status="pending"
+        ),
+        ActionItem(
+            user_id=user_id,
+            title="Update seasonal menu items",
+            description="Add new seasonal items to your menu as the season changes",
+            priority="medium",
+            action_type="data_entry",
+            status="pending"
+        ),
+        ActionItem(
+            user_id=user_id,
+            title="Analyze weekly profit margins",
+            description="Review the profit margin trends from the last 4 weeks and identify improvement opportunities",
+            priority="medium",
+            action_type="analysis",
+            status="in_progress"
+        )
+    ]
+    
+    for item in additional_items:
+        db.add(item)
+    
+    db.commit()
+    logger.info(f"Successfully created action items for user {user_id}")
+
+
 def main():
     """Main function to reseed the test account"""
     logger.info(f"Starting reseed process for {TARGET_EMAIL}")
@@ -315,6 +380,9 @@ def main():
         
         # Create COGS data
         create_cogs_data(db, user_id)
+        
+        # Create action items (to-dos)
+        create_action_items(db, user_id)
         
         logger.info(f"Reseeding completed successfully for {TARGET_EMAIL}")
     except Exception as e:
