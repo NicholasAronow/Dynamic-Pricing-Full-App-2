@@ -36,14 +36,17 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # Constants for price change generation
-NUM_PRICE_CHANGES_PER_ITEM = 8  # Increased from 7 to ensure enough data for elasticity
+NUM_PRICE_CHANGES_PER_ITEM = 12  # Increased to cover a full year (approximately monthly)
 MAX_PRICE_CHANGE_PERCENT = 0.20  # Maximum price change of 20% up or down
 BASE_ELASTICITY = -1.5  # Base elasticity for simulation (negative as price increases lower demand)
 ELASTICITY_VARIANCE = 0.7  # Increased variance to create more realistic patterns
-DAYS_BETWEEN_PRICE_CHANGES = 28  # Approximately monthly changes
+DAYS_BETWEEN_PRICE_CHANGES = 30  # Monthly changes
 ORDER_VARIANCE_PCT = 0.3  # Variance in order quantities (30% up or down)
 MIN_ORDERS_PER_PERIOD = 12  # Minimum number of orders in each price period
 MAX_ORDERS_PER_PERIOD = 25  # Maximum number of orders in each price period
+# Additional constants for daily orders
+DAILY_ORDERS_PER_MONTH = 90  # Approximately 3 orders per day
+RECENT_DAYS_WITH_MORE_ORDERS = 7  # Last 7 days will have more orders
 
 # Target email
 TARGET_EMAIL = "testprofessional@test.com"
@@ -116,11 +119,20 @@ def clear_existing_data(db: Session, user_id: int):
     logger.info("Successfully cleared existing data")
 
 def create_price_history_with_orders(db: Session, user_id: int):
-    """Create comprehensive price history with corresponding orders"""
+    """Create comprehensive price history with corresponding orders for a full year including today"""
     logger.info(f"Creating new price history and orders for user {user_id}")
     
     # Get all items for this user
     items = db.query(Item).filter(Item.user_id == user_id).all()
+    
+    # Define the date range - exactly 1 year back from today including today
+    end_date = datetime.datetime.now()
+    start_date = end_date - datetime.timedelta(days=365)
+    
+    logger.info(f"Creating data from {start_date.date()} to {end_date.date()}, covering a full year")
+    
+    # Keeping track of all orders created to ensure even distribution
+    all_item_orders = []
     
     # For each item, create a series of price changes and corresponding orders
     for item in items:
@@ -131,11 +143,6 @@ def create_price_history_with_orders(db: Session, user_id: int):
         # Start from current price
         current_price = item.current_price
         
-        # Create orders and price changes going back approximately 8 months
-        # Most recent change was 7 days ago
-        change_date = datetime.datetime.now() - datetime.timedelta(days=7)
-        start_date = change_date - datetime.timedelta(days=DAYS_BETWEEN_PRICE_CHANGES * NUM_PRICE_CHANGES_PER_ITEM)
-        
         # Price at the beginning of our history (work backwards from current)
         # Create some randomness by starting with a different price
         initial_price = current_price * (1 + random.uniform(-0.15, 0.15))
@@ -144,7 +151,7 @@ def create_price_history_with_orders(db: Session, user_id: int):
         # Track price changes
         price_changes = []
         
-        # Create the sequence of price changes
+        # Create the sequence of monthly price changes for the full year
         price = initial_price
         for i in range(NUM_PRICE_CHANGES_PER_ITEM):
             change_pct = random.uniform(-MAX_PRICE_CHANGE_PERCENT, MAX_PRICE_CHANGE_PERCENT)
@@ -154,8 +161,13 @@ def create_price_history_with_orders(db: Session, user_id: int):
             if i == NUM_PRICE_CHANGES_PER_ITEM - 1:
                 new_price = current_price
             
-            # Calculate change date
-            change_date = start_date + datetime.timedelta(days=DAYS_BETWEEN_PRICE_CHANGES * i)
+            # Calculate change date - distribute evenly over the year
+            month_offset = i * 30  # Approx 30 days per month
+            change_date = start_date + datetime.timedelta(days=month_offset)
+            
+            # Ensure we don't go beyond today
+            if change_date > end_date:
+                change_date = end_date - datetime.timedelta(days=random.randint(1, 7))
             
             price_changes.append({
                 "date": change_date,
@@ -179,54 +191,86 @@ def create_price_history_with_orders(db: Session, user_id: int):
                 new_price=change["new_price"],
                 change_reason=random.choice([
                     "Cost increase", 
-                    "Seasonal adjustment", 
-                    "Competitive pricing", 
-                    "Promotion", 
-                    "Demand optimization"
+                    "Competitive adjustment", 
+                    "Seasonal adjustment",
+                    "Demand-based pricing",
+                    "Promotion"
                 ]),
                 changed_at=change["date"]
             )
-            
             db.add(price_history)
             
-            # Create orders for the period between this change and the previous one
-            start = price_changes[i-1]["date"]
-            end = change["date"]
-            price = price_changes[i-1]["new_price"]  # Price during this period
+            # Create orders for the period after this price change
+            # Find the date range for this price period
+            start_period = change["date"]
             
-            # Number of orders during this period
+            # End period is either the next price change or today
+            end_period = None
+            if i < len(price_changes) - 1:
+                end_period = price_changes[i+1]["date"]
+            else:
+                end_period = end_date
+            
+            # Duration of this price period in days
+            period_days = (end_period - start_period).days
+            if period_days <= 0:
+                continue
+                
+            # Create a number of orders during this period
             num_orders = random.randint(MIN_ORDERS_PER_PERIOD, MAX_ORDERS_PER_PERIOD)
             
-            # Base quantity affected by elasticity
-            # Calculate a base quantity that seems reasonable for the item
-            base_quantity = int(300 / price)  # Higher priced items sell fewer units
-            base_quantity = max(5, min(50, base_quantity))  # Between 5 and 50 units
-            
-            # Calculate actual quantity based on elasticity and price change (if not first period)
-            if i > 1:
-                prev_price = price_changes[i-2]["new_price"]
-                price_ratio = price / prev_price
-                # Apply elasticity formula: quantity_change = price_change^elasticity
-                quantity_modifier = price_ratio ** item_elasticity
-                base_quantity = int(base_quantity * quantity_modifier)
+            # Expected quantity based on elasticity and price change
+            if i > 0:
+                # Calculate percentage change in price
+                prev_price = price_changes[i-1]["new_price"]
+                current_price = change["new_price"]
+                price_pct_change = (current_price - prev_price) / prev_price
+                
+                # Apply elasticity to determine quantity change
+                # (elasticity is negative, so price increase reduces quantity)
+                qty_pct_change = price_pct_change * item_elasticity
+                
+                # Base quantity with randomness
+                base_quantity = random.randint(5, 20) * (1 + qty_pct_change)
+            else:
+                # Base quantity for first price period
+                base_quantity = random.randint(5, 20)
+                
+            # Ensure base quantity is positive
+            base_quantity = max(1, base_quantity)
             
             # Create orders spread throughout the period
-            period_days = (end - start).days
             for j in range(num_orders):
-                # Random date within the period
+                # Randomly select a date within this period
                 days_offset = random.randint(0, period_days)
-                order_date = start + datetime.timedelta(days=days_offset)
+                order_date = start_period + datetime.timedelta(days=days_offset)
                 
-                # Create order
-                order = Order(
-                    user_id=user_id,
-                    order_date=order_date,
-                    total_amount=0  # Will update after adding items
-                )
-                db.add(order)
-                db.flush()  # To get the order ID
+                # Track all orders created
+                all_item_orders.append({
+                    "item_id": item.id,
+                    "date": order_date,
+                    "price": change["new_price"],
+                    "base_quantity": base_quantity
+                })
                 
-                # Add variance to quantity
+                # Create a new order or find an existing one on this date
+                existing_order = db.query(Order).filter(
+                    Order.user_id == user_id,
+                    func.date(Order.order_date) == func.date(order_date)
+                ).first()
+                
+                if existing_order:
+                    order = existing_order
+                else:
+                    order = Order(
+                        user_id=user_id,
+                        order_date=order_date,
+                        total_amount=0.0
+                    )
+                    db.add(order)
+                    db.flush()
+                
+                # Apply some randomness to the quantity
                 quantity = int(base_quantity * (1 + random.uniform(-ORDER_VARIANCE_PCT, ORDER_VARIANCE_PCT)))
                 quantity = max(1, quantity)  # Ensure at least 1 unit
                 
@@ -235,7 +279,7 @@ def create_price_history_with_orders(db: Session, user_id: int):
                     order_id=order.id,
                     item_id=item.id,
                     quantity=quantity,
-                    unit_price=price
+                    unit_price=change["new_price"]
                 )
                 db.add(order_item)
                 
@@ -244,6 +288,68 @@ def create_price_history_with_orders(db: Session, user_id: int):
                 
                 # Update order total
                 order.total_amount = subtotal
+    
+    # Now ensure we have orders for EVERY day in the last week
+    # This is crucial to make the dashboard show recent data
+    logger.info("Ensuring every day in the last week has orders...")
+    
+    # Get the last 7 days
+    today = end_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    last_week_dates = [today - datetime.timedelta(days=i) for i in range(7)]
+    
+    # Check which days have orders
+    for day in last_week_dates:
+        day_start = day
+        day_end = day + datetime.timedelta(days=1)
+        
+        # Check if we have orders for this day
+        existing_orders = db.query(func.count(Order.id)).filter(
+            Order.user_id == user_id,
+            Order.order_date >= day_start,
+            Order.order_date < day_end
+        ).scalar()
+        
+        # If no orders, create some
+        if existing_orders < 3:  # Ensure at least 3 orders per day
+            logger.info(f"Adding orders for {day.date()} which had {existing_orders} orders")
+            
+            # Create 3-5 orders for this day
+            for _ in range(random.randint(3, 5)):
+                # Random time during the day
+                hour = random.randint(8, 21)  # Between 8am and 9pm
+                minute = random.randint(0, 59)
+                order_time = day.replace(hour=hour, minute=minute)
+                
+                # Create a new order
+                order = Order(
+                    user_id=user_id,
+                    order_date=order_time,
+                    total_amount=0.0
+                )
+                db.add(order)
+                db.flush()
+                
+                # Add 1-3 random items to this order
+                num_items = random.randint(1, 3)
+                random_items = random.sample(items, min(num_items, len(items)))
+                
+                order_total = 0.0
+                for item in random_items:
+                    quantity = random.randint(1, 3)
+                    
+                    order_item = OrderItem(
+                        order_id=order.id,
+                        item_id=item.id,
+                        quantity=quantity,
+                        unit_price=item.current_price
+                    )
+                    db.add(order_item)
+                    
+                    # Add to order total
+                    order_total += order_item.subtotal
+                
+                # Update order total
+                order.total_amount = order_total
     
     # Commit all changes
     db.commit()
