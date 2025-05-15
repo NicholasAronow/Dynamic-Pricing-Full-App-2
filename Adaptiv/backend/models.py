@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, DateTime, Text, Float, Table
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, DateTime, Text, Float, Table, Enum
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -114,3 +114,34 @@ class OrderItem(Base):
     @property
     def subtotal(self):
         return self.quantity * self.unit_price
+
+class COGS(Base):
+    __tablename__ = "cogs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    week_start_date = Column(DateTime(timezone=True), index=True)
+    week_end_date = Column(DateTime(timezone=True), index=True)
+    amount = Column(Float)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationship to User
+    user = relationship("User", backref="cogs_data")
+
+class ActionItem(Base):
+    __tablename__ = "action_items"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    title = Column(String, index=True)
+    description = Column(Text, nullable=True)
+    priority = Column(Enum("low", "medium", "high", name="priority_enum"), default="medium")
+    status = Column(Enum("pending", "in_progress", "completed", name="status_enum"), default="pending")
+    action_type = Column(Enum("integration", "data_entry", "analysis", "configuration", "other", name="action_type_enum"), default="other")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Relationship to User
+    user = relationship("User", backref="action_items")

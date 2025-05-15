@@ -62,6 +62,7 @@ export const api = axios.create({
 // Request interceptor: (1) fix URL duplication, (2) add auth token
 api.interceptors.request.use(
   config => {
+    // Fix URL path issues
     if (config.url) {
       // Remove any leading slash to avoid double slashes
       if (config.url.startsWith('/')) {
@@ -73,10 +74,27 @@ api.interceptors.request.use(
       }
     }
 
+    // CRITICAL: Always check for token and apply it on every request
+    // We do this even if the header might already be set elsewhere
+    // This guarantees the token is included after page refresh
     const token = localStorage.getItem('token');
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+      // Apply authorization header in a simpler way to avoid TypeScript errors
+      // Directly set the header without conditional logic
+      if (typeof config.headers === 'object') {
+        // Set header using bracket notation to avoid TypeScript complaints
+        config.headers['Authorization'] = `Bearer ${token}`;
+      }
+      
+      // Also ensure it's set on the axios instance for future requests
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      
+      // Log token presence for debugging (not the actual token value)
+      console.log(`Auth token applied to ${config.url || 'request'}`);
+    } else {
+      console.log(`No auth token available for ${config.url || 'request'}`);
     }
+    
     return config;
   },
   error => Promise.reject(error)
@@ -86,10 +104,32 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   response => response,
   error => {
-    // Handle unauthorized errors (token expired, etc.)
+    // Only log the error, but don't take any action that could disrupt the user session
+    console.log('API error response:', error.message);
+    
+    // Handle unauthorized errors (token expired, etc.) but ONLY for authentication endpoints
     if (error.response && error.response.status === 401) {
-      localStorage.removeItem('token');
-      window.location.href = '/login';
+      console.log('Received 401 error, path:', error.config.url);
+      
+      // ONLY handle auth errors for explicit auth endpoints
+      const requestUrl = error.config.url || '';
+      const isAuthEndpoint = requestUrl.includes('/auth/token') || 
+                           requestUrl.includes('/login') ||
+                           (requestUrl.includes('/me') && error.response.data?.detail?.includes('credentials'));
+      
+      if (isAuthEndpoint) {
+        console.log('Authentication endpoint error, clearing invalid token');
+        localStorage.removeItem('token');
+        
+        // Only redirect if we're not already on the login page to avoid redirect loops
+        if (!window.location.pathname.includes('/login')) {
+          console.log('Redirecting to login due to auth endpoint error');
+          window.location.href = '/login';
+        }
+      } else {
+        // For all other 401 errors, just log but don't disrupt the user session
+        console.log('Non-auth endpoint 401 error, not disrupting session');
+      }
     }
     return Promise.reject(error);
   }

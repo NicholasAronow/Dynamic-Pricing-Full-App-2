@@ -149,6 +149,45 @@ const PriceRecommendations: React.FC = () => {
     setEditPrice(null);
   };
 
+  // Calculate estimated impact of applying price recommendation
+  const calculateImpact = (record: PriceRecommendation) => {
+    if (!record.recommendedPrice || record.recommendedPrice === record.currentPrice) {
+      return { projectedQuantity: record.quantity, projectedRevenue: record.revenue, revenueDiff: 0, percentChange: 0, estimatedNewMargin: record.profitMargin };
+    }
+    
+    const percentChange = ((record.recommendedPrice - record.currentPrice) / record.currentPrice) * 100;
+    const elasticity = parseFloat(record.elasticity);
+    const quantityChange = -percentChange * elasticity / 100; // Elasticity formula
+    const projectedQuantity = record.quantity * (1 + quantityChange);
+    const projectedRevenue = projectedQuantity * record.recommendedPrice;
+    const revenueDiff = projectedRevenue - record.revenue;
+    const revenueChangePercent = (revenueDiff / record.revenue) * 100;
+    
+    // Calculate estimated new margin if price changes
+    let estimatedNewMargin = record.profitMargin;
+    if (percentChange > 0 && record.profitMargin) {
+      // Price increase typically improves margins, unless quantity drops too much
+      const marginalEffect = 1 + (percentChange / 100) * (1 - elasticity);
+      estimatedNewMargin = record.profitMargin * marginalEffect;
+      // Cap at reasonable maximum
+      estimatedNewMargin = Math.min(estimatedNewMargin, 0.7);
+    } else if (percentChange < 0 && record.profitMargin) {
+      // Price decrease typically reduces margins, but might be offset by volume
+      const marginalEffect = 1 + (percentChange / 100) * (1 + elasticity / 2);
+      estimatedNewMargin = record.profitMargin * marginalEffect;
+      // Ensure we don't go below 0
+      estimatedNewMargin = Math.max(estimatedNewMargin, 0);
+    }
+    
+    return { 
+      projectedQuantity,
+      projectedRevenue,
+      revenueDiff,
+      revenueChangePercent,
+      estimatedNewMargin
+    };
+  };
+
   // Save edited price
   const saveEditing = async (record: PriceRecommendation) => {
     if (editPrice !== null) {
@@ -163,6 +202,22 @@ const PriceRecommendations: React.FC = () => {
       const revenueDiff = projectedRevenue - record.revenue;
       const revenueChangePercent = Math.round((revenueDiff / record.revenue) * 100);
       
+      // Calculate the estimated new margin
+      let estimatedNewMargin = record.profitMargin;
+      if (percentChange > 0 && record.profitMargin) {
+        // Price increase typically improves margins, unless quantity drops too much
+        const marginalEffect = 1 + (percentChange / 100) * (1 - demandElasticity);
+        estimatedNewMargin = record.profitMargin * marginalEffect;
+        // Cap at reasonable maximum
+        estimatedNewMargin = Math.min(estimatedNewMargin, 0.7);
+      } else if (percentChange < 0 && record.profitMargin) {
+        // Price decrease typically reduces margins, but might be offset by volume
+        const marginalEffect = 1 + (percentChange / 100) * (1 + demandElasticity / 2);
+        estimatedNewMargin = record.profitMargin * marginalEffect;
+        // Ensure we don't go below 0
+        estimatedNewMargin = Math.max(estimatedNewMargin, 0);
+      }
+      
       // Apply the price change using the service
       try {
         const success = await pricingService.applyRecommendation(record.id, editPrice);
@@ -176,7 +231,8 @@ const PriceRecommendations: React.FC = () => {
                 recommendedPrice: editPrice,
                 percentChange,
                 projectedRevenue,
-                revenueChangePercent
+                revenueChangePercent,
+                profitMargin: estimatedNewMargin // Update with the newly calculated margin
               };
             }
             return item;
@@ -293,6 +349,7 @@ const PriceRecommendations: React.FC = () => {
       title: 'Last Price Change',
       key: 'priceChange',
       sorter: (a: any, b: any) => {
+        // Always sort by the size of the price change (largest change first)
         const changeA = Math.abs(a.currentPrice - a.previousPrice);
         const changeB = Math.abs(b.currentPrice - b.previousPrice);
         return changeB - changeA; // Sort by change size descending by default
@@ -301,7 +358,41 @@ const PriceRecommendations: React.FC = () => {
       render: (text: string, record: any) => {
         const currentPrice = record.currentPrice || 0;
         const previousPrice = record.previousPrice;
-        const isPriceNeverChanged = previousPrice === 0 || previousPrice === undefined;
+        // More robust check for price changes - consider a price changed if it's different from current by more than 1 cent
+        const isPriceNeverChanged = previousPrice === undefined || 
+                                  Math.abs(currentPrice - previousPrice) < 0.01;
+        const lastChangeDate = record.lastPriceChangeDate ? new Date(record.lastPriceChangeDate) : null;
+        
+        // Format date to a readable string if available
+        const formatDate = (date: Date | null) => {
+          if (!date) return null;
+          
+          // Check if date is from today
+          const today = new Date();
+          const isToday = date.getDate() === today.getDate() &&
+                          date.getMonth() === today.getMonth() &&
+                          date.getFullYear() === today.getFullYear();
+                          
+          // Check if date is from yesterday
+          const yesterday = new Date(today);
+          yesterday.setDate(yesterday.getDate() - 1);
+          const isYesterday = date.getDate() === yesterday.getDate() &&
+                              date.getMonth() === yesterday.getMonth() &&
+                              date.getFullYear() === yesterday.getFullYear();
+          
+          if (isToday) {
+            return 'Today';
+          } else if (isYesterday) {
+            return 'Yesterday';
+          } else {
+            // Default date format: May 14, 2025
+            return date.toLocaleDateString('en-US', { 
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric'
+            });
+          }
+        };
         
         // If price has never been changed, display a special message
         if (isPriceNeverChanged) {
@@ -338,15 +429,47 @@ const PriceRecommendations: React.FC = () => {
                 {priceIncreased ? '+' : '-'}${formatNumberWithCommas(Number(changeAmount))} ({formatNumberWithCommas(changePercent)}%)
               </Text>
             </div>
-            <Text type="secondary" style={{ fontSize: '0.85em' }}>
-              <InfoCircleOutlined style={{ marginRight: 4 }} />
-              {record.optimizationReason}
-            </Text>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85em' }}>
+              <Text type="secondary">
+                <InfoCircleOutlined style={{ marginRight: 4 }} />
+                {record.optimizationReason}
+              </Text>
+              {lastChangeDate && (
+                <Text type="secondary" style={{ marginLeft: 8 }}>
+                  {formatDate(lastChangeDate)}
+                </Text>
+              )}
+            </div>
           </Space>
         );
       },
     },
 
+    {
+      title: (
+        <Tooltip title="Estimated margin based on revenue contribution and product category. This is an approximation due to the nature of COGS data for independent retailers.">
+          <span>
+            Estimated Margin <InfoCircleOutlined style={{ fontSize: '12px', color: '#9370DB' }} />
+          </span>
+        </Tooltip>
+      ),
+      key: 'margin',
+      dataIndex: 'profitMargin',
+      sorter: (a, b) => (a.profitMargin || 0) - (b.profitMargin || 0),
+      sortDirections: ['descend', 'ascend'] as TableColumnType<any>['sortDirections'],
+      render: (margin: number, record: any) => {
+        // Convert decimal margin to percentage and ensure it's a number
+        const marginPercent = typeof margin === 'number' ? margin * 100 : 0;
+        const marginColor = marginPercent >= 30 ? '#3f8600' : 
+                           marginPercent >= 15 ? '#faad14' : '#cf1322';
+        
+        return (
+          <Text strong style={{ color: marginColor }}>
+            {marginPercent.toFixed(1)}%
+          </Text>
+        );
+      },
+    },
     {
       title: 'Measured Impact',
       key: 'impact',

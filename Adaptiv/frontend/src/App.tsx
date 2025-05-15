@@ -21,8 +21,19 @@ import ProductDetail from './components/products/ProductDetail';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
   
+  // Don't redirect immediately while still loading authentication state
+  if (loading) {
+    // Show a simple loading indicator while checking auth
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <div>Loading...</div>
+      </div>
+    );
+  }
+  
+  // Only redirect after loading is complete and we know user isn't authenticated
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }

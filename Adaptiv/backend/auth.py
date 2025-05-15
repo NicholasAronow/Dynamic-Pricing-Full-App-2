@@ -12,7 +12,7 @@ from database import get_db
 # JWT Settings
 SECRET_KEY = "YOUR_SECRET_KEY"  # In production, use os.getenv and .env file
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 10080  # 7 days (60 * 24 * 7) for persistent login
 
 # Password handling
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

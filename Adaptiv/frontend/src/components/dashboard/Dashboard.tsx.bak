@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Card, Row, Col, Statistic, Button, Radio, Spin, Table, Tag, Space, Tooltip as AntTooltip, Alert } from 'antd';
+import { Typography, Card, Row, Col, Statistic, Button, Radio, Spin, Table, Tag, Space, Tooltip as AntTooltip, Alert, Empty } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { 
   ArrowUpOutlined, 
@@ -11,14 +11,18 @@ import {
   FallOutlined,
   InfoCircleOutlined
 } from '@ant-design/icons';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
+import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
 import moment from 'moment';
 
-// Import our API services
+// Import components and services
+import COGSPromptBubble from './COGSPromptBubble';
+import ActionItemsCard from './ActionItemsCard';
+import cogsService from '../../services/cogsService';
 import itemService, { Item } from '../../services/itemService';
 import orderService, { Order } from '../../services/orderService';
 import analyticsService, { SalesAnalytics } from '../../services/analyticsService';
+import competitorService from '../../services/competitorService';
 
 const { Title } = Typography;
 
@@ -97,7 +101,8 @@ const generateProductPerformanceData = (timeFrame: string) => {
 // Generating mock sales data
 const generateMockData = (timeFrame: string) => {
   const data = [];
-  const now = moment();
+  // Use yesterday as the most recent date (end date) for all time frames
+  const endDate = moment().subtract(1, 'day').endOf('day');
   
   let numPoints: number;
   let format: string;
@@ -107,6 +112,7 @@ const generateMockData = (timeFrame: string) => {
   
   switch (timeFrame) {
     case '1d':
+      // For 1-day, show 24 hours from midnight to midnight of yesterday
       numPoints = 24;
       format = 'HH:mm';
       dateFormat = 'YYYY-MM-DD HH:00';
@@ -128,15 +134,15 @@ const generateMockData = (timeFrame: string) => {
       unit = 'days';
       break;
     case '6m':
-      numPoints = 26;
-      format = 'MMM DD';
-      dateFormat = 'YYYY-MM-DD';
+      numPoints = 6; // Show just 6 months
+      format = 'MMM'; // Just show month name
+      dateFormat = 'YYYY-MM';
       step = 1;
-      unit = 'weeks';
+      unit = 'months';
       break;
     case '1yr':
       numPoints = 12;
-      format = 'MMM YYYY';
+      format = 'MMM'; // Just show month name without year
       dateFormat = 'YYYY-MM';
       step = 1;
       unit = 'months';
@@ -150,8 +156,23 @@ const generateMockData = (timeFrame: string) => {
   }
   
   // Generate data points
-  for (let i = numPoints - 1; i >= 0; i--) {
-    const date = moment(now).subtract(i * step, unit);
+  for (let i = 0; i < numPoints; i++) {
+    let date;
+    if (timeFrame === '1d') {
+      // For 1d view, use hours of yesterday from midnight to 11 PM
+      date = moment(endDate).startOf('day').add(i, 'hours');
+    } else if (timeFrame === '7d') {
+      // For 7d view, start 6 days before yesterday and include yesterday
+      date = moment(endDate).subtract(6, 'days').add(i, 'days');
+    } else if (timeFrame === '6m' || timeFrame === '1yr') {
+      // For 6m and 1yr, ensure we're using the first day of each month
+      // Start from the appropriate month and add months
+      const startMonth = moment(endDate).subtract(numPoints - 1, 'months').startOf('month');
+      date = moment(startMonth).add(i, 'months').startOf('month');
+    } else {
+      // For other views, work backwards from yesterday
+      date = moment(endDate).subtract(numPoints - 1, unit).add(i * step, unit);
+    }
     const baseValue = 5000 + Math.random() * 5000; // Base value between 5000 and 10000
     
     // Add some weekly patterns for daily data
@@ -167,10 +188,12 @@ const generateMockData = (timeFrame: string) => {
     } else if (timeFrame === '7d' || timeFrame === '1m') {
       // More sales on weekends
       const day = date.day();
-      if (day === 0 || day === 6) {
-        modifier = 1.3;
+      if (day === 0 || day === 6) { // Weekend days (Saturday = 6, Sunday = 0)
+        modifier = 1.3; // Higher sales on weekends
+      } else {
+        modifier = 0.9 + (Math.random() * 0.3); // Weekday variation
       }
-    } else if (timeFrame === '1yr') {
+    } else if (timeFrame === '6m' || timeFrame === '1yr') {
       // Seasonal variations
       const month = date.month();
       if (month === 10 || month === 11) { // Holiday season
@@ -224,8 +247,9 @@ const generateMockData = (timeFrame: string) => {
   return data;
 };
 
-// Utility function to format numbers with commas
-const formatNumberWithCommas = (num: number | string) => {
+// Utility function to format numbers with commas that safely handles undefined/null
+const formatNumberWithCommas = (num: number | string | undefined | null) => {
+  if (num === undefined || num === null) return '0';
   return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 };
 
@@ -242,33 +266,49 @@ const Dashboard: React.FC = () => {
   const [salesData, setSalesData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [chartView, setChartView] = useState<'sales' | 'margin'>('sales'); // Toggle between sales and profit margin
+  // Removed profit margin toggle - only showing sales now
   const [productsLoading, setProductsLoading] = useState(true);
   const [productPerformance, setProductPerformance] = useState<any[]>([]);
   const [itemsTimeFrame, setItemsTimeFrame] = useState('7d');
   const [analyticsData, setAnalyticsData] = useState<SalesAnalytics | null>(null);
+  const [competitors, setCompetitors] = useState<any[]>([]);
+  const [competitorsLoading, setCompetitorsLoading] = useState(true);
+  // States to track if we have any data
+  const [hasSalesData, setHasSalesData] = useState(false);
+  const [hasProductsData, setHasProductsData] = useState(false);
+  const [hasCompetitorsData, setHasCompetitorsData] = useState(false);
+  const [hasAdaptivData, setHasAdaptivData] = useState(false);
+  const [showCOGSPrompt, setShowCOGSPrompt] = useState(false);
   
   // Helper function to convert timeframe to dates
   const getDateRangeFromTimeFrame = (timeFrame: string) => {
-    const end = moment();
+    // Use yesterday as the end date for all timeframes
+    const end = moment().subtract(1, 'day').endOf('day');
     let start;
     
     switch (timeFrame) {
-      case '24h':
-        start = moment().subtract(1, 'day');
+      case '1d':
+        // For 1-day view, use yesterday's full day (midnight to midnight)
+        start = moment().subtract(1, 'day').startOf('day');
         break;
       case '7d':
-        start = moment().subtract(7, 'days');
+        // For 7-day view, use 7 complete days ending with yesterday
+        start = moment().subtract(7, 'days').startOf('day');
         break;
-      case '30d':
-        start = moment().subtract(30, 'days');
+      case '1m':
+        start = moment().subtract(30, 'days').startOf('day');
         break;
-      case '90d':
-        start = moment().subtract(90, 'days');
+      case '6m':
+        start = moment().subtract(180, 'days').startOf('day');
+        break;
+      case '1yr':
+        start = moment().subtract(365, 'days').startOf('day');
         break;
       default:
-        start = moment().subtract(7, 'days');
+        start = moment().subtract(30, 'days').startOf('day');
     }
+    
+    console.log(`Time frame selected: ${timeFrame}, Date range: ${start.format('YYYY-MM-DD')} to ${end.format('YYYY-MM-DD')}`);
     
     return {
       startDate: start.format('YYYY-MM-DD'),
@@ -276,7 +316,55 @@ const Dashboard: React.FC = () => {
     };
   };
 
-  // Fetch sales data from API
+  // Fetch sales data and COGS data from API
+  // Keep track of whether we have ANY sales data across all time frames
+  const [hasAnySalesData, setHasAnySalesData] = useState(false);
+  const [cogsData, setCogsData] = useState<any[]>([]);
+  
+  // Helper function to convert weekly COGS to daily values
+  const processCogsDataToDaily = () => {
+    // Create a map of daily COGS by date
+    const dailyCogsByDate: Record<string, number> = {};
+    
+    console.log('Processing COGS data to daily values:', cogsData);
+    
+    // If we have no COGS data, let's add some test data to ensure the line appears
+    if (!cogsData || cogsData.length === 0) {
+      console.log('No COGS data found');
+    }
+    
+    // Process each weekly COGS entry and distribute to daily values
+    cogsData.forEach(cogsEntry => {
+      const weekStart = moment(cogsEntry.week_start_date);
+      const weekEnd = moment(cogsEntry.week_end_date);
+      const daysInWeek = weekEnd.diff(weekStart, 'days') + 1;
+      const dailyCogs = cogsEntry.amount / daysInWeek; // Distribute weekly COGS evenly to each day
+      
+      console.log(`Processing COGS entry: ${weekStart.format('YYYY-MM-DD')} to ${weekEnd.format('YYYY-MM-DD')}, amount: ${cogsEntry.amount}, daily: ${dailyCogs}`);
+      
+      // For each day in the week, add the daily COGS value
+      for (let day = 0; day < daysInWeek; day++) {
+        const currentDate = moment(weekStart).add(day, 'days').format('YYYY-MM-DD');
+        dailyCogsByDate[currentDate] = dailyCogs;
+      }
+    });
+    
+    console.log('Processed daily COGS data:', dailyCogsByDate);
+    return dailyCogsByDate;
+  };
+  
+  // Check if we have Adaptiv metrics data
+  useEffect(() => {
+    // This would typically be a real API call to get Adaptiv metrics
+    // For now, we're using the presence of other data as a proxy
+    const checkAdaptivData = () => {
+      // If we have sales data, assume we have Adaptiv data too
+      setHasAdaptivData(hasAnySalesData);
+    };
+    
+    checkAdaptivData();
+  }, [hasAnySalesData]);
+
   useEffect(() => {
     const fetchSalesData = async () => {
       try {
@@ -285,26 +373,267 @@ const Dashboard: React.FC = () => {
         
         const { startDate, endDate } = getDateRangeFromTimeFrame(timeFrame);
         
+        // Fetch COGS data for the same period
+        try {
+          const fetchedCogsData = await cogsService.getCOGSData(startDate, endDate);
+          setCogsData(fetchedCogsData);
+        } catch (cogsError) {
+          console.error('Error fetching COGS data:', cogsError);
+          // Continue with sales data even if COGS fetch fails
+        }
+        
         // Fetch analytics data if available
         try {
           const analytics = await analyticsService.getSalesAnalytics(startDate, endDate);
           setAnalyticsData(analytics);
           
           // If we have daily sales data, use it for the chart
+          // Set global flag that we have data, even if not for the current time frame
+          setHasAnySalesData(true);
+          
           if (analytics.salesByDay && analytics.salesByDay.length > 0) {
-            setSalesData(analytics.salesByDay.map(day => ({
-              name: day.date,
-              revenue: day.revenue,
-              orders: day.orders
-            })));
+            // Get daily COGS data for profit margin calculations
+            const dailyCogs = processCogsDataToDaily();
+            
+            // Debug: Log COGS data to see if we have any
+            console.log('COGS data available:', cogsData);
+            console.log('Daily COGS data processed:', dailyCogs);
+            
+            // Process data based on timeFrame
+            let formattedData;
+            
+            if (timeFrame === '1d') {
+              // For 1d, ensure we show all 24 hours even if there's no data
+              const yesterday = moment().subtract(1, 'day').startOf('day');
+              formattedData = [];
+              
+              for (let i = 0; i < 24; i++) {
+                const hourTime = moment(yesterday).add(i, 'hours');
+                const hourStr = hourTime.format('HH:00');
+                
+                // Find if we have data for this hour
+                const hourData = analytics.salesByDay.find(day => 
+                  moment(day.date).format('HH:00') === hourStr
+                );
+                
+                // Get the COGS for yesterday
+                const yesterdayStr = yesterday.format('YYYY-MM-DD');
+                const daysCogs = dailyCogs[yesterdayStr] || 0;
+                
+                // Hourly COGS (dividing daily COGS by 24 hours)
+                const hourlyCogs = daysCogs / 24;
+                
+                // Calculate revenue and profit margin
+                const revenue = hourData ? hourData.revenue : 0;
+                const margin = revenue > 0 && hourlyCogs > 0 ? Math.max(0, ((revenue - hourlyCogs) / revenue) * 100) : null;
+                
+                formattedData.push({
+                  name: hourStr,
+                  revenue: revenue,
+                  orders: hourData ? hourData.orders : 0,
+                  profitMargin: margin
+                });
+              }
+            } else if (timeFrame === '6m') {
+              // For 6m, bin data by month to avoid duplicate labels
+              const startDate = moment().subtract(6, 'months').startOf('month');
+              const monthlyData: Record<string, {revenue: number, orders: number, cogs: number, daysCount: number}> = {};
+              
+              // Initialize all 6 months with zero values
+              for (let i = 0; i < 6; i++) {
+                const monthDate = moment(startDate).add(i, 'months');
+                const monthKey = monthDate.format('MMM');
+                monthlyData[monthKey] = { revenue: 0, orders: 0, cogs: 0, daysCount: 0 };
+              }
+              
+              // Aggregate data by month
+              analytics.salesByDay.forEach(day => {
+                const dayMoment = moment(day.date);
+                const monthKey = dayMoment.format('MMM');
+                const dateStr = dayMoment.format('YYYY-MM-DD');
+                
+                if (monthlyData[monthKey]) {
+                  // Add sales data
+                  monthlyData[monthKey].revenue += day.revenue;
+                  monthlyData[monthKey].orders += day.orders;
+                  
+                  // Add COGS data if available
+                  if (dailyCogs[dateStr]) {
+                    monthlyData[monthKey].cogs += dailyCogs[dateStr];
+                    monthlyData[monthKey].daysCount++;
+                  }
+                }
+              });
+              
+              // Convert to array format for chart with profit margin
+              formattedData = Object.entries(monthlyData).map(([month, data]) => {
+                // Calculate profit margin if we have both revenue and COGS
+                let profitMargin = null;
+                if (data.revenue > 0 && data.cogs > 0) {
+                  profitMargin = Math.max(0, ((data.revenue - data.cogs) / data.revenue) * 100);
+                }
+                
+                return {
+                  name: month,
+                  revenue: data.revenue,
+                  orders: data.orders,
+                  profitMargin: profitMargin
+                };
+              });
+            } else if (timeFrame === '7d') {
+              // Ensure all 7 days are represented, even if some have 0 sales
+              const startMoment = moment(startDate);
+              // Use proper typing for the date map
+              const dataByDate: Record<string, { revenue: number, orders: number }> = {};
+              
+              // Create a map of existing data by date
+              analytics.salesByDay.forEach(day => {
+                dataByDate[day.date] = {
+                  revenue: day.revenue,
+                  orders: day.orders
+                };
+              });
+              
+              // Create an array with entries for all 7 days
+              formattedData = [];
+              for (let i = 0; i < 7; i++) {
+                const currentDate = moment(startMoment).add(i, 'days');
+                const dateStr = currentDate.format('YYYY-MM-DD');
+                const existingData = dataByDate[dateStr];
+                
+                // Get daily COGS data if available
+                const dayCogs = dailyCogs[dateStr] || 0;
+                
+                // Calculate revenue and profit margin
+                const revenue = existingData ? existingData.revenue : 0;
+                let profitMargin = null;
+                if (revenue > 0 && dayCogs > 0) {
+                  profitMargin = Math.max(0, ((revenue - dayCogs) / revenue) * 100);
+                }
+                
+                formattedData.push({
+                  name: currentDate.format('MMM DD'),
+                  revenue: revenue,
+                  orders: existingData ? existingData.orders : 0,
+                  profitMargin: profitMargin
+                });
+              }
+            } else if (timeFrame === '1yr') {
+              // For 1yr, bin data by month to avoid duplicate labels
+              const startDate = moment().subtract(12, 'months').startOf('month');
+              const monthlyData: Record<string, {revenue: number, orders: number, cogs: number, daysCount: number}> = {};
+              
+              // Initialize all 12 months with zero values
+              for (let i = 0; i < 12; i++) {
+                const monthDate = moment(startDate).add(i, 'months');
+                const monthKey = monthDate.format('MMM');
+                monthlyData[monthKey] = { revenue: 0, orders: 0, cogs: 0, daysCount: 0 };
+              }
+              
+              // Aggregate data by month
+              analytics.salesByDay.forEach(day => {
+                const dayMoment = moment(day.date);
+                const monthKey = dayMoment.format('MMM');
+                const dateStr = dayMoment.format('YYYY-MM-DD');
+                
+                if (monthlyData[monthKey]) {
+                  // Add sales data
+                  monthlyData[monthKey].revenue += day.revenue;
+                  monthlyData[monthKey].orders += day.orders;
+                  
+                  // Add COGS data if available
+                  if (dailyCogs[dateStr]) {
+                    monthlyData[monthKey].cogs += dailyCogs[dateStr];
+                    monthlyData[monthKey].daysCount++;
+                  }
+                }
+              });
+              
+              // Convert to array format for chart with profit margin
+              formattedData = Object.entries(monthlyData).map(([month, data]) => {
+                // Calculate profit margin if we have both revenue and COGS
+                let profitMargin = null;
+                if (data.revenue > 0 && data.cogs > 0) {
+                  profitMargin = Math.max(0, ((data.revenue - data.cogs) / data.revenue) * 100);
+                }
+                
+                return {
+                  name: month,
+                  revenue: data.revenue,
+                  orders: data.orders,
+                  profitMargin: profitMargin
+                };
+              });
+            } else {
+              // For 1m, include profit margin if COGS data is available
+              formattedData = analytics.salesByDay.map(day => {
+                const dayMoment = moment(day.date);
+                let formattedDate = dayMoment.format('MMM DD');
+                
+                // Get COGS data for this day if available
+                const dateStr = dayMoment.format('YYYY-MM-DD');
+                const dayCogs = dailyCogs[dateStr] || 0;
+                
+                // Calculate profit margin if we have COGS data
+                let profitMargin = null;
+                if (day.revenue > 0 && dayCogs > 0) {
+                  profitMargin = Math.max(0, ((day.revenue - dayCogs) / day.revenue) * 100);
+                }
+                
+                return {
+                  name: formattedDate,
+                  revenue: day.revenue,
+                  orders: day.orders,
+                  profitMargin: profitMargin
+                };
+              });
+            }
+            
+            setSalesData(formattedData);
+            setHasSalesData(true);
+          } else if (hasAnySalesData && timeFrame === '1d') {
+            // Special case: if we have any sales data but none for yesterday,
+            // show empty hourly bars instead of the "Connect POS" message
+            const yesterday = moment().subtract(1, 'day').startOf('day');
+            const formattedData = [];
+            
+            for (let i = 0; i < 24; i++) {
+              formattedData.push({
+                name: moment(yesterday).add(i, 'hours').format('HH:00'),
+                revenue: 0,
+                orders: 0
+              });
+            }
+            
+            setSalesData(formattedData);
+            setHasSalesData(true); // We're treating this as having data
           } else {
             // Fallback to mock data if API doesn't provide what we need
             setSalesData(generateMockData(timeFrame));
+            setHasSalesData(false);
           }
         } catch (err) {
           console.error('Failed to fetch analytics data:', err);
-          // Fallback to mock data
-          setSalesData(generateMockData(timeFrame));
+          
+          // If we have any sales data but error on 1d view, show empty day
+          if (hasAnySalesData && timeFrame === '1d') {
+            const yesterday = moment().subtract(1, 'day').startOf('day');
+            const formattedData = [];
+            
+            for (let i = 0; i < 24; i++) {
+              formattedData.push({
+                name: moment(yesterday).add(i, 'hours').format('HH:00'),
+                revenue: 0,
+                orders: 0
+              });
+            }
+            
+            setSalesData(formattedData);
+            setHasSalesData(true);
+          } else {
+            // Fallback to mock data
+            setSalesData(generateMockData(timeFrame));
+          }
         }
         
         setLoading(false);
@@ -327,13 +656,15 @@ const Dashboard: React.FC = () => {
         
         // Try to fetch real item performance data
         try {
-          const data = await analyticsService.getItemPerformance();
+          const data = await analyticsService.getItemPerformance(itemsTimeFrame);
           setProductPerformance(data);
+          setHasProductsData(data && data.length > 0);
         } catch (err) {
           console.error('Failed to fetch item performance:', err);
           // Fallback to mock data
           const mockData = generateProductPerformanceData(itemsTimeFrame);
           setProductPerformance(mockData);
+          setHasProductsData(false);
         }
         
         setProductsLoading(false);
@@ -349,6 +680,79 @@ const Dashboard: React.FC = () => {
     fetchProductPerformance();
   }, [itemsTimeFrame]);
   
+  // Fetch competitor data
+  useEffect(() => {
+    const fetchCompetitorData = async () => {
+      try {
+        setCompetitorsLoading(true);
+        
+        // Try to fetch competitor data
+        try {
+          // Get all competitor names
+          const competitorNames = await competitorService.getCompetitors();
+          
+          // Process each competitor
+          const competitorData = [];
+          
+          for (let i = 0; i < competitorNames.length; i++) {
+            const name = competitorNames[i];
+            
+            try {
+              // Calculate similarity score for each competitor
+              const similarityData = await competitorService.calculateSimilarityScore(name);
+              
+              competitorData.push({
+                key: String(i + 1),
+                name: name,
+                similarityScore: similarityData.similarityScore,
+                priceSimScore: similarityData.priceSimScore,
+                menuSimScore: similarityData.menuSimScore,
+                distanceScore: similarityData.distanceScore
+              });
+            } catch (err) {
+              console.error(`Error calculating similarity for ${name}:`, err);
+            }
+          }
+          
+          setCompetitors(competitorData);
+        } catch (err) {
+          console.error('Failed to fetch competitor data:', err);
+          // Fallback to empty array
+          setCompetitors([]);
+        }
+        
+        setCompetitorsLoading(false);
+      } catch (err) {
+        console.error('Error fetching competitor data:', err);
+        setCompetitors([]);
+        setCompetitorsLoading(false);
+      }
+    };
+    
+    fetchCompetitorData();
+  }, []);  // Empty dependency array means this runs once on component mount
+  
+  // Check if we need to show the COGS prompt
+  useEffect(() => {
+    const checkCOGSStatus = async () => {
+      try {
+        const hasCurrentWeekCOGS = await cogsService.hasCurrentWeekCOGS();
+        setShowCOGSPrompt(!hasCurrentWeekCOGS);
+      } catch (error) {
+        console.error('Error checking COGS status:', error);
+        // Show prompt by default if we couldn't determine the status
+        setShowCOGSPrompt(true);
+      }
+    };
+    
+    checkCOGSStatus();
+  }, []);
+
+  // Handle completion of COGS data entry
+  const handleCOGSComplete = () => {
+    setShowCOGSPrompt(false);
+  };
+
   // Extract the user's name for the welcome message
   const userName = user?.email?.split('@')[0] || 'User';
   // Capitalize the first letter of the name
@@ -373,6 +777,12 @@ const Dashboard: React.FC = () => {
     return [...productPerformance].sort((a, b) => a.revenue - b.revenue).slice(0, 3).sort((a, b) => b.revenue - a.revenue);
   };
   
+  // Get top 3 competitors by similarity score
+  const getTopCompetitors = () => {
+    if (!competitors.length) return [];
+    return [...competitors].sort((a, b) => b.similarityScore - a.similarityScore).slice(0, 3);
+  };
+  
   const topProducts = getTopProducts();
   const bottomProducts = getBottomProducts();
   
@@ -383,98 +793,157 @@ const Dashboard: React.FC = () => {
         Welcome back, {formattedName}! Here's your dynamic pricing overview
       </Title>
       
-      {/* Sales/Profit Margin Chart */}
-      <Card 
-        title={
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span><LineChartOutlined /> {chartView === 'sales' ? 'Sales' : 'Profit Margin'} Over Time</span>
-            <div style={{ display: 'flex', gap: '16px' }}>
-              <Radio.Group 
-                value={chartView}
-                onChange={(e) => setChartView(e.target.value)}
-                optionType="button"
-                buttonStyle="solid"
-                size="small"
-              >
-                <Radio.Button value="sales">Sales</Radio.Button>
-                <Radio.Button value="margin">Profit Margin</Radio.Button>
-              </Radio.Group>
-              <Radio.Group 
-                value={timeFrame}
-                onChange={handleTimeFrameChange}
-                optionType="button"
-                buttonStyle="solid"
-                size="small"
-              >
-                <Radio.Button value="1d">1D</Radio.Button>
-                <Radio.Button value="7d">7D</Radio.Button>
-                <Radio.Button value="1m">1M</Radio.Button>
-                <Radio.Button value="6m">6M</Radio.Button>
-                <Radio.Button value="1yr">1Y</Radio.Button>
-              </Radio.Group>
-            </div>
-          </div>
-        }
-        style={{ marginBottom: 24 }}
-      >
+      {/* Chart Row with Sales Chart and Action Items */}
+      <Row gutter={24} style={{ marginBottom: 24 }}>
+        {/* Sales/Profit Margin Chart - Takes up more space */}
+        <Col xs={24} sm={24} md={18} lg={18} xl={18}>
+          <Card 
+            title={
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span><LineChartOutlined /> Sales Over Time</span>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <Radio.Group 
+                    value={timeFrame}
+                    onChange={handleTimeFrameChange}
+                    optionType="button"
+                    buttonStyle="solid"
+                    size="small"
+                  >
+                    <Radio.Button value="1d">1D</Radio.Button>
+                    <Radio.Button value="7d">7D</Radio.Button>
+                    <Radio.Button value="1m">1M</Radio.Button>
+                    <Radio.Button value="6m">6M</Radio.Button>
+                    <Radio.Button value="1yr">1Y</Radio.Button>
+                  </Radio.Group>
+                </div>
+              </div>
+            }
+            style={{ height: '100%' }}
+          >
         {loading ? (
           <div style={{ height: 300, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
             <Spin size="large" />
           </div>
+        ) : !hasSalesData ? (
+          <div style={{ width: '100%', height: 300, position: 'relative' }}>
+            {/* Blurred sample data in background */}
+            <div style={{ width: '100%', height: '100%', filter: 'blur(5px)', opacity: 0.6 }}>
+              <ResponsiveContainer>
+                <ComposedChart
+                  data={generateMockData(timeFrame)}
+                  margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" />
+                  <YAxis tickFormatter={(tick) => `$${formatNumberWithCommas(tick)}`} />
+                  <Bar 
+                    dataKey="revenue" 
+                    name="Sales" 
+                    fill="#9370DB" 
+                    radius={[4, 4, 0, 0]}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+            {/* Overlay with message */}
+            <div style={{ 
+              position: 'absolute', 
+              top: 0, 
+              left: 0, 
+              width: '100%', 
+              height: '100%', 
+              display: 'flex', 
+              flexDirection: 'column', 
+              justifyContent: 'center', 
+              alignItems: 'center',
+              backgroundColor: 'rgba(255, 255, 255, 0.85)' 
+            }}>
+              <div style={{ 
+                padding: '20px', 
+                borderRadius: '8px', 
+                textAlign: 'center',
+                maxWidth: '80%' 
+              }}>
+                <p style={{ fontSize: '16px', fontWeight: 500, marginBottom: '8px' }}>No sales data available</p>
+                <p style={{ color: '#666', marginBottom: '20px' }}>To see your actual sales data, please connect your POS provider</p>
+                <Button type="primary" size="large">
+                  Connect POS Provider
+                </Button>
+              </div>
+            </div>
+          </div>
         ) : (
           <div style={{ width: '100%', height: 300 }}>
             <ResponsiveContainer>
-              <LineChart
+              <ComposedChart
                 data={salesData}
                 margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
               >
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                {chartView === 'sales' ? (
-                  <YAxis 
-                    tickFormatter={(tick) => `$${formatNumberWithCommas(tick)}`}
-                  />
-                ) : (
-                  <YAxis 
-                    domain={[20, 40]} 
-                    tickFormatter={(tick) => `${formatNumberWithCommas(tick)}%`}
-                  />
-                )}
+                <XAxis dataKey="name" />
+                {/* Primary Y-axis for revenue */}
+                <YAxis 
+                  yAxisId="left"
+                  tickFormatter={(tick) => `$${formatNumberWithCommas(tick)}`}
+                />
+                {/* Secondary Y-axis for profit margin percentage */}
+                <YAxis 
+                  yAxisId="right" 
+                  orientation="right" 
+                  domain={[0, 100]}
+                  tickFormatter={(tick) => `${tick}%`}
+                />
                 <RechartsTooltip 
-                  formatter={(value: number) => {
-                    if (chartView === 'sales') {
-                      return [`$${formatNumberWithCommas(value)}`, 'Sales'];
-                    } else {
-                      return [`${formatNumberWithCommas(value)}%`, 'Profit Margin'];
+                  formatter={(value: number, name: string) => {
+                    if (name === 'Sales') {
+                      return [`$${formatNumberWithCommas(value.toFixed(2))}`, name];
+                    } else if (name === 'Profit Margin') {
+                      return [`${value.toFixed(1)}%`, name];
                     }
+                    return [value, name];
                   }}
                   labelFormatter={(label: string) => `Date: ${label}`}
                 />
                 <Legend />
-                {chartView === 'sales' ? (
-                  <Line 
-                    type="monotone" 
-                    dataKey="sales" 
-                    name="Sales" 
-                    stroke="#9370DB" 
-                    activeDot={{ r: 8 }} 
-                    strokeWidth={2}
-                  />
-                ) : (
-                  <Line 
-                    type="monotone" 
-                    dataKey="profitMargin" 
-                    name="Profit Margin" 
-                    stroke="#52c41a" 
-                    activeDot={{ r: 8 }} 
-                    strokeWidth={2}
-                  />
-                )}
-              </LineChart>
+                <Bar 
+                  dataKey="revenue" 
+                  name="Sales" 
+                  fill="#9370DB" 
+                  radius={[4, 4, 0, 0]}
+                  yAxisId="left"
+                />
+                {/* Profit margin as a dashed line with MAXIMUM visibility */}
+                <Line 
+                  type="monotone" 
+                  dataKey="profitMargin" 
+                  name="Profit Margin (%)" 
+                  stroke="#FF5733" 
+                  strokeWidth={3}
+                  strokeDasharray="5 5"
+                  dot={{ r: 4, fill: '#FF5733' }}
+                  activeDot={{ r: 8 }}
+                  yAxisId="right"
+                  connectNulls={false} /* Show all points */
+                />
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
         )}
-      </Card>
+          </Card>
+        </Col>
+        
+        {/* Action Items Card - Takes up less space */}
+        <Col xs={24} sm={24} md={6} lg={6} xl={6}>
+          <ActionItemsCard />
+        </Col>
+      </Row>
+        </Col>
+        
+        {/* Action Items Card - Takes up less space */}
+        <Col xs={24} sm={24} md={6} lg={6} xl={6}>
+          <ActionItemsCard />
+        </Col>
+      </Row>
       
       {/* Main dashboard layout */}
       <Row gutter={[24, 24]} style={{ marginTop: 24 }}>
@@ -508,6 +977,80 @@ const Dashboard: React.FC = () => {
               <div style={{ height: 400, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                 <Spin size="large" />
               </div>
+            ) : !hasProductsData ? (
+              <div style={{ height: 400, position: 'relative' }}>
+                {/* Blurred sample product data in background */}
+                <div style={{ width: '100%', height: '100%', filter: 'blur(5px)', opacity: 0.4 }}>
+                  <div style={{ opacity: 0.7 }}>
+                    {/* Top Products Sample */}
+                    <div>
+                      <Title level={4} style={{ color: '#3f8600', display: 'flex', alignItems: 'center', marginTop: -5, marginBottom: 16 }}>
+                        Best Selling Items
+                      </Title>
+                      <div style={{ marginBottom: 36 }}>
+                        {generateProductPerformanceData(itemsTimeFrame).slice(0, 3).map((product, index) => (
+                          <Card
+                            key={product.id}
+                            style={{ marginBottom: 8, borderRadius: 0, border: 'none'}}
+                            size="small"
+                            className="dashboard-card-item"
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              {/* Product details (simplified) */}
+                              <div>
+                                <div style={{ display: 'flex', alignItems: 'center' }}>
+                                  <strong>{product.name}</strong>
+                                </div>
+                              </div>
+                            </div>
+                              </Card>
+        </Col>
+        
+        {/* Action Items Card - Takes up less space */}
+        <Col xs={24} sm={24} md={6} lg={6} xl={6}>
+          <ActionItemsCard />
+        </Col>
+      </Row>
+        </Col>
+        
+        {/* Action Items Card - Takes up less space */}
+        <Col xs={24} sm={24} md={6} lg={6} xl={6}>
+          <ActionItemsCard />
+        </Col>
+      </Row>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Overlay with message */}
+                <div style={{ 
+                  position: 'absolute', 
+                  top: 0, 
+                  left: 0, 
+                  width: '100%', 
+                  height: '100%', 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  justifyContent: 'center', 
+                  alignItems: 'center',
+                  backgroundColor: 'rgba(255, 255, 255, 0.85)' 
+                }}>
+                  <div style={{ 
+                    padding: '20px', 
+                    borderRadius: '8px', 
+                    textAlign: 'center',
+                    maxWidth: '80%' 
+                  }}>
+                    <p style={{ fontSize: '16px', fontWeight: 500, marginBottom: '8px' }}>No menu items available</p>
+                    <p style={{ color: '#666', marginBottom: '20px' }}>To view your item performance, please connect your POS provider</p>
+                    <Button type="primary" size="large">
+                      Connect POS Provider
+                    </Button>
+                  </div>
+                </div>
+              </div>
             ) : (
               <div>
                 {/* Top Performers */}
@@ -535,19 +1078,19 @@ const Dashboard: React.FC = () => {
                                 <AntTooltip title="Price">
                                   <InfoCircleOutlined style={{ marginRight: 4 }} />
                                 </AntTooltip>
-                                ${formatNumberWithCommas(Number(product.price.toFixed(2)))}
+                                ${formatNumberWithCommas(Number((product.currentPrice || 0).toFixed(2)))}
                               </span>
                             </div>
                           </div>
                           <div style={{ textAlign: 'right' }}>
                             <div>
-                              <strong>${formatNumberWithCommas(Number(product.revenue.toFixed(2)))}</strong>
+                              <strong>${formatNumberWithCommas(Number((product.revenue || 0).toFixed(2)))}</strong>
                               <span style={{ fontSize: '0.85em', color: '#8c8c8c', marginLeft: 4 }}>revenue</span>
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 4 }}>
                               <div style={{ marginRight: 12 }}>
                                 <AntTooltip title="Units Sold">
-                                  <span>{formatNumberWithCommas(product.quantity)} units</span>
+                                  <span>{formatNumberWithCommas(product.quantitySold || 0)} units</span>
                                 </AntTooltip>
                               </div>
                               {product.growth > 0 ? (
@@ -562,7 +1105,21 @@ const Dashboard: React.FC = () => {
                             </div>
                           </div>
                         </div>
-                      </Card>
+                          </Card>
+        </Col>
+        
+        {/* Action Items Card - Takes up less space */}
+        <Col xs={24} sm={24} md={6} lg={6} xl={6}>
+          <ActionItemsCard />
+        </Col>
+      </Row>
+        </Col>
+        
+        {/* Action Items Card - Takes up less space */}
+        <Col xs={24} sm={24} md={6} lg={6} xl={6}>
+          <ActionItemsCard />
+        </Col>
+      </Row>
                     ))}
                   </div>
                 </div>
@@ -592,19 +1149,19 @@ const Dashboard: React.FC = () => {
                                 <AntTooltip title="Price">
                                   <InfoCircleOutlined style={{ marginRight: 4 }} />
                                 </AntTooltip>
-                                ${formatNumberWithCommas(Number(product.price.toFixed(2)))}
+                                ${formatNumberWithCommas(Number((product.currentPrice || 0).toFixed(2)))}
                               </span>
                             </div>
                           </div>
                           <div style={{ textAlign: 'right' }}>
                             <div>
-                              <strong>${formatNumberWithCommas(Number(product.revenue.toFixed(2)))}</strong>
+                              <strong>${formatNumberWithCommas(Number((product.revenue || 0).toFixed(2)))}</strong>
                               <span style={{ fontSize: '0.85em', color: '#8c8c8c', marginLeft: 4 }}>revenue</span>
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 4 }}>
                               <div style={{ marginRight: 12 }}>
                                 <AntTooltip title="Units Sold">
-                                  <span>{formatNumberWithCommas(product.quantity)} units</span>
+                                  <span>{formatNumberWithCommas(product.quantitySold || 0)} units</span>
                                 </AntTooltip>
                               </div>
                               {product.growth > 0 ? (
@@ -619,13 +1176,41 @@ const Dashboard: React.FC = () => {
                             </div>
                           </div>
                         </div>
-                      </Card>
+                          </Card>
+        </Col>
+        
+        {/* Action Items Card - Takes up less space */}
+        <Col xs={24} sm={24} md={6} lg={6} xl={6}>
+          <ActionItemsCard />
+        </Col>
+      </Row>
+        </Col>
+        
+        {/* Action Items Card - Takes up less space */}
+        <Col xs={24} sm={24} md={6} lg={6} xl={6}>
+          <ActionItemsCard />
+        </Col>
+      </Row>
                     ))}
                   </div>
                 </div>
               </div>
             )}
-            </Card>
+                </Card>
+        </Col>
+        
+        {/* Action Items Card - Takes up less space */}
+        <Col xs={24} sm={24} md={6} lg={6} xl={6}>
+          <ActionItemsCard />
+        </Col>
+      </Row>
+        </Col>
+        
+        {/* Action Items Card - Takes up less space */}
+        <Col xs={24} sm={24} md={6} lg={6} xl={6}>
+          <ActionItemsCard />
+        </Col>
+      </Row>
           </div>
         </Col>
         
@@ -638,50 +1223,238 @@ const Dashboard: React.FC = () => {
               extra={<Button type="link">View All</Button>}
               style={{ width: '100%' }}
             >
-              <Statistic
-                title="Revenue Increase from Adaptiv"
-                value={12750}
-                precision={0}
-                formatter={(value) => {
-                  const numValue = typeof value === 'number' ? value : Number(value);
-                  return formatNumberWithCommas(Number(numValue.toFixed(0)));
-                }}
-                valueStyle={{ color: '#3f8600' }}
-                prefix={<DollarOutlined />}
-                suffix="/mo"
-              />
-              <div style={{ marginTop: 16 }}>
-                <p><strong>Margin Improvement:</strong> <span style={{ color: '#3f8600' }}><ArrowUpOutlined /> 4.3%</span></p>
-                <p><strong>Price Optimization Score:</strong> <span style={{ fontWeight: 'bold' }}>92/100</span></p>
-                <p><strong>ROI:</strong> <span style={{ color: '#3f8600' }}>428%</span> (6-month trailing)</p>
-              </div>
-            </Card>
+              {!hasProductsData ? (
+                <div style={{ position: 'relative' }}>
+                  {/* Blurred sample data in background */}
+                  <div style={{ filter: 'blur(4px)', opacity: 0.5 }}>
+                    <Statistic
+                      title="Revenue Increase from Adaptiv"
+                      value={12750}
+                      precision={0}
+                      formatter={(value) => {
+                        const numValue = typeof value === 'number' ? value : Number(value);
+                        return formatNumberWithCommas(Number(numValue.toFixed(0)));
+                      }}
+                      valueStyle={{ color: '#3f8600' }}
+                      prefix={<DollarOutlined />}
+                      suffix="/mo"
+                    />
+                    <div style={{ marginTop: 16 }}>
+                      <p><strong>Margin Improvement:</strong> <span style={{ color: '#3f8600' }}><ArrowUpOutlined /> 4.3%</span></p>
+                      <p><strong>Price Optimization Score:</strong> <span style={{ fontWeight: 'bold' }}>92/100</span></p>
+                      <p><strong>ROI:</strong> <span style={{ color: '#3f8600' }}>428%</span> (6-month trailing)</p>
+                    </div>
+                  </div>
+                  
+                  {/* Overlay with message */}
+                  <div style={{ 
+                    position: 'absolute', 
+                    top: 0, 
+                    left: 0, 
+                    width: '100%', 
+                    height: '100%', 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    justifyContent: 'center', 
+                    alignItems: 'center',
+                    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+                    padding: '20px 0',
+                    minHeight: '150px'
+                  }}>
+                    <div style={{ 
+                      padding: '15px', 
+                      borderRadius: '8px', 
+                      textAlign: 'center',
+                      maxWidth: '90%' 
+                    }}>
+                      <p style={{ fontSize: '16px', fontWeight: 500, marginBottom: '8px' }}>No Adaptiv data available</p>
+                      <p style={{ color: '#666', marginBottom: '15px', fontSize: '14px' }}>To view your optimization metrics, please connect your POS provider</p>
+                      <Button type="primary">
+                        Connect POS Provider
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <Statistic
+                    title="Revenue Increase from Adaptiv"
+                    value={12750}
+                    precision={0}
+                    formatter={(value) => {
+                      const numValue = typeof value === 'number' ? value : Number(value);
+                      return formatNumberWithCommas(Number(numValue.toFixed(0)));
+                    }}
+                    valueStyle={{ color: '#3f8600' }}
+                    prefix={<DollarOutlined />}
+                    suffix="/mo"
+                  />
+                  <div style={{ marginTop: 16 }}>
+                    <p><strong>Margin Improvement:</strong> <span style={{ color: '#3f8600' }}><ArrowUpOutlined /> 4.3%</span></p>
+                    <p><strong>Price Optimization Score:</strong> <span style={{ fontWeight: 'bold' }}>92/100</span></p>
+                    <p><strong>ROI:</strong> <span style={{ color: '#3f8600' }}>428%</span> (6-month trailing)</p>
+                  </div>
+                </>
+              )}
+                </Card>
+        </Col>
+        
+        {/* Action Items Card - Takes up less space */}
+        <Col xs={24} sm={24} md={6} lg={6} xl={6}>
+          <ActionItemsCard />
+        </Col>
+      </Row>
+        </Col>
+        
+        {/* Action Items Card - Takes up less space */}
+        <Col xs={24} sm={24} md={6} lg={6} xl={6}>
+          <ActionItemsCard />
+        </Col>
+      </Row>
             
             {/* Competitor Analysis Card */}
             <Card 
               title="Competitor Analysis" 
-              extra={<Button type="link">View All</Button>}
+              extra={<Button type="link" onClick={() => navigate('/competitor-analysis')}>View All</Button>}
               style={{ width: '100%' }}
             >
-              <Statistic
-                title="Market Position"
-                value="Top 15%"
-                valueStyle={{ color: '#9370DB' }}
-                prefix={<TeamOutlined />}
-              />
-              <div style={{ marginTop: 16 }}>
-                <p>Competitors Tracked: 23</p>
-                <p>Price Differential: <span style={{ color: '#cf1322' }}><ArrowDownOutlined /> 5.3%</span></p>
-                <p>Feature Parity: 92%</p>
-              </div>
-            </Card>
+              {!hasProductsData ? (
+                <div style={{ position: 'relative' }}>
+                  {/* Blurred sample data in background */}
+                  <div style={{ filter: 'blur(4px)', opacity: 0.5 }}>
+                    <Statistic
+                      title="Market Position"
+                      value="Top 15%"
+                      valueStyle={{ color: '#9370DB' }}
+                      prefix={<TeamOutlined />}
+                    />
+                    <div style={{ marginTop: 16 }}>
+                      <p>Competitors Tracked: 5</p>
+                      <p>Price Differential: <span style={{ color: '#cf1322' }}><ArrowDownOutlined /> 5.3%</span></p>
+                      <p>Feature Parity: 92%</p>
+                      
+                      {/* Sample top competitors */}
+                      <div style={{ marginTop: 16 }}>
+                        <h4 style={{ marginBottom: 12 }}>Top Competitors by Similarity</h4>
+                        {[1, 2, 3].map((i) => (
+                          <div 
+                            key={i}
+                            style={{ 
+                              padding: '8px 6px', 
+                              borderBottom: i < 3 ? '1px solid #f0f0f0' : 'none',
+                              borderRadius: '4px'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div style={{ fontWeight: 500 }}>Competitor {i}</div>
+                              <div>
+                                <Tag color="blue">{85 - (i * 5)}%</Tag>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Overlay with message */}
+                  <div style={{ 
+                    position: 'absolute', 
+                    top: 0, 
+                    left: 0, 
+                    width: '100%', 
+                    height: '100%', 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    justifyContent: 'center', 
+                    alignItems: 'center',
+                    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+                    padding: '30px 0',
+                    minHeight: '220px'
+                  }}>
+                    <div style={{ 
+                      padding: '15px', 
+                      borderRadius: '8px', 
+                      textAlign: 'center',
+                      maxWidth: '90%' 
+                    }}>
+                      <p style={{ fontSize: '16px', fontWeight: 500, marginBottom: '8px' }}>No competitor data available</p>
+                      <p style={{ color: '#666', marginBottom: '15px', fontSize: '14px' }}>To view competitor analysis, please connect your POS provider</p>
+                      <Button type="primary">
+                        Connect POS Provider
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <Statistic
+                    title="Market Position"
+                    value="Top 15%"
+                    valueStyle={{ color: '#9370DB' }}
+                    prefix={<TeamOutlined />}
+                  />
+                  <div style={{ marginTop: 16 }}>
+                    <p>Competitors Tracked: {competitors.length || 'Loading...'}</p>
+                    <p>Price Differential: <span style={{ color: '#cf1322' }}><ArrowDownOutlined /> 5.3%</span></p>
+                    <p>Feature Parity: 92%</p>
+                    
+                    {/* Top 3 Competitors Section */}
+                    <div style={{ marginTop: 16 }}>
+                      <h4 style={{ marginBottom: 12 }}>Top Competitors by Similarity</h4>
+                      {competitorsLoading ? (
+                        <div style={{ textAlign: 'center', padding: '10px 0' }}>
+                          <Spin size="small" />
+                        </div>
+                      ) : (
+                        <div>
+                          {getTopCompetitors().map((competitor, index) => (
+                            <div 
+                              key={competitor.key}
+                              onClick={() => navigate(`/competitor/${encodeURIComponent(competitor.name)}`)}
+                              className="dashboard-competitor-item"
+                              style={{ 
+                                padding: '8px 6px', 
+                                borderBottom: index < getTopCompetitors().length - 1 ? '1px solid #f0f0f0' : 'none',
+                                cursor: 'pointer',
+                                borderRadius: '4px',
+                                transition: 'all 0.3s ease'
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div style={{ fontWeight: 500 }}>{competitor.name}</div>
+                                <div>
+                                  <Tag color="blue">{competitor.similarityScore}%</Tag>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+                </Card>
+        </Col>
+        
+        {/* Action Items Card - Takes up less space */}
+        <Col xs={24} sm={24} md={6} lg={6} xl={6}>
+          <ActionItemsCard />
+        </Col>
+      </Row>
+        </Col>
+        
+        {/* Action Items Card - Takes up less space */}
+        <Col xs={24} sm={24} md={6} lg={6} xl={6}>
+          <ActionItemsCard />
+        </Col>
+      </Row>
           </Space>
         </Col>
       </Row>
-      
-      {/* Best and Worst Performing Items Card */}
-      <div style={{ justifyContent: 'center', marginTop: 24, marginBottom: 24 }}>
-    </div>
+      {/* COGS Prompt Bubble */}
+      {showCOGSPrompt && <COGSPromptBubble onComplete={handleCOGSComplete} />}
     </div>
   );
 };
