@@ -289,7 +289,7 @@ const ProductDetail: React.FC = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<string>('summary');
   const [salesTimeFrame, setSalesTimeFrame] = useState<string>('7d');
-  const [selectedDate, setSelectedDate] = useState<moment.Moment>(moment().subtract(1, 'day'));
+  const [selectedDate, setSelectedDate] = useState<moment.Moment>(moment());
   const [salesData, setSalesData] = useState<any[]>([]);
   const [intradayData, setIntradayData] = useState<any[]>([]);
   const [elasticityData, setElasticityData] = useState<PriceElasticityData[]>([]);
@@ -473,9 +473,21 @@ const ProductDetail: React.FC = () => {
           // Fetch hourly sales data for today
           console.log('Fetching hourly sales data for item:', numericProductId);
           const today = moment().format('YYYY-MM-DD');
-          const hourlyData = await analyticsService.getItemHourlySales(numericProductId, today);
-          console.log('Received hourly sales data:', hourlyData);
-          setIntradayData(hourlyData);
+          try {
+            const hourlyData = await analyticsService.getItemHourlySales(numericProductId, today);
+            console.log('Received hourly sales data:', hourlyData);
+            if (Array.isArray(hourlyData) && hourlyData.length > 0) {
+              console.log('Hourly data sample:', hourlyData[0]);
+              console.log('Available keys:', Object.keys(hourlyData[0]));
+              setIntradayData(hourlyData);
+            } else {
+              console.warn('Empty or invalid hourly data received, running seed script may help');
+              // Will fallback to mock data below
+            }
+          } catch (hourlyError) {
+            console.error('Error fetching hourly data:', hourlyError);
+            // Will fallback to mock data below
+          }
           
           // Fetch weekly sales data
           console.log('Fetching weekly sales data for item:', numericProductId);
@@ -689,12 +701,29 @@ const ProductDetail: React.FC = () => {
     }
   };
   
-  const handleDateChange = (date: moment.Moment | null) => {
+  const handleDateChange = async (date: moment.Moment | null) => {
     if (date) {
       setSelectedDate(date);
       
-      // Update intraday data immediately when date changes
-      setIntradayData(generateIntradayData(productId || '1', date));
+      try {
+        // Convert productId string to number
+        const numericProductId = parseInt(productId || '1', 10);
+        
+        // Format date for API
+        const formattedDate = date.format('YYYY-MM-DD');
+        console.log(`Fetching hourly data for date: ${formattedDate}`);
+        
+        // Fetch real intraday data from API
+        const hourlyData = await analyticsService.getItemHourlySales(numericProductId, formattedDate);
+        console.log('Fetched hourly data:', hourlyData);
+        
+        // Set the data
+        setIntradayData(hourlyData);
+      } catch (error) {
+        console.error('Error fetching hourly data:', error);
+        // Fallback to mock data if API fails
+        setIntradayData(generateIntradayData(productId || '1', date));
+      }
     }
   };
   
@@ -857,6 +886,17 @@ const ProductDetail: React.FC = () => {
                 }
                 style={{ marginBottom: 24 }}
               >
+                {/* Debug info to inspect the data */}
+                <div style={{ marginBottom: 10, padding: 8, background: '#f9f9f9', fontSize: '12px' }}>
+                  <p style={{ margin: 0 }}><strong>Debug:</strong> {intradayData.length} hourly records found</p>
+                  {intradayData.length > 0 && (
+                    <div>
+                      <p style={{ margin: 0 }}>Sample data (first hour): {JSON.stringify(intradayData[0])}</p>
+                      <p style={{ margin: 0 }}>Data keys: {Object.keys(intradayData[0]).join(', ')}</p>
+                    </div>
+                  )}
+                </div>
+                
                 <div style={{ width: '100%', height: 300 }}>
                   <ResponsiveContainer>
                     <BarChart
