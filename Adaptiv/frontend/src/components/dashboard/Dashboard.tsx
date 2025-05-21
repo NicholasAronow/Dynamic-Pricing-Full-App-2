@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Card, Row, Col, Statistic, Button, Radio, Spin, Table, Tag, Space, Tooltip as AntTooltip, Alert, Empty } from 'antd';
+import { Typography, Card, Row, Col, Statistic, Button, Radio, Spin, Table, Tag, Space, Tooltip as AntTooltip, Alert, Empty, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { 
   ArrowUpOutlined, 
@@ -9,7 +9,8 @@ import {
   LineChartOutlined,
   RiseOutlined,
   FallOutlined,
-  InfoCircleOutlined
+  InfoCircleOutlined,
+  ShoppingOutlined
 } from '@ant-design/icons';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
@@ -22,9 +23,28 @@ import itemService, { Item } from '../../services/itemService';
 import orderService, { Order } from '../../services/orderService';
 import analyticsService, { SalesAnalytics } from '../../services/analyticsService';
 import competitorService from '../../services/competitorService';
+import { integrationService } from '../../services/integrationService';
 import api from '../../services/api';
 
-const { Title } = Typography;
+const { Title, Text, Paragraph } = Typography;
+
+// Function to handle Square integration
+const handleSquareIntegration = async () => {
+  try {
+    console.log('Initiating Square integration from Dashboard');
+    // Use the integrationService to get the auth URL
+    const authUrl = await integrationService.getSquareAuthUrl();
+    
+    console.log('Received Square auth URL:', authUrl);
+    if (authUrl) {
+      // Redirect to Square's authorization page
+      window.location.href = authUrl;
+    }
+  } catch (error) {
+    message.error('Failed to start Square integration. Please try again.');
+    console.error('Square integration error:', error);
+  }
+};
 
 // Mock product data
 const products = [
@@ -1165,31 +1185,39 @@ const Dashboard: React.FC = () => {
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
-            {/* Overlay with message */}
-            <div style={{ 
-              position: 'absolute', 
-              top: 0, 
-              left: 0, 
-              width: '100%', 
-              height: '100%', 
-              display: 'flex', 
-              flexDirection: 'column', 
-              justifyContent: 'center', 
+
+            {/* Semi-transparent overlay with message */}
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
               alignItems: 'center',
-              backgroundColor: 'rgba(255, 255, 255, 0.85)' 
+              background: 'rgba(255, 255, 255, 0.85)',
+              padding: '20px',
+              textAlign: 'center',
+              borderRadius: '8px'
             }}>
-              <div style={{ 
-                padding: '20px', 
-                borderRadius: '8px', 
-                textAlign: 'center',
-                maxWidth: '80%' 
-              }}>
-                <p style={{ fontSize: '16px', fontWeight: 500, marginBottom: '8px' }}>No sales data available</p>
-                <p style={{ color: '#666', marginBottom: '20px' }}>To see your actual sales data, please connect your POS provider</p>
-                <Button type="primary" size="large">
-                  Connect POS Provider
-                </Button>
-              </div>
+              <Title level={4}>No Sales Data Available</Title>
+              <Paragraph>
+                Connect your Square account to import your sales data and menu items.
+                Get personalized insights and price recommendations based on your actual sales.
+              </Paragraph>
+              <Button 
+                type="primary" 
+                icon={<ShoppingOutlined />}
+                onClick={handleSquareIntegration}
+                size="large"
+              >
+                Connect Square Account
+              </Button>
+              <Paragraph style={{ marginTop: 12, fontSize: '12px', opacity: 0.7 }}>
+                <Text type="secondary">After connecting, check your data in the <a href="/square-test">Square Test Page</a></Text>
+              </Paragraph>
             </div>
           </div>
         ) : (

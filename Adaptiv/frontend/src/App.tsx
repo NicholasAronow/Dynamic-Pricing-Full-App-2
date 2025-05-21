@@ -17,6 +17,11 @@ import CompetitorAnalysis from './components/competitor/CompetitorAnalysis';
 import CompetitorDetail from './components/competitor/CompetitorDetail';
 import ProductDetail from './components/products/ProductDetail';
 
+// Integration components
+import SquareCallback from './components/integrations/SquareCallback';
+import SquareOrderTester from './components/integrations/SquareOrderTester';
+import SquareIntegrationPage from './components/integrations/SquareIntegrationPage';
+
 // Auth context
 import { AuthProvider, useAuth } from './context/AuthContext';
 
@@ -49,6 +54,7 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/auth-debug" element={<AuthDebug />} />
+          <Route path="/integrations/square/callback" element={<SquareCallback />} />
           <Route path="/" element={
             <ProtectedRoute>
               <MainLayout />
@@ -60,6 +66,8 @@ function App() {
             <Route path="competitor-analysis" element={<CompetitorAnalysis />} />
             <Route path="competitor/:competitorId" element={<CompetitorDetail />} />
             <Route path="product/:productId" element={<ProductDetail />} />
+            <Route path="square-test" element={<SquareOrderTester />} />
+            <Route path="integrations/square" element={<SquareIntegrationPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

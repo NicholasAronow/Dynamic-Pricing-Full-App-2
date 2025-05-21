@@ -1,0 +1,814 @@
+"""
+Square Integration Module
+
+This module handles OAuth authentication with Square and API interactions.
+"""
+
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
+from fastapi.responses import RedirectResponse
+from sqlalchemy.orm import Session
+from typing import Optional, List, Dict, Any
+from datetime import datetime, timedelta
+import os
+import secrets
+import requests
+from urllib.parse import urlencode
+import json
+import logging
+
+import models, schemas
+from database import get_db
+from auth import get_current_user
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Router
+square_router = APIRouter()
+
+# Constants
+SQUARE_ENV = os.getenv("SQUARE_ENV", "sandbox")  # 'sandbox' or 'production'
+SQUARE_APP_ID = os.getenv("SQUARE_APP_ID", "")
+SQUARE_APP_SECRET = os.getenv("SQUARE_APP_SECRET", "")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
+# Square hosts based on environment
+SQUARE_OAUTH_HOST = "https://connect.squareupsandbox.com" if SQUARE_ENV == "sandbox" else "https://connect.squareup.com"
+SQUARE_API_BASE = "https://connect.squareupsandbox.com" if SQUARE_ENV == "sandbox" else "https://connect.squareup.com"
+
+@square_router.get("/auth")
+async def square_auth(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Start OAuth flow with Square by returning the authorization URL"""
+    # Generate state to prevent CSRF
+    state = secrets.token_hex(16)
+    
+    # Create redirect URL with proper URLSearchParams equivalent
+    params = {
+        "client_id": SQUARE_APP_ID,
+        "scope": "ITEMS_READ ITEMS_WRITE ORDERS_READ MERCHANT_PROFILE_READ",
+        "session": "true",  # Force login screen
+        "state": state,
+        "redirect_uri": f"{FRONTEND_URL}/integrations/square/callback"
+    }
+    
+    logger.info(f"Square OAuth: Redirect URI = {FRONTEND_URL}/integrations/square/callback")
+    
+    # Construct the URL using urlencode
+    auth_url = f"{SQUARE_OAUTH_HOST}/oauth2/authorize?{urlencode(params)}"
+    logger.info(f"Square OAuth: Auth URL = {auth_url}")
+    
+    # Return the URL to the frontend
+    return {"auth_url": auth_url}
+
+@square_router.post("/process-callback")
+async def process_square_callback(
+    data: Dict[str, Any],
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Process Square OAuth callback data from frontend"""
+    code = data.get("code")
+    state = data.get("state")
+    
+    if not code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing authorization code"
+        )
+    
+    # Exchange code for access token
+    try:
+        logger.info(f"Square OAuth: Exchanging code for token")
+        token_response = requests.post(
+            f"{SQUARE_API_BASE}/oauth2/token",
+            headers={"Content-Type": "application/json"},
+            json={
+                "client_id": SQUARE_APP_ID,
+                "client_secret": SQUARE_APP_SECRET,
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": f"{FRONTEND_URL}/integrations/square/callback"
+            }
+        )
+        
+        data = token_response.json()
+        logger.info(f"Square OAuth: Token response received")
+        
+        if "error" in data:
+            logger.error(f"Square OAuth error: {data.get('error')}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"OAuth error: {data.get('error')}"
+            )
+            
+        # Extract token data with detailed logging
+        access_token = data.get("access_token")
+        refresh_token = data.get("refresh_token")
+        expires_at = None
+        if "expires_in" in data:
+            # Calculate expiration time
+            expires_at = datetime.now() + timedelta(seconds=data.get("expires_in"))
+        
+        merchant_id = data.get("merchant_id")
+        token_type = data.get("token_type")
+        
+        # Log token information for debugging
+        logger.info(f"Square OAuth: Token data received - access_token present: {bool(access_token)}, refresh_token present: {bool(refresh_token)}")
+        logger.info(f"Square OAuth: Merchant ID: {merchant_id}, Token type: {token_type}, Expires at: {expires_at}")
+        
+        # Verify we actually have the token data needed
+        if not access_token:
+            logger.error("Square OAuth: No access token received from Square")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No access token received from Square"
+            )
+        
+        # Check if integration already exists
+        existing_integration = db.query(models.POSIntegration).filter(
+            models.POSIntegration.user_id == current_user.id,
+            models.POSIntegration.provider == "square"
+        ).first()
+        
+        if existing_integration:
+            # Update existing integration
+            logger.info(f"Square OAuth: Updating existing integration")
+            # Update with detailed logging to make sure tokens are set
+            existing_integration.access_token = access_token
+            existing_integration.refresh_token = refresh_token
+            existing_integration.expires_at = expires_at
+            existing_integration.merchant_id = merchant_id
+            existing_integration.token_type = token_type
+            existing_integration.updated_at = datetime.now()
+            
+            # Force token values to be set explicitly (debug redundancy)
+            db.flush()  # Flush changes to check if they got applied
+            
+            # Verify tokens were saved before committing
+            logger.info(f"Square OAuth: Verifying tokens were updated - access_token present: {bool(existing_integration.access_token)}")
+            
+            # Commit changes
+            db.commit()
+            
+            # Double-check after commit
+            db.refresh(existing_integration)
+            logger.info(f"Square OAuth: After commit - access_token present: {bool(existing_integration.access_token)}")
+            
+            # Initial sync of data
+            await sync_initial_data(current_user.id, db)
+            
+            return {"success": True, "message": "Square integration updated successfully"}
+        
+        # Create new integration with additional validation
+        logger.info(f"Square OAuth: Creating new integration")
+        new_integration = models.POSIntegration(
+            user_id=current_user.id,
+            provider="square",
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_at=expires_at,
+            merchant_id=merchant_id,
+            token_type=token_type
+        )
+        
+        # Log field values explicitly
+        logger.info(f"Square OAuth: Setting up new integration with token: {access_token[:5]}...")
+        
+        # Add to database
+        db.add(new_integration)
+        db.flush()  # Flush changes to DB to get the ID
+        
+        # Verify values were applied
+        logger.info(f"Square OAuth: New integration ID: {new_integration.id}, token present: {bool(new_integration.access_token)}")
+        
+        # Commit changes
+        db.commit()
+        
+        # Double-check after commit
+        db.refresh(new_integration)
+        logger.info(f"Square OAuth: After commit - access_token present: {bool(new_integration.access_token)}")
+        
+        # Mark related action item as completed if exists
+        await _update_pos_action_item(current_user.id, db)
+        
+        # Initial sync of data
+        await sync_initial_data(current_user.id, db)
+        
+        return {"success": True, "message": "Square integration created successfully"}
+        
+    except Exception as e:
+        logger.exception(f"Square OAuth error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to complete OAuth: {str(e)}"
+        )
+
+async def _update_pos_action_item(user_id: int, db: Session):
+    """Mark POS integration action item as completed"""
+    pos_action_item = db.query(models.ActionItem).filter(
+        models.ActionItem.user_id == user_id,
+        models.ActionItem.title == "Connect POS provider",
+        models.ActionItem.status != "completed"
+    ).first()
+    
+    if pos_action_item:
+        pos_action_item.status = "completed"
+        pos_action_item.completed_at = datetime.now()
+        db.commit()
+
+@square_router.get("/orders")
+async def get_square_orders(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get orders from Square"""
+    try:
+        # Check if integration exists directly first with detailed logging
+        logger.info(f"Checking Square integration for user_id: {current_user.id}")
+        integration = db.query(models.POSIntegration).filter(
+            models.POSIntegration.user_id == current_user.id,
+            models.POSIntegration.provider == "square"
+        ).first()
+        
+        if not integration:
+            logger.error(f"No Square integration found for user {current_user.id}")
+            # Try to get information about the user's OAuth status
+            return {
+                "error": "Square integration not found",
+                "message": "Please connect your Square account first.",
+                "connected": False
+            }
+            
+        logger.info(f"Found Square integration: {integration.id} for user {current_user.id}")
+        
+        # Check if we have a valid access token
+        if not integration.access_token:
+            logger.error(f"No access token found for integration {integration.id}")
+            return {
+                "error": "Invalid integration",
+                "message": "Your Square integration is missing authentication tokens. Please reconnect your account.",
+                "connected": False
+            }
+        
+        # Get merchant's location ID first
+        logger.info("Square API: Fetching locations")
+        try:
+            locations_response = requests.get(
+                f"{SQUARE_API_BASE}/v2/locations",
+                headers={
+                    "Authorization": f"Bearer {integration.access_token}",
+                    "Content-Type": "application/json"
+                },
+                timeout=10  # Add timeout to prevent hanging requests
+            )
+            
+            # Try to parse the JSON response
+            try:
+                locations_data = locations_response.json()
+            except Exception as e:
+                logger.error(f"Square API error: Failed to parse locations response - {str(e)}")
+                return {
+                    "error": "Failed to parse Square response",
+                    "message": "Could not retrieve location data from Square. Please try again later.",
+                    "connected": True,
+                    "auth_status": "valid",
+                    "status_code": locations_response.status_code,
+                    "response_text": locations_response.text[:200],  # Truncate long responses
+                    "orders": []
+                }
+            
+            if locations_response.status_code != 200 or "locations" not in locations_data:
+                logger.error(f"Square API error: Failed to get locations - {locations_data.get('errors', [])}")
+                return {
+                    "error": "Failed to get Square locations",
+                    "message": f"Error fetching locations from Square: {locations_data.get('errors', [])}",
+                    "connected": True,
+                    "auth_status": "valid" if locations_response.status_code != 401 else "invalid",
+                    "orders": []
+                }
+        except Exception as e:
+            logger.exception(f"Square API request error: {str(e)}")
+            return {
+                "error": "Square API request failed",
+                "message": f"Could not connect to Square API: {str(e)}",
+                "connected": True,
+                "auth_status": "unknown",
+                "orders": []
+            }
+        
+        # If we get here, we have locations data. Extract the first location ID to use for orders.
+        if len(locations_data.get("locations", [])) == 0:
+            return {
+                "error": "No locations found",
+                "message": "No locations found in your Square account",
+                "connected": True,
+                "auth_status": "valid",
+                "orders": []
+            }
+        
+        location_id = locations_data["locations"][0]["id"]
+        logger.info(f"Square API: Using location ID {location_id}")
+        
+        # Get orders for this location
+        logger.info("Square API: Fetching orders")
+        try:
+            orders_response = requests.post(
+                f"{SQUARE_API_BASE}/v2/orders/search",
+                headers={
+                    "Authorization": f"Bearer {integration.access_token}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "location_ids": [location_id],
+                    "query": {
+                        "filter": {
+                            "state_filter": {"states": ["COMPLETED"]}
+                        }
+                    }
+                },
+                timeout=15  # Add timeout to prevent hanging requests
+            )
+            
+            # Try to parse the JSON response
+            try:
+                orders_data = orders_response.json()
+            except Exception as e:
+                logger.error(f"Square API error: Failed to parse orders response - {str(e)}")
+                return {
+                    "error": "Failed to parse orders response",
+                    "message": "Could not read order data from Square. Please try again later.",
+                    "connected": True,
+                    "auth_status": "valid",
+                    "status_code": orders_response.status_code,
+                    "response_text": orders_response.text[:200],  # Truncate long responses
+                    "orders": []
+                }
+            
+            if orders_response.status_code != 200:
+                logger.error(f"Square API error: Failed to get orders - {orders_data.get('errors', [])}")
+                return {
+                    "error": "Failed to get Square orders",
+                    "message": f"Error fetching orders from Square: {orders_data.get('errors', [])}",
+                    "connected": True,
+                    "auth_status": "valid" if orders_response.status_code != 401 else "invalid",
+                    "orders": []
+                }
+            
+            return {
+                "success": True,
+                "connected": True,
+                "auth_status": "valid",
+                "orders": orders_data.get("orders", []),
+                "count": len(orders_data.get("orders", [])),
+                "location": {
+                    "id": location_id,
+                    "name": locations_data["locations"][0].get("name", "Unknown Location")
+                }
+            }
+            
+        except Exception as e:
+            logger.exception(f"Square API orders request error: {str(e)}")
+            return {
+                "error": "Square API orders request failed",
+                "message": f"Could not fetch orders from Square: {str(e)}",
+                "connected": True,
+                "auth_status": "unknown",
+                "orders": []
+            }
+            
+    except Exception as e:
+        logger.exception(f"Error getting Square orders: {str(e)}")
+        return {
+            "error": "Unexpected error",
+            "message": f"An unexpected error occurred: {str(e)}",
+            "connected": False,
+            "auth_status": "unknown",
+            "orders": []
+        }
+
+@square_router.post("/sync")
+async def sync_square_data(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Sync menu items and orders from Square to local database"""
+    try:
+        return await sync_initial_data(current_user.id, db)
+    except Exception as e:
+        logger.exception(f"Error syncing Square data: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to sync data: {str(e)}"
+        )
+
+async def sync_initial_data(user_id: int, db: Session):
+    """Sync catalog and orders from Square"""
+    try:
+        # Get integration for user
+        integration = await _get_integration(user_id, db)
+        catalog_mapping = {}  # Maps Square catalog IDs to local item IDs
+        
+        # Get merchant's locations
+        logger.info("Square API: Fetching locations for sync")
+        locations_response = requests.get(
+            f"{SQUARE_API_BASE}/v2/locations",
+            headers={
+                "Authorization": f"Bearer {integration.access_token}",
+                "Content-Type": "application/json"
+            },
+            timeout=10  # Add timeout to prevent hanging requests
+        )
+        
+        locations_data = locations_response.json()
+        
+        if locations_response.status_code != 200 or "locations" not in locations_data:
+            return {"success": False, "error": "Failed to get locations"}
+        
+        if not locations_data.get("locations"):
+            return {"success": False, "error": "No locations found"}
+        
+        # Get all locations for later use
+        locations = locations_data.get("locations", [])
+        if not locations:
+            return {"success": False, "error": "No locations found"}
+            
+        # Sync catalog items
+        items_created = 0
+        items_updated = 0
+        
+        # Get catalog from Square
+        logger.info("Square API: Fetching catalog items")
+        catalog_response = requests.get(
+            f"{SQUARE_API_BASE}/v2/catalog/list?types=ITEM",
+            headers={
+                "Authorization": f"Bearer {integration.access_token}",
+                "Content-Type": "application/json"
+            },
+            timeout=10
+        )
+        
+        if catalog_response.status_code != 200:
+            return {"success": False, "error": "Failed to get catalog"}
+            
+        catalog_data = catalog_response.json()
+        items = catalog_data.get("objects", [])
+        
+        logger.info(f"Found {len(items)} items in Square catalog")
+        
+        # Process each catalog item
+        for item_obj in items:
+            if item_obj.get("type") != "ITEM":
+                continue
+                
+            square_item_id = item_obj.get("id")
+            item_data = item_obj.get("item_data", {})
+            name = item_data.get("name", "")
+            description = item_data.get("description", "")
+            
+            # Skip items without name
+            if not name:
+                continue
+                
+            # Get price from first variation
+            variations = item_data.get("variations", [])
+            price = None
+            square_variation_id = None
+            
+            if variations:
+                variation = variations[0]
+                square_variation_id = variation.get("id")
+                variation_data = variation.get("item_variation_data", {})
+                price_money = variation_data.get("price_money", {})
+                if price_money:
+                    # Convert cents to dollars
+                    price = price_money.get("amount", 0) / 100.0
+            
+            # Skip items without price
+            if price is None:
+                continue
+                
+            # Check if item already exists by Square ID first
+            existing_item = db.query(models.Item).filter(
+                models.Item.pos_id == square_item_id,
+                models.Item.user_id == user_id
+            ).first()
+            
+            # If not found by ID, try by name
+            if not existing_item:
+                existing_item = db.query(models.Item).filter(
+                    models.Item.name == name,
+                    models.Item.user_id == user_id
+                ).first()
+            
+            if existing_item:
+                # Update existing item
+                if existing_item.current_price != price:
+                    # Create price history
+                    price_history = models.PriceHistory(
+                        item_id=existing_item.id,
+                        user_id=user_id,
+                        previous_price=existing_item.current_price,
+                        new_price=price,
+                        change_reason="Updated from Square"
+                    )
+                    db.add(price_history)
+                
+                # Update item
+                existing_item.current_price = price
+                existing_item.description = description or existing_item.description
+                existing_item.updated_at = datetime.now()
+                existing_item.pos_id = square_item_id  # Ensure Square ID is set
+                items_updated += 1
+                
+                # Add to mapping
+                catalog_mapping[square_item_id] = existing_item.id
+                if square_variation_id:
+                    catalog_mapping[square_variation_id] = existing_item.id
+            else:
+                # Create new item
+                new_item = models.Item(
+                    name=name,
+                    description=description,
+                    category="From Square",  # Default category
+                    current_price=price,
+                    user_id=user_id,
+                    pos_id=square_item_id  # Store Square ID
+                )
+                db.add(new_item)
+                db.flush()  # Get ID of new item
+                items_created += 1
+                
+                # Add to mapping
+                catalog_mapping[square_item_id] = new_item.id
+                if square_variation_id:
+                    catalog_mapping[square_variation_id] = new_item.id
+        
+        # Commit catalog changes
+        db.commit()
+        logger.info(f"Catalog sync complete. Created: {items_created}, Updated: {items_updated}")
+        
+        # Sync orders from all locations
+        orders_created = 0
+        orders_failed = 0
+        last_sync_time = None
+        
+        # Calculate date filter for orders
+        # For today's orders, start with beginning of today in UTC
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start_utc = today_start.isoformat() + "Z"
+        
+        # For historical orders, use last sync time or default lookback
+        if integration.last_sync_at:
+            # Check if last sync was today
+            if integration.last_sync_at.date() == datetime.now().date():
+                # If sync was already done today, start from beginning of today to catch all today's orders
+                last_sync_time = today_start_utc
+                logger.info(f"Last sync was today, using start of today: {last_sync_time}")
+            else:
+                # Otherwise use the last sync time
+                last_sync_time = integration.last_sync_at.replace(microsecond=0).isoformat() + "Z"
+                logger.info(f"Using last sync time filter: {last_sync_time}")
+        else:
+            # Default to 90 days if no previous sync
+            start_date = (datetime.now() - timedelta(days=90)).replace(microsecond=0)
+            last_sync_time = start_date.isoformat() + "Z"
+            logger.info(f"No previous sync, using 90 day lookback: {last_sync_time}")
+        
+        # Process each location
+        for location in locations:
+            location_id = location.get("id")
+            location_name = location.get("name", "Unknown Location")
+            
+            logger.info(f"Syncing orders from location: {location_name} ({location_id})")
+            
+            # Check if we should use a different date filter for this location
+            # For today's orders, we want to make sure we get everything
+            use_start_time = last_sync_time
+            
+            # Current time in ISO format for possible end_at filter
+            now_utc = datetime.now().replace(microsecond=0).isoformat() + "Z"
+            
+            # Log the date filter being used
+            logger.info(f"Fetching orders from {use_start_time} to now for location {location_name}")
+            
+            # Build request JSON with proper filters
+            request_json = {
+                "location_ids": [location_id],
+                "query": {
+                    "filter": {
+                        "date_time_filter": {
+                            "created_at": {
+                                "start_at": use_start_time
+                            }
+                        },
+                        "state_filter": {"states": ["COMPLETED"]}
+                    },
+                    "sort": {
+                        "sort_field": "CREATED_AT",
+                        "sort_order": "ASC"
+                    }
+                },
+                "limit": 100  # Square limits to 100 orders per request
+            }
+            
+            # Get orders from Square with date filter
+            orders_response = requests.post(
+                f"{SQUARE_API_BASE}/v2/orders/search",
+                headers={
+                    "Authorization": f"Bearer {integration.access_token}",
+                    "Content-Type": "application/json"
+                },
+                json=request_json,
+                timeout=15  # Longer timeout for orders
+            )
+            
+            if orders_response.status_code != 200:
+                logger.error(f"Failed to get orders from location {location_name}: {orders_response.json().get('errors', [])}")
+                orders_failed += 1
+                continue
+            
+            orders_data = orders_response.json()
+            orders = orders_data.get("orders", [])
+            
+            logger.info(f"Found {len(orders)} orders in location {location_name}")
+            
+            # Process each order
+            for order in orders:
+                # Get order date and ID
+                created_at = order.get("created_at")
+                if not created_at:
+                    continue
+                
+                order_date = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                square_order_id = order.get("id")
+                
+                # Check if order already exists
+                existing_order = db.query(models.Order).filter(
+                    models.Order.user_id == user_id,
+                    models.Order.pos_id == square_order_id
+                ).first()
+                
+                if existing_order:
+                    logger.debug(f"Order {square_order_id} already exists, skipping")
+                    continue
+                
+                # Calculate total from line items
+                total_amount = 0
+                order_items = []
+                
+                line_items = order.get("line_items", [])
+                for line_item in line_items:
+                    # Get item details
+                    name = line_item.get("name", "")
+                    quantity = int(line_item.get("quantity", 1))
+                    
+                    # Get catalog ID from variation ID if available
+                    catalog_object_id = line_item.get("catalog_object_id")
+                    
+                    # Extract price
+                    base_price_money = line_item.get("base_price_money", {})
+                    unit_price = base_price_money.get("amount", 0) / 100.0  # Convert cents to dollars
+                    
+                    # Calculate line item total
+                    item_total = unit_price * quantity
+                    total_amount += item_total
+                    
+                    # Find matching item in database through the catalog mapping
+                    item_id = None
+                    if catalog_object_id and catalog_object_id in catalog_mapping:
+                        item_id = catalog_mapping[catalog_object_id]
+                    
+                    if not item_id:
+                        # Try to find by name if not in mapping
+                        item = db.query(models.Item).filter(
+                            models.Item.name == name,
+                            models.Item.user_id == user_id
+                        ).first()
+                        
+                        if item:
+                            item_id = item.id
+                        else:
+                            # Create new item if not exists
+                            new_item = models.Item(
+                                name=name,
+                                description=f"Imported from Square - {location_name}",
+                                category="From Square",  # Default category
+                                current_price=unit_price,
+                                user_id=user_id,
+                                pos_id=catalog_object_id  # Store Square ID if available
+                            )
+                            db.add(new_item)
+                            db.flush()  # Get ID
+                            
+                            item_id = new_item.id
+                            if catalog_object_id:
+                                catalog_mapping[catalog_object_id] = item_id
+                    
+                    # Add to order items list
+                    order_items.append({
+                        "item_id": item_id,
+                        "quantity": quantity,
+                        "unit_price": unit_price
+                    })
+                
+                # Create order
+                new_order = models.Order(
+                    order_date=order_date,
+                    total_amount=total_amount,
+                    user_id=user_id,
+                    pos_id=square_order_id,  # Store Square order ID
+                    created_at=order_date,    # Use Square creation date
+                    updated_at=order_date
+                )
+                db.add(new_order)
+                db.flush()  # Get ID of new order
+                
+                # Add order items
+                for item_data in order_items:
+                    order_item = models.OrderItem(
+                        order_id=new_order.id,
+                        item_id=item_data["item_id"],
+                        quantity=item_data["quantity"],
+                        unit_price=item_data["unit_price"]
+                    )
+                    db.add(order_item)
+                
+                orders_created += 1
+            
+            # Check for pagination (not handling pages beyond first in this implementation)
+            cursor = orders_data.get("cursor")
+            if cursor:
+                logger.info(f"More orders available for location {location_name} (cursor available)")
+        
+        # Commit all changes
+        db.commit()
+        
+        # Debug info about orders synced
+        logger.info(f"Total sync complete: {orders_created} orders created across {len(locations)} locations")
+        
+        # Update integration with last sync time
+        integration.last_sync_at = datetime.now()
+        db.commit()
+        logger.info(f"Updated last_sync_at to {integration.last_sync_at.isoformat()}")
+        
+        return {
+            "success": True,
+            "items_created": items_created,
+            "items_updated": items_updated,
+            "orders_created": orders_created,
+            "locations_processed": len(locations),
+            "locations_failed": orders_failed
+        }
+    except Exception as e:
+        logger.exception(f"Error syncing Square data: {str(e)}")
+        db.rollback()
+        return {"success": False, "error": str(e)}
+async def _get_integration(user_id: int, db: Session) -> models.POSIntegration:
+    """Get Square integration for user or raise exception"""
+    integration = db.query(models.POSIntegration).filter(
+        models.POSIntegration.user_id == user_id,
+        models.POSIntegration.provider == "square"
+    ).first()
+    if not integration:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Square integration not found. Please connect your Square account first."
+        )
+    
+    # Check if token is expired and needs refresh
+    if integration.expires_at and integration.expires_at < datetime.now() and integration.refresh_token:
+        # Refresh token
+        try:
+            logger.info(f"Square OAuth: Refreshing expired token")
+            refresh_response = requests.post(
+                f"{SQUARE_API_BASE}/oauth2/token",
+                headers={"Content-Type": "application/json"},
+                json={
+                    "client_id": SQUARE_APP_ID,
+                    "client_secret": SQUARE_APP_SECRET,
+                    "grant_type": "refresh_token",
+                    "refresh_token": integration.refresh_token
+                }
+            )
+            
+            refresh_data = refresh_response.json()
+            
+            if "error" not in refresh_data:
+                # Update token
+                integration.access_token = refresh_data.get("access_token")
+                integration.refresh_token = refresh_data.get("refresh_token", integration.refresh_token)
+                
+                if "expires_in" in refresh_data:
+                    integration.expires_at = datetime.now() + timedelta(seconds=refresh_data.get("expires_in"))
+                    
+                integration.updated_at = datetime.now()
+                db.commit()
+        except Exception as e:
+            logger.exception(f"Error refreshing token: {str(e)}")
+            # Continue with existing token
+    
+    return integration

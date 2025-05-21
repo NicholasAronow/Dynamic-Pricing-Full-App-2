@@ -1,3 +1,10 @@
+# Load environment variables from .env file
+import os
+from dotenv import load_dotenv
+
+# Load environment variables before any other imports
+load_dotenv()
+
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +25,7 @@ from dashboard import dashboard_router
 from item_analytics import item_analytics_router
 from cogs import cogs_router
 from action_items import action_items_router
+from square_integration import square_router
 
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
@@ -52,6 +60,7 @@ app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"]
 app.include_router(item_analytics_router, prefix="/api/item-analytics", tags=["Item Analytics"])
 app.include_router(cogs_router, prefix="/api/cogs", tags=["COGS"])
 app.include_router(action_items_router, prefix="/api/action-items", tags=["Action Items"])
+app.include_router(square_router, prefix="/api/integrations/square", tags=["Square Integration"])
 
 @app.get("/")
 async def root():

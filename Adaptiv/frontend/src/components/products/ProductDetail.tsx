@@ -733,6 +733,7 @@ const ProductDetail: React.FC = () => {
             />
           </Col>
           
+          {/* 
           <Col xs={24} md={4}>
             <Statistic
               title="Margin"
@@ -744,6 +745,7 @@ const ProductDetail: React.FC = () => {
               valueStyle={{ color: 'rgba(0, 0, 0, 0.85)' }}
             />
           </Col>
+          */}
           
           <Col xs={24} md={4}>
             <Statistic

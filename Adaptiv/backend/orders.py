@@ -243,3 +243,53 @@ def get_order_analytics(
         "average_order_value": average_order_value,
         "top_selling_items": top_selling_items
     }
+    total_revenue = db.query(func.sum(models.Order.total_amount)).scalar() or 0
+    
+    # Calculate average order value
+    average_order_value = total_revenue / total_orders if total_orders > 0 else 0
+    
+    # Get top selling items
+    top_items_query = db.query(
+        models.Item.id,
+        models.Item.name,
+        func.sum(models.OrderItem.quantity).label("total_quantity"),
+        func.sum(models.OrderItem.quantity * models.OrderItem.unit_price).label("total_revenue")
+    ).join(
+        models.OrderItem, models.Item.id == models.OrderItem.item_id
+    ).join(
+        models.Order, models.OrderItem.order_id == models.Order.id
+    ).filter(
+        # Ensure only items belonging to current user are included
+        models.Item.user_id == user_id,
+        models.Order.user_id == user_id
+    )
+    
+    # Apply date filters if provided
+    if start_date and end_date:
+        top_items_query = top_items_query.filter(
+            models.Order.order_date >= start,
+            models.Order.order_date <= end
+        )
+    
+    top_items = top_items_query.group_by(
+        models.Item.id
+    ).order_by(
+        func.sum(models.OrderItem.quantity).desc()
+    ).limit(5).all()
+    
+    top_selling_items = [
+        {
+            "id": item.id,
+            "name": item.name,
+            "total_quantity": item.total_quantity,
+            "total_revenue": item.total_revenue
+        }
+        for item in top_items
+    ]
+    
+    return {
+        "total_orders": total_orders,
+        "total_revenue": total_revenue,
+        "average_order_value": average_order_value,
+        "top_selling_items": top_selling_items
+    }

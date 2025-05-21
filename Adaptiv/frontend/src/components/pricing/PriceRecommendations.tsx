@@ -470,40 +470,7 @@ const PriceRecommendations: React.FC = () => {
         );
       },
     },
-    {
-      title: 'Measured Impact',
-      key: 'impact',
-      sorter: (a, b) => a.incrementalRevenue - b.incrementalRevenue,
-      sortDirections: ['descend', 'ascend'] as TableColumnType<any>['sortDirections'],
-      render: (text: string, record: any) => (
-        <Space direction="vertical" size={1}>
-          <div>
-            <Text type="secondary" style={{ fontSize: '0.85em' }}>Incremental Revenue</Text>
-          </div>
-          <div>
-            <Text strong style={{ color: record.incrementalRevenue > 0 ? '#3f8600' : '#cf1322' }}>
-              {record.incrementalRevenue > 0 ? '+' : ''}
-              ${formatNumberWithCommas(Number(Math.abs(record.incrementalRevenue || 0).toFixed(2)))}
-            </Text>
-          </div>
-          <div>
-            <Text 
-              style={{ 
-                color: record.measuredRevenueChangePercent > 0 ? '#3f8600' : record.measuredRevenueChangePercent < 0 ? '#cf1322' : 'inherit' 
-              }}
-            >
-              {record.measuredRevenueChangePercent > 0 ? (
-                <ArrowUpOutlined />
-              ) : record.measuredRevenueChangePercent < 0 ? (
-                <ArrowDownOutlined />
-              ) : null}
-              {' '}
-              {record.measuredRevenueChangePercent > 0 ? '+' : ''}{formatNumberWithCommas(record.measuredRevenueChangePercent)}%
-            </Text>
-          </div>
-        </Space>
-      ),
-    },
+
   ];
 
   // Function to format numbers with commas

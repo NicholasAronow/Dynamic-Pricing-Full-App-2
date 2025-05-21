@@ -42,6 +42,7 @@ class Item(Base):
     current_price = Column(Float)
     cost = Column(Float, nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # Add user_id for account-specific data
+    pos_id = Column(String, nullable=True, index=True)  # Store external POS system ID (Square catalog ID)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
@@ -90,7 +91,9 @@ class Order(Base):
     order_date = Column(DateTime(timezone=True))
     total_amount = Column(Float)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # Add user_id for account-specific data
+    pos_id = Column(String, nullable=True, index=True)  # Store external POS system order ID (Square order ID)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Add relationship to User
     user = relationship("User", backref="orders")
@@ -145,3 +148,23 @@ class ActionItem(Base):
     
     # Relationship to User
     user = relationship("User", backref="action_items")
+
+class POSIntegration(Base):
+    __tablename__ = "pos_integrations"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    provider = Column(String, index=True)  # e.g. "square", "clover", etc.
+    access_token = Column(String)
+    refresh_token = Column(String, nullable=True)
+    merchant_id = Column(String, nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    token_type = Column(String, nullable=True)
+    scope = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    pos_id = Column(String, nullable=True, index=True)  # Store external order IDs
+    
+    # Relationship to User
+    user = relationship("User", backref="pos_integrations")
