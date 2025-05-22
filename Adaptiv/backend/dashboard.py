@@ -19,7 +19,7 @@ dashboard_router = APIRouter()
 def get_sales_data(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    account_id: Optional[int] = None,
+    account_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
@@ -57,11 +57,33 @@ def get_sales_data(
             start_date_obj = min_date
         
         # Filter by the current user's ID unless specifically requesting another account's data
-        user_id = account_id if account_id else current_user.id
+        # Handle both integer IDs and Square's alphanumeric IDs
+        if account_id:
+            try:
+                # Try to convert to integer (for regular order IDs)
+                user_id = int(account_id)
+                logger.info(f"Using numeric user_id: {user_id}")
+                # Regular orders query with numeric ID
+                orders_query = db.query(models.Order).filter(models.Order.user_id == user_id)
+            except ValueError:
+                # If conversion fails, it's likely a Square ID (alphanumeric)
+                logger.info(f"Detected Square ID format: {account_id}")
+                # For Square orders, use the square_merchant_id field
+                user_id = current_user.id  # Default to current user for permissions
+                orders_query = db.query(models.Order).filter(
+                    models.Order.user_id == user_id,
+                    models.Order.source == "square",
+                    models.Order.square_merchant_id == account_id
+                )
+        else:
+            # No account_id provided, use current user
+            user_id = current_user.id
+            logger.info(f"Using current user_id: {user_id}")
+            orders_query = db.query(models.Order).filter(models.Order.user_id == user_id)
+        
         logger.info(f"Filtering dashboard data for user_id: {user_id}")
         
-        # Basic stats using simpler queries with date filter
-        orders_query = db.query(models.Order).filter(models.Order.user_id == user_id)
+        # Basic stats using the query we created above
         if start_date or end_date:
             orders_query = orders_query.filter(
                 models.Order.order_date >= start_date_obj,
@@ -227,7 +249,7 @@ def get_sales_data(
 @dashboard_router.get("/product-performance")
 def get_product_performance(
     time_frame: Optional[str] = None,
-    account_id: Optional[int] = None,
+    account_id: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
@@ -264,11 +286,27 @@ def get_product_performance(
             start_date = min_date
             
         # Filter by the current user's ID unless specifically requesting another account's data
-        user_id = account_id if account_id else current_user.id
-        logger.info(f"Filtering product performance data for user_id: {user_id}")
+        # Handle both integer IDs and Square's alphanumeric IDs
+        is_square_id = False
+        if account_id:
+            try:
+                # Try to convert to integer (for regular order IDs)
+                user_id = int(account_id)
+                logger.info(f"Using numeric user_id for product performance: {user_id}")
+            except ValueError:
+                # If conversion fails, it's likely a Square ID (alphanumeric)
+                logger.info(f"Detected Square ID format for product performance: {account_id}")
+                is_square_id = True
+                user_id = current_user.id  # Default to current user for permissions
+                square_merchant_id = account_id
+        else:
+            # No account_id provided, use current user
+            user_id = current_user.id
+            logger.info(f"Using current user_id for product performance: {user_id}")
         
         # Basic query to get products and their order metrics with time range filter
-        item_query = db.query(
+        # Handle Square ID differently if detected
+        base_query = db.query(
             models.Item.id,
             models.Item.name,
             models.Item.category,
@@ -283,17 +321,34 @@ def get_product_performance(
         ).outerjoin(
             models.Order,
             models.OrderItem.order_id == models.Order.id
-        ).filter(
-            # Filter items by user_id
-            models.Item.user_id == user_id,
-            # Only include orders within the time frame
-            (models.Order.order_date >= start_date) | (models.Order.order_date.is_(None)),
-            (models.Order.order_date <= end_date) | (models.Order.order_date.is_(None)),
-            # If there are orders, ensure they belong to this user too
-            (models.Order.user_id == user_id) | (models.Order.id.is_(None))
-        ).group_by(
-            models.Item.id
-        ).all()
+        )
+        
+        # Apply different filters based on whether this is a Square ID or not
+        if is_square_id:
+            logger.info(f"Applying Square merchant ID filter: {square_merchant_id}")
+            item_query = base_query.filter(
+                # Filter items by user_id (actual user account)
+                models.Item.user_id == user_id,
+                # Only include orders within the time frame
+                (models.Order.order_date >= start_date) | (models.Order.order_date.is_(None)),
+                (models.Order.order_date <= end_date) | (models.Order.order_date.is_(None)),
+                # If there are orders, filter by Square merchant ID
+                (models.Order.source == "square") | (models.Order.id.is_(None)),
+                (models.Order.square_merchant_id == square_merchant_id) | (models.Order.id.is_(None))
+            )
+        else:
+            item_query = base_query.filter(
+                # Filter items by user_id
+                models.Item.user_id == user_id,
+                # Only include orders within the time frame
+                (models.Order.order_date >= start_date) | (models.Order.order_date.is_(None)),
+                (models.Order.order_date <= end_date) | (models.Order.order_date.is_(None)),
+                # If there are orders, ensure they belong to this user too
+                (models.Order.user_id == user_id) | (models.Order.id.is_(None))
+            )
+            
+        # Group and execute the query
+        item_query = item_query.group_by(models.Item.id).all()
         
         # Transform the data for the frontend
         results = []
