@@ -1365,16 +1365,29 @@ const Dashboard: React.FC = () => {
                   alignItems: 'center',
                   backgroundColor: 'rgba(255, 255, 255, 0.85)' 
                 }}>
-                  <div style={{ 
-                    padding: '20px', 
-                    borderRadius: '8px', 
+                  <div style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    background: 'rgba(255, 255, 255, 0.85)',
+                    padding: '20px',
                     textAlign: 'center',
-                    maxWidth: '80%' 
+                    borderRadius: '8px'
                   }}>
-                    <p style={{ fontSize: '16px', fontWeight: 500, marginBottom: '8px' }}>No menu items available</p>
-                    <p style={{ color: '#666', marginBottom: '20px' }}>To view your item performance, please connect your POS provider</p>
-                    <Button type="primary" size="large">
-                      Connect POS Provider
+                    <Title level={4}>No Menu Data Available</Title>
+                    <Button 
+                      type="primary" 
+                      icon={<ShoppingOutlined />}
+                      onClick={handleSquareIntegration}
+                      size="large"
+                    >
+                      Connect Square Account
                     </Button>
                   </div>
                 </div>
@@ -1547,18 +1560,31 @@ const Dashboard: React.FC = () => {
                     padding: '20px 0',
                     minHeight: '150px'
                   }}>
-                    <div style={{ 
-                      padding: '15px', 
-                      borderRadius: '8px', 
-                      textAlign: 'center',
-                      maxWidth: '90%' 
-                    }}>
-                      <p style={{ fontSize: '16px', fontWeight: 500, marginBottom: '8px' }}>No Adaptiv data available</p>
-                      <p style={{ color: '#666', marginBottom: '15px', fontSize: '14px' }}>To view your optimization metrics, please connect your POS provider</p>
-                      <Button type="primary">
-                        Connect POS Provider
-                      </Button>
-                    </div>
+                   <div style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    background: 'rgba(255, 255, 255, 0.85)',
+                    padding: '20px',
+                    textAlign: 'center',
+                    borderRadius: '8px'
+                  }}>
+                    <Title level={4}>No Adaptiv Data Available</Title>
+                    <Button 
+                      type="primary" 
+                      icon={<ShoppingOutlined />}
+                      onClick={handleSquareIntegration}
+                      size="large"
+                    >
+                      Connect Square Account
+                    </Button>
+                  </div>
                   </div>
                 </div>
               ) : (
@@ -1644,16 +1670,29 @@ const Dashboard: React.FC = () => {
                     padding: '30px 0',
                     minHeight: '220px'
                   }}>
-                    <div style={{ 
-                      padding: '15px', 
-                      borderRadius: '8px', 
+                    <div style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: '100%',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      background: 'rgba(255, 255, 255, 0.85)',
+                      padding: '20px',
                       textAlign: 'center',
-                      maxWidth: '90%' 
+                      borderRadius: '8px'
                     }}>
-                      <p style={{ fontSize: '16px', fontWeight: 500, marginBottom: '8px' }}>No competitor data available</p>
-                      <p style={{ color: '#666', marginBottom: '15px', fontSize: '14px' }}>To view competitor analysis, please connect your POS provider</p>
-                      <Button type="primary">
-                        Connect POS Provider
+                      <Title level={4}>No Competitor Data Available</Title>
+                      <Button 
+                        type="primary" 
+                        icon={<ShoppingOutlined />}
+                        onClick={handleSquareIntegration}
+                        size="large"
+                      >
+                        Connect Square Account
                       </Button>
                     </div>
                   </div>
