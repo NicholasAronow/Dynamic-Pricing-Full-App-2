@@ -62,6 +62,9 @@ def run_migration():
                 connection.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_pos_id ON orders (pos_id);"))
                 connection.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS source VARCHAR DEFAULT 'manual';"))
                 connection.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS square_merchant_id VARCHAR;"))
+                
+                # Add updated_at column with the same default behavior as created_at
+                connection.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;"))
                 logger.info("Successfully added Square-related columns to orders table")
             except ProgrammingError as e:
                 if "already exists" in str(e):
