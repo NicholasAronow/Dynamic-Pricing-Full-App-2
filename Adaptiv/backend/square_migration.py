@@ -4,7 +4,7 @@ Square Integration Migration Script
 This script adds the necessary columns to the database to support Square integration.
 """
 import logging
-from sqlalchemy import create_engine, Column, String, MetaData, Table
+from sqlalchemy import create_engine, Column, String, MetaData, Table, text
 from sqlalchemy.exc import SQLAlchemyError, ProgrammingError
 import os
 from dotenv import load_dotenv
@@ -43,8 +43,9 @@ def run_migration():
         logger.info("Adding pos_id column to items table...")
         with engine.begin() as connection:
             try:
-                connection.execute("ALTER TABLE items ADD COLUMN IF NOT EXISTS pos_id VARCHAR;")
-                connection.execute("CREATE INDEX IF NOT EXISTS ix_items_pos_id ON items (pos_id);")
+                # Use text() to create executable SQL statements
+                connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS pos_id VARCHAR;"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_items_pos_id ON items (pos_id);"))
                 logger.info("Successfully added pos_id to items table")
             except ProgrammingError as e:
                 if "already exists" in str(e):
@@ -56,10 +57,11 @@ def run_migration():
         logger.info("Adding pos_id and source columns to orders table...")
         with engine.begin() as connection:
             try:
-                connection.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS pos_id VARCHAR;")
-                connection.execute("CREATE INDEX IF NOT EXISTS ix_orders_pos_id ON orders (pos_id);")
-                connection.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS source VARCHAR DEFAULT 'manual';")
-                connection.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS square_merchant_id VARCHAR;")
+                # Use text() to create executable SQL statements
+                connection.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS pos_id VARCHAR;"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_pos_id ON orders (pos_id);"))
+                connection.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS source VARCHAR DEFAULT 'manual';"))
+                connection.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS square_merchant_id VARCHAR;"))
                 logger.info("Successfully added Square-related columns to orders table")
             except ProgrammingError as e:
                 if "already exists" in str(e):
