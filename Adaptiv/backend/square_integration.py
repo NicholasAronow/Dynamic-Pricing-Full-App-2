@@ -31,7 +31,7 @@ square_router = APIRouter()
 SQUARE_ENV = os.getenv("SQUARE_ENV", "sandbox")  # 'sandbox' or 'production'
 SQUARE_APP_ID = os.getenv("SQUARE_APP_ID", "")
 SQUARE_APP_SECRET = os.getenv("SQUARE_APP_SECRET", "")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "https://adaptiv-eight.vercel.app/")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://adaptiv-eight.vercel.app").rstrip('/')
 
 # Square hosts based on environment
 SQUARE_OAUTH_HOST = "https://connect.squareupsandbox.com" if SQUARE_ENV == "sandbox" else "https://connect.squareup.com"
