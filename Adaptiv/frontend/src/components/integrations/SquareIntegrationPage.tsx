@@ -63,17 +63,8 @@ const SquareIntegrationPage: React.FC = () => {
       console.log('Initiating Square OAuth flow');
       const authUrl = await integrationService.getSquareAuthUrl();
       
-      console.log('Square Auth URL from backend:', authUrl);
-      
       if (authUrl) {
         // Redirect to Square's authorization page
-        // Ensure we're using the correct domain
-        if (!authUrl.includes('connect.squareupsandbox.com') && !authUrl.includes('connect.squareup.com')) {
-          console.error('Invalid Square auth URL domain:', authUrl);
-          message.error('Invalid Square authorization URL. Please contact support.');
-          return;
-        }
-        
         window.location.href = authUrl;
       } else {
         message.error('Failed to get Square authorization URL.');

@@ -1,0 +1,9 @@
+# Database connection
+DATABASE_URL=sqlite:///./adaptiv.db
+SECRET_KEY=your_secure_secret_key_here
+
+# Square Integration
+SQUARE_ENV=sandbox
+SQUARE_APP_ID=YOUR_SQUARE_APP_ID
+SQUARE_APP_SECRET=YOUR_SQUARE_APP_SECRET
+FRONTEND_URL=http://localhost:3000
