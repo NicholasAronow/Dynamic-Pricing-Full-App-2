@@ -1,5 +1,5 @@
-from pydantic import BaseModel, EmailStr, Field, validator
-from typing import Optional, List
+from pydantic import BaseModel, EmailStr, Field, validator, ConfigDict
+from typing import Optional, List, Any, Dict
 from datetime import datetime
 
 # Auth Schemas
@@ -25,8 +25,7 @@ class User(UserBase):
     is_active: bool
     created_at: datetime
     
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
 
 # Business Profile Schemas
 class BusinessProfileBase(BaseModel):
@@ -50,15 +49,13 @@ class BusinessProfile(BusinessProfileBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
 
 # Complete User with Profile
 class UserWithProfile(User):
     business: Optional[BusinessProfile] = None
     
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
 
 # Item Schemas
 class ItemBase(BaseModel):
@@ -83,8 +80,7 @@ class Item(ItemBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
 
 # Price History Schemas
 class PriceHistoryBase(BaseModel):
@@ -100,8 +96,7 @@ class PriceHistory(PriceHistoryBase):
     id: int
     changed_at: datetime
     
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
 
 # Price Simulation Schema (for testing without Square API)
 class PriceSimulation(BaseModel):
@@ -136,8 +131,7 @@ class CompetitorItem(CompetitorItemBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
 
 # Order Item Schemas
 class OrderItemBase(BaseModel):
@@ -159,8 +153,7 @@ class OrderItem(OrderItemBase):
     order_id: int
     subtotal: float
     
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
 
 # Order Schemas
 class OrderBase(BaseModel):
@@ -187,8 +180,7 @@ class Order(OrderBase):
     created_at: datetime
     items: List[OrderItem] = []
     
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
 
 # Order Analytics Response
 class OrderAnalytics(BaseModel):
@@ -227,8 +219,7 @@ class COGS(COGSBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
 
 # Action Item Schemas
 class ActionItemBase(BaseModel):
@@ -291,5 +282,4 @@ class ActionItem(ActionItemBase):
     updated_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)

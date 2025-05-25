@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 # Load environment variables before any other imports
 load_dotenv()
 
-from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -26,6 +25,8 @@ from item_analytics import item_analytics_router
 from cogs import cogs_router
 from action_items import action_items_router
 from square_integration import square_router
+from local_agents.agents_router import router as agents_router
+from agents_api import router as agents_api_router
 
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
@@ -61,6 +62,8 @@ app.include_router(item_analytics_router, prefix="/api/item-analytics", tags=["I
 app.include_router(cogs_router, prefix="/api/cogs", tags=["COGS"])
 app.include_router(action_items_router, prefix="/api/action-items", tags=["Action Items"])
 app.include_router(square_router, prefix="/api/integrations/square", tags=["Square Integration"])
+app.include_router(agents_router, prefix="/api", tags=["Agents"])
+app.include_router(agents_api_router, prefix="/api", tags=["Agents SDK"])
 
 @app.get("/")
 async def root():

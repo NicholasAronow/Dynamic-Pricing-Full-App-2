@@ -16,6 +16,7 @@ import PriceRecommendations from './components/pricing/PriceRecommendations';
 import CompetitorAnalysis from './components/competitor/CompetitorAnalysis';
 import CompetitorDetail from './components/competitor/CompetitorDetail';
 import ProductDetail from './components/products/ProductDetail';
+import AgentDashboard from './components/agents/AgentDashboard';
 
 // Integration components
 import SquareCallback from './components/integrations/SquareCallback';
@@ -66,6 +67,7 @@ function App() {
             <Route path="competitor-analysis" element={<CompetitorAnalysis />} />
             <Route path="competitor/:competitorId" element={<CompetitorDetail />} />
             <Route path="product/:productId" element={<ProductDetail />} />
+            <Route path="agents" element={<AgentDashboard />} />
             <Route path="square-test" element={<SquareOrderTester />} />
             <Route path="integrations/square" element={<SquareIntegrationPage />} />
           </Route>

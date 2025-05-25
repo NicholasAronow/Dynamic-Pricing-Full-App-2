@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from typing import Optional
+from typing import Optional, Annotated
 
 import models, schemas
 from database import get_db
@@ -18,6 +18,10 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 10080  # 7 days (60 * 24 * 7) for persistent login
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # Use absolute URL to avoid confusion with frontend routes
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
+
+# Define annotated dependencies for Pydantic compatibility
+SessionDep = Annotated[Session, Depends(get_db)]
+TokenDep = Annotated[str, Depends(oauth2_scheme)]
 
 auth_router = APIRouter()
 
@@ -51,6 +55,10 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     return encoded_jwt
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    """Get the current user from the database.
+    
+    This function is annotated with the dependency using Depends() to avoid Pydantic schema errors.
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
