@@ -8,7 +8,9 @@ import {
   Card, 
   notification,
   Spin,
-  Alert
+  Alert,
+  Row,
+  Col
 } from 'antd';
 import { BankOutlined } from '@ant-design/icons';
 import axios from 'axios';
@@ -23,6 +25,12 @@ interface BusinessProfileData {
   company_size: string;
   founded_year?: number;
   description?: string;
+  // Address fields
+  street_address?: string;
+  city?: string;
+  state?: string;
+  postal_code?: string;
+  country?: string;
 }
 
 const BusinessProfile: React.FC = () => {
@@ -125,6 +133,11 @@ const BusinessProfile: React.FC = () => {
             company_size: '',
             founded_year: undefined,
             description: '',
+            street_address: '',
+            city: '',
+            state: '',
+            postal_code: '',
+            country: 'USA',
           }}
         >
           <Form.Item
@@ -144,16 +157,20 @@ const BusinessProfile: React.FC = () => {
             rules={[{ required: true, message: 'Please select your industry' }]}
           >
             <Select placeholder="Select your industry">
-              <Option value="Technology">Technology</Option>
-              <Option value="E-commerce">E-commerce</Option>
-              <Option value="Manufacturing">Manufacturing</Option>
-              <Option value="Healthcare">Healthcare</Option>
-              <Option value="Finance">Finance</Option>
-              <Option value="Education">Education</Option>
-              <Option value="Retail">Retail</Option>
-              <Option value="Hospitality">Hospitality</Option>
-              <Option value="Transportation">Transportation</Option>
-              <Option value="Other">Other</Option>
+              <Option value="Cafe">Cafe</Option>
+              <Option value="Coffee Shop">Coffee Shop</Option>
+              <Option value="Bakery">Bakery</Option>
+              <Option value="Restaurant">Restaurant</Option>
+              <Option value="Fast Food">Fast Food</Option>
+              <Option value="Food Truck">Food Truck</Option>
+              <Option value="Pizzeria">Pizzeria</Option>
+              <Option value="Bar">Bar</Option>
+              <Option value="Brewery">Brewery</Option>
+              <Option value="Ice Cream Shop">Ice Cream Shop</Option>
+              <Option value="Juice Bar">Juice Bar</Option>
+              <Option value="Deli">Deli</Option>
+              <Option value="Catering">Catering</Option>
+              <Option value="Other Food Service">Other Food Service</Option>
             </Select>
           </Form.Item>
           
@@ -191,6 +208,56 @@ const BusinessProfile: React.FC = () => {
               rows={4} 
               placeholder="Brief description of your company" 
             />
+          </Form.Item>
+
+          <Title level={4} style={{ marginTop: 24 }}>Location Information</Title>
+          <p style={{ marginBottom: 16 }}>This information helps our agents find local competitors in your area.</p>
+          
+          <Form.Item
+            name="street_address"
+            label="Street Address"
+          >
+            <Input placeholder="123 Main St" />
+          </Form.Item>
+          
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item
+                name="city"
+                label="City"
+              >
+                <Input placeholder="New York" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="state"
+                label="State"
+              >
+                <Input placeholder="NY" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="postal_code"
+                label="Postal Code"
+              >
+                <Input placeholder="10001" />
+              </Form.Item>
+            </Col>
+          </Row>
+          
+          <Form.Item
+            name="country"
+            label="Country"
+            initialValue="USA"
+          >
+            <Select>
+              <Option value="USA">United States</Option>
+              <Option value="Canada">Canada</Option>
+              <Option value="Mexico">Mexico</Option>
+              <Option value="Other">Other</Option>
+            </Select>
           </Form.Item>
           
           <Form.Item>

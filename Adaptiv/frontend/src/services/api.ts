@@ -104,18 +104,34 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   response => response,
   error => {
-    // Only log the error, but don't take any action that could disrupt the user session
+    // Log the error for debugging
     console.log('API error response:', error.message);
     
-    // Handle unauthorized errors (token expired, etc.) but ONLY for authentication endpoints
+    // Handle unauthorized errors (token expired, etc.)
     if (error.response && error.response.status === 401) {
       console.log('Received 401 error, path:', error.config.url);
       
-      // ONLY handle auth errors for explicit auth endpoints
       const requestUrl = error.config.url || '';
       const isAuthEndpoint = requestUrl.includes('/auth/token') || 
                            requestUrl.includes('/login') ||
                            (requestUrl.includes('/me') && error.response.data?.detail?.includes('credentials'));
+      
+      const isAgentEndpoint = requestUrl.includes('/agents-sdk/');
+      
+      // Check for token and reapply if missing
+      const token = localStorage.getItem('token');
+      if (token && !api.defaults.headers.common['Authorization']) {
+        console.log('Re-applying missing auth token to headers');
+        api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        
+        // If this was an agent endpoint error and we reapplied the token,
+        // we'll return a special error that can be retried
+        if (isAgentEndpoint) {
+          error.shouldRetry = true;
+          return Promise.reject(error);
+        }
+      }
       
       if (isAuthEndpoint) {
         console.log('Authentication endpoint error, clearing invalid token');
@@ -125,6 +141,17 @@ api.interceptors.response.use(
         if (!window.location.pathname.includes('/login')) {
           console.log('Redirecting to login due to auth endpoint error');
           window.location.href = '/login';
+        }
+      } else if (isAgentEndpoint) {
+        console.log('Agent endpoint 401 error, token may be invalid');
+        // For agent endpoint errors, we might want to refresh the token or redirect
+        // if the user is clearly not authenticated
+        
+        if (!token) {
+          console.log('No token found for agent endpoint request, redirecting to login');
+          if (!window.location.pathname.includes('/login')) {
+            window.location.href = '/login';
+          }
         }
       } else {
         // For all other 401 errors, just log but don't disrupt the user session

@@ -128,8 +128,9 @@ async def generate_market_report(db: Session, user_id: int) -> models.MarketRepo
             
             # Extract components
             summary = analysis_json.get("summary", "No summary provided")
-            supply_chain = analysis_json.get("supply_chain", {})
-            cost_trends = analysis_json.get("cost_trends", {})
+            supply_chain = analysis_json.get("supply_chain", [])
+            market_trends = analysis_json.get("market_trends", {})
+            cost_trends = market_trends.get("cost_trends", [])  # Properly extract cost_trends from market_trends
             competitive_landscape = analysis_json.get("competitive_landscape", {})
             recommendations = analysis_json.get("recommendations", [])
             
@@ -138,7 +139,7 @@ async def generate_market_report(db: Session, user_id: int) -> models.MarketRepo
                 user_id=user_id,
                 summary=summary,
                 market_trends=json.dumps({
-                    "cost_trends": cost_trends,
+                    "cost_trends": cost_trends,  # This is now properly extracted from market_trends
                     "competitive_landscape": competitive_landscape
                 }),
                 supply_chain=json.dumps(supply_chain),

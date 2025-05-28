@@ -16,11 +16,21 @@ class CompetitorRecommendation(BaseModelConfig):
     recommendation: str
     rationale: str
 
+class DiscoveredCompetitorItem(BaseModelConfig):
+    competitor_name: str
+    item_name: str
+    price: float
+    category: Optional[str] = ""
+    description: Optional[str] = ""
+    similarity_score: Optional[float] = None
+    url: Optional[str] = ""
+
 class CompetitorAnalysis(BaseModelConfig):
     summary: str
     insights: Optional[List[CompetitorInsight]] = []
     recommendations: Optional[List[CompetitorRecommendation]] = []
     positioning: Optional[str] = ""
+    discovered_competitors: Optional[List[DiscoveredCompetitorItem]] = []
 
 # Customer Agent Models
 class DemographicSegment(BaseModelConfig):

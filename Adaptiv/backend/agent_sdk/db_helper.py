@@ -45,10 +45,30 @@ class DBHelper:
         if not business:
             return {"error": "Business not found"}
         
+        # Format address as a string if any address components exist
+        location = ""
+        if any([business.city, business.state, business.postal_code]):
+            address_parts = []
+            if business.city:
+                address_parts.append(business.city)
+            if business.state:
+                address_parts.append(business.state)
+            if business.postal_code:
+                address_parts.append(business.postal_code)
+            if business.country and business.country.lower() != "usa":
+                address_parts.append(business.country)
+            location = ", ".join(address_parts)
+        
         return {
             "name": business.business_name,
             "industry": business.industry,
-            "description": business.description
+            "description": business.description,
+            "location": location,
+            "street_address": business.street_address or "",
+            "city": business.city or "",
+            "state": business.state or "",
+            "postal_code": business.postal_code or "",
+            "country": business.country or "USA"
         }
     
     def get_competitor_items(self) -> Dict[str, List[Dict[str, Any]]]:
@@ -105,8 +125,62 @@ class DBHelper:
         
         return history_data
     
+    def save_competitor_items(self, competitors_data: List[Dict[str, Any]]) -> List[db_models.CompetitorItem]:
+        """Save new competitor items to the database.
+        
+        Args:
+            competitors_data: List of competitor items with name, price, etc.
+            
+        Returns:
+            List of saved CompetitorItem objects
+        """
+        saved_items = []
+        
+        for item_data in competitors_data:
+            # Check if this competitor item already exists
+            existing_item = self._session.query(db_models.CompetitorItem).filter(
+                db_models.CompetitorItem.competitor_name == item_data.get('competitor_name'),
+                db_models.CompetitorItem.item_name == item_data.get('item_name')
+            ).first()
+            
+            if existing_item:
+                # Update the existing item with new information
+                existing_item.price = item_data.get('price', existing_item.price)
+                existing_item.category = item_data.get('category', existing_item.category)
+                existing_item.description = item_data.get('description', existing_item.description)
+                existing_item.similarity_score = item_data.get('similarity_score', existing_item.similarity_score)
+                existing_item.updated_at = func.now()
+                saved_items.append(existing_item)
+            else:
+                # Create a new competitor item
+                new_item = db_models.CompetitorItem(
+                    competitor_name=item_data.get('competitor_name'),
+                    item_name=item_data.get('item_name'),
+                    price=item_data.get('price'),
+                    category=item_data.get('category', ''),
+                    description=item_data.get('description', ''),
+                    similarity_score=item_data.get('similarity_score'),
+                    url=item_data.get('url', '')
+                )
+                self._session.add(new_item)
+                saved_items.append(new_item)
+        
+        # Commit all changes
+        self._session.commit()
+        
+        # Refresh all items to get their IDs
+        for item in saved_items:
+            self._session.refresh(item)
+            
+        return saved_items
+    
     def save_competitor_report(self, user_id: int, report_data: Dict[str, Any]) -> db_models.CompetitorReport:
         """Save a competitor report to the database."""
+        # First save any new competitor items discovered by the agent
+        new_competitors = report_data.get("discovered_competitors", [])
+        if new_competitors:
+            self.save_competitor_items(new_competitors)
+        
         competitor_report = db_models.CompetitorReport(
             user_id=user_id,
             summary=report_data.get("summary", ""),

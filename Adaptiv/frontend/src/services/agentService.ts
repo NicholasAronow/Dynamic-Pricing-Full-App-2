@@ -150,13 +150,33 @@ const agentService = {
 
   // Get the latest reports from all agents
   getLatestReports: async (): Promise<AgentReport> => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/api/agents-sdk/latest-reports`);
-      return response.data;
-    } catch (error) {
-      console.error('Error getting latest agent reports:', error);
-      throw error;
-    }
+    const maxRetries = 1; // Only retry once
+    let retryCount = 0;
+    
+    const attemptRequest = async (): Promise<AgentReport> => {
+      try {
+        // Ensure the Authorization header is set for this specific request
+        const token = localStorage.getItem('token');
+        if (token) {
+          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        }
+        
+        const response = await axios.get(`${API_BASE_URL}/api/agents-sdk/latest-reports`);
+        return response.data;
+      } catch (error: any) {
+        // Check if this is a 401 error that should be retried
+        if (error.response?.status === 401 && error.shouldRetry && retryCount < maxRetries) {
+          console.log(`Retrying agent reports request (attempt ${retryCount + 1})`);
+          retryCount++;
+          return attemptRequest();
+        }
+        
+        console.error('Error getting latest agent reports:', error);
+        throw error;
+      }
+    };
+    
+    return attemptRequest();
   },
 
   // Run a specific agent

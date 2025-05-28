@@ -26,6 +26,12 @@ class BusinessProfile(Base):
     company_size = Column(String)
     founded_year = Column(Integer, nullable=True)
     description = Column(Text, nullable=True)
+    # Address fields
+    street_address = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    state = Column(String, nullable=True)
+    postal_code = Column(String, nullable=True)
+    country = Column(String, nullable=True, default="USA")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
