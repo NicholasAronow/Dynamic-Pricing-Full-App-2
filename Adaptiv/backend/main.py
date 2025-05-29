@@ -27,6 +27,7 @@ from action_items import action_items_router
 from square_integration import square_router
 from local_agents.agents_router import router as agents_router
 from agents_api import router as agents_api_router
+from dynamic_pricing_agents.api_routes import router as dynamic_pricing_router
 
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
@@ -64,6 +65,7 @@ app.include_router(action_items_router, prefix="/api/action-items", tags=["Actio
 app.include_router(square_router, prefix="/api/integrations/square", tags=["Square Integration"])
 app.include_router(agents_router, prefix="/api", tags=["Agents"])
 app.include_router(agents_api_router, prefix="/api", tags=["Agents SDK"])
+app.include_router(dynamic_pricing_router, prefix="/api/agents/dynamic-pricing", tags=["Dynamic Pricing Agents"])
 
 @app.get("/")
 async def root():

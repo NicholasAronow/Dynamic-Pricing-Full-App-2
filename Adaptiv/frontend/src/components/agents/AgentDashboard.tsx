@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Row, Col, Typography, Tabs, Button, Space, Tooltip, Modal, message, Spin, Empty } from 'antd';
-import { RobotOutlined, PlusOutlined, SettingOutlined, ApiOutlined, PlayCircleOutlined, FileTextOutlined } from '@ant-design/icons';
+import { RobotOutlined, PlusOutlined, SettingOutlined, ApiOutlined, PlayCircleOutlined, FileTextOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import agentService, { AgentReport } from '../../services/agentService';
 import AgentReports from './AgentReports';
 import AgentProgressMonitor from './AgentProgressMonitor';
+import DynamicPricingAgents from './DynamicPricingAgents';
 
 const { Title, Paragraph } = Typography;
 const { TabPane } = Tabs;
@@ -327,6 +328,17 @@ const AgentDashboard: React.FC = () => {
               </Col>
             ))}
           </Row>
+        </TabPane>
+        <TabPane 
+          tab={
+            <span>
+              <ThunderboltOutlined />
+              Dynamic Pricing Agents
+            </span>
+          } 
+          key="dynamic-pricing"
+        >
+          <DynamicPricingAgents />
         </TabPane>
       </Tabs>
       <Modal
