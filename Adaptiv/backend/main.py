@@ -25,6 +25,7 @@ from item_analytics import item_analytics_router
 from cogs import cogs_router
 from action_items import action_items_router
 from square_integration import square_router
+from pricing_recommendations import pricing_recommendations_router
 from local_agents.agents_router import router as agents_router
 from agents_api import router as agents_api_router
 from dynamic_pricing_agents.api_routes import router as dynamic_pricing_router
@@ -38,7 +39,8 @@ app = FastAPI(title="Adaptiv API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "*", 
+        "http://localhost:3000", 
+        "http://127.0.0.1:3000",
         "https://*.vercel.app",
         "https://adaptiv-dynamic-pricing.vercel.app",
         "https://adaptiv-eight.vercel.app",
@@ -63,6 +65,7 @@ app.include_router(item_analytics_router, prefix="/api/item-analytics", tags=["I
 app.include_router(cogs_router, prefix="/api/cogs", tags=["COGS"])
 app.include_router(action_items_router, prefix="/api/action-items", tags=["Action Items"])
 app.include_router(square_router, prefix="/api/integrations/square", tags=["Square Integration"])
+app.include_router(pricing_recommendations_router, prefix="/api/pricing", tags=["Pricing Recommendations"])
 app.include_router(agents_router, prefix="/api", tags=["Agents"])
 app.include_router(agents_api_router, prefix="/api", tags=["Agents SDK"])
 app.include_router(dynamic_pricing_router, prefix="/api/agents/dynamic-pricing", tags=["Dynamic Pricing Agents"])

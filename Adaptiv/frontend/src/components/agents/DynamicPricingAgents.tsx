@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, message, Spin, Alert, Tabs, Badge, Progress, Statistic, Row, Col, Timeline, Tag, Tooltip, Space, Divider } from 'antd';
-import { RobotOutlined, PlayCircleOutlined, CheckCircleOutlined, ClockCircleOutlined, ExperimentOutlined, LineChartOutlined, SearchOutlined, ThunderboltOutlined, WarningOutlined } from '@ant-design/icons';
+import { Card, Button, message, Spin, Alert, Tabs, Badge, Progress, Statistic, Row, Col, Timeline, Tag, Tooltip, Space, Divider, Modal, Input, Empty } from 'antd';
+import { RobotOutlined, PlayCircleOutlined, CheckCircleOutlined, ClockCircleOutlined, ExperimentOutlined, LineChartOutlined, SearchOutlined, ThunderboltOutlined, WarningOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { API_BASE_URL } from 'config';
+import pricingService, { AgentPricingRecommendation } from '../../services/pricingService';
 
 const { TabPane } = Tabs;
 
@@ -35,11 +36,91 @@ interface AnalysisResults {
   }>;
 }
 
+const { TextArea } = Input;
+
+interface FeedbackModalProps {
+  visible: boolean;
+  recommendation: AgentPricingRecommendation | null;
+  action: 'accept' | 'reject';
+  onSubmit: (action: 'accept' | 'reject', feedback: string) => void;
+  onCancel: () => void;
+}
+
+const FeedbackModal: React.FC<FeedbackModalProps> = ({ 
+  visible, 
+  recommendation, 
+  action, 
+  onSubmit, 
+  onCancel 
+}) => {
+  const [feedback, setFeedback] = useState('');
+
+  useEffect(() => {
+    if (visible) {
+      setFeedback(''); // Reset feedback when modal opens
+    }
+  }, [visible]);
+
+  return (
+    <Modal
+      title={action === 'accept' ? 'Accept Price Recommendation' : 'Reject Price Recommendation'}
+      open={visible}
+      onCancel={onCancel}
+      footer={[
+        <Button key="back" onClick={onCancel}>
+          Cancel
+        </Button>,
+        <Button 
+          key="submit" 
+          type="primary" 
+          onClick={() => onSubmit(action, feedback)}
+        >
+          {action === 'accept' ? 'Accept' : 'Reject'}
+        </Button>,
+      ]}
+    >
+      {recommendation && (
+        <>
+          <p>
+            <strong>Item:</strong> {recommendation.item_name}<br />
+            <strong>Current Price:</strong> ${Number(recommendation.current_price).toFixed(2)}<br />
+            <strong>Recommended Price:</strong> ${Number(recommendation.recommended_price).toFixed(2)}<br />
+            <strong>Change:</strong> ${Number(recommendation.price_change_amount).toFixed(2)} ({(Number(recommendation.price_change_percent) * 100).toFixed(1)}%)
+          </p>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ color: '#888', marginBottom: 8 }}>Please provide any feedback or reasoning (optional):</div>
+            <TextArea
+              rows={4}
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              placeholder="Add your feedback here..."
+            />
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+};
+
 const DynamicPricingAgents: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [analysisStatus, setAnalysisStatus] = useState<'idle' | 'running' | 'completed' | 'error'>('idle');
   const [results, setResults] = useState<AnalysisResults | null>(null);
+  const [recommendations, setRecommendations] = useState<AgentPricingRecommendation[]>([]);
+  const [pendingRecommendations, setPendingRecommendations] = useState<AgentPricingRecommendation[]>([]);
+  const [completedRecommendations, setCompletedRecommendations] = useState<AgentPricingRecommendation[]>([]);
+  const [loadingRecommendations, setLoadingRecommendations] = useState<boolean>(false);
+  const [lastFetchTime, setLastFetchTime] = useState<number>(0);
+  const [feedbackModal, setFeedbackModal] = useState<{
+    visible: boolean;
+    recommendation: AgentPricingRecommendation | null;
+    action: 'accept' | 'reject';
+  }>({
+    visible: false,
+    recommendation: null,
+    action: 'accept'
+  });
   const [agentStatuses, setAgentStatuses] = useState<AgentStatus[]>([
     { name: 'Data Collection', status: 'idle', icon: <SearchOutlined /> },
     { name: 'Market Analysis', status: 'idle', icon: <LineChartOutlined /> },
@@ -48,6 +129,137 @@ const DynamicPricingAgents: React.FC = () => {
     { name: 'Experimentation', status: 'idle', icon: <ExperimentOutlined /> }
   ]);
 
+  // Load recommendations from localStorage on component mount
+  useEffect(() => {
+    const savedRecommendations = localStorage.getItem('adaptiv_pricing_recommendations');
+    const savedTimestamp = localStorage.getItem('adaptiv_recommendations_timestamp');
+    
+    if (savedRecommendations && savedTimestamp) {
+      try {
+        const recommendations = JSON.parse(savedRecommendations);
+        const timestamp = parseInt(savedTimestamp, 10);
+        
+        // Only use saved recommendations if they're less than 24 hours old
+        const isRecent = (Date.now() - timestamp) < 24 * 60 * 60 * 1000;
+        
+        if (isRecent && recommendations.length > 0) {
+          setRecommendations(recommendations);
+          setLastFetchTime(timestamp);
+          
+          // Organize recommendations by status
+          const pending = recommendations.filter((rec: AgentPricingRecommendation) => !rec.user_action);
+          const completed = recommendations.filter((rec: AgentPricingRecommendation) => rec.user_action);
+          
+          setPendingRecommendations(pending);
+          setCompletedRecommendations(completed);
+          
+          console.log(`Loaded ${recommendations.length} saved recommendations from localStorage`);
+        } else {
+          // Data is too old or empty, fetch fresh data
+          fetchAgentRecommendations();
+        }
+      } catch (e) {
+        console.error('Error parsing saved recommendations:', e);
+        fetchAgentRecommendations();
+      }
+    } else {
+      // No saved data, fetch fresh data
+      fetchAgentRecommendations();
+    }
+  }, []);
+
+  const fetchAgentRecommendations = async () => {
+    try {
+      setLoadingRecommendations(true);
+      
+      // Fetch ALL recommendations, not just pending ones
+      const data = await pricingService.getAgentRecommendations();
+      
+      // Debug log the received data
+      console.log('Pricing recommendations received:', data);
+      if (data && data.length > 0) {
+        data.forEach((rec: AgentPricingRecommendation) => {
+          console.log(`${rec.item_name}: Current: $${rec.current_price}, Recommended: $${rec.recommended_price}, Change %: ${rec.price_change_percent}`);
+        });
+      }
+      
+      // Save to state and localStorage
+      setRecommendations(data);
+      setLastFetchTime(Date.now());
+      localStorage.setItem('adaptiv_pricing_recommendations', JSON.stringify(data));
+      localStorage.setItem('adaptiv_recommendations_timestamp', Date.now().toString());
+      
+      // Organize recommendations by status
+      const pending = data.filter((rec: AgentPricingRecommendation) => !rec.user_action);
+      const completed = data.filter((rec: AgentPricingRecommendation) => rec.user_action);
+      
+      setPendingRecommendations(pending);
+      setCompletedRecommendations(completed);
+    } catch (error) {
+      console.error('Error fetching agent recommendations:', error);
+      message.error('Failed to load pricing recommendations');
+    } finally {
+      setLoadingRecommendations(false);
+    }
+  };
+
+  const handleActionClick = (recommendation: AgentPricingRecommendation, action: 'accept' | 'reject') => {
+    setFeedbackModal({
+      visible: true,
+      recommendation,
+      action
+    });
+  };
+
+  const handleActionConfirm = async (action: 'accept' | 'reject', feedback: string) => {
+    if (!feedbackModal.recommendation) return;
+
+    try {
+      const result = await pricingService.updateRecommendationAction(
+        feedbackModal.recommendation.id, 
+        action, 
+        feedback
+      );
+      
+      if (result) {
+        message.success(`Successfully ${action}ed the price recommendation`);
+        
+        // Update the local state without making another API call
+        const updatedRecommendations = recommendations.map((rec: AgentPricingRecommendation) => {
+          if (rec.id === feedbackModal.recommendation!.id) {
+            return {
+              ...rec,
+              user_action: action,
+              user_feedback: feedback
+            };
+          }
+          return rec;
+        });
+        
+        setRecommendations(updatedRecommendations);
+        
+        // Update localStorage
+        localStorage.setItem('adaptiv_pricing_recommendations', JSON.stringify(updatedRecommendations));
+        
+        // Re-filter pending and completed recommendations
+        setPendingRecommendations(updatedRecommendations.filter((rec: AgentPricingRecommendation) => !rec.user_action));
+        setCompletedRecommendations(updatedRecommendations.filter((rec: AgentPricingRecommendation) => rec.user_action));
+      } else {
+        message.error(`Failed to ${action} the recommendation`);
+      }
+    } catch (error) {
+      console.error(`Error ${action}ing recommendation:`, error);
+      message.error(`Error ${action}ing recommendation. Please try again.`);
+    } finally {
+      // Close modal
+      setFeedbackModal({
+        visible: false,
+        recommendation: null,
+        action: 'accept'
+      });
+    }
+  };
+  
   const runFullAnalysis = async () => {
     try {
       setLoading(true);
@@ -94,7 +306,7 @@ const DynamicPricingAgents: React.FC = () => {
   };
 
   const pollForResults = async (taskId: string) => {
-    const maxAttempts = 120; // 2 minutes max
+    const maxAttempts = 600; // 10 minutes max
     let attempts = 0;
     
     console.log('Starting to poll for results with task ID:', taskId);
@@ -371,6 +583,158 @@ const DynamicPricingAgents: React.FC = () => {
                 </Timeline>
               )}
             </TabPane>
+
+            <TabPane 
+              tab={
+                <span>
+                  <Badge count={pendingRecommendations.length} style={{ marginRight: '6px' }} />
+                  Actionable Recommendations
+                </span>
+              } 
+              key="agent-recommendations"
+            >
+              {loadingRecommendations ? (
+                <div style={{ textAlign: 'center', padding: '20px' }}>
+                  <Spin size="large" />
+                  <div style={{ marginTop: '10px' }}>Loading recommendations...</div>
+                </div>
+              ) : pendingRecommendations.length > 0 ? (
+                <div>
+                  <Alert
+                    message="Pending Price Recommendations"
+                    description="Review and accept/reject these AI-generated price recommendations to help improve your pricing strategy. These recommendations require your decision."
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: '16px' }}
+                  />
+                  {pendingRecommendations.map((rec) => (
+                    <Card 
+                      key={rec.id} 
+                      size="small" 
+                      style={{ marginBottom: '16px' }}
+                    >
+                      <Row gutter={16} align="middle">
+                        <Col span={5}>
+                          <strong>{rec.item_name}</strong>
+                        </Col>
+                        <Col span={4}>
+                          Current: <span style={{ fontWeight: 500 }}>${Number(rec.current_price).toFixed(2)}</span>
+                        </Col>
+                        <Col span={4}>
+                          Suggested: <span style={{ fontWeight: 500, color: '#1890ff' }}>${Number(rec.recommended_price).toFixed(2)}</span>
+                        </Col>
+                        <Col span={3}>
+                          <Tag color={rec.price_change_amount >= 0 ? 'green' : 'red'}>
+                            {rec.price_change_amount >= 0 ? '+' : ''}
+                            {/* Check if price_change_percent is already in percentage format */}
+                            {Math.abs(rec.price_change_percent) > 1 ? 
+                              rec.price_change_percent.toFixed(1) : 
+                              (rec.price_change_percent * 100).toFixed(1)
+                            }%
+                          </Tag>
+                        </Col>
+                        <Col span={4}>
+                          <Tag color="blue">Confidence: {(rec.confidence_score * 100).toFixed(0)}%</Tag>
+                        </Col>
+                        <Col span={4}>
+                          <Space>
+                            <Button 
+                              type="primary" 
+                              size="small" 
+                              icon={<CheckOutlined />} 
+                              onClick={() => handleActionClick(rec, 'accept')}
+                            >
+                              Accept
+                            </Button>
+                            <Button 
+                              size="small" 
+                              icon={<CloseOutlined />} 
+                              onClick={() => handleActionClick(rec, 'reject')}
+                            >
+                              Reject
+                            </Button>
+                          </Space>
+                        </Col>
+                      </Row>
+                      <div style={{ marginTop: '10px' }}>
+                        <strong>Rationale:</strong> {rec.rationale}
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <Empty description="No pending pricing recommendations" />
+              )}
+            </TabPane>
+            <TabPane 
+              tab={
+                <span>
+                  <Tag color="#108ee9">{completedRecommendations.length}</Tag>
+                  Completed Recommendations
+                </span>
+              } 
+              key="completed-recommendations"
+            >
+              {completedRecommendations.length > 0 ? (
+                <div>
+                  <Alert
+                    message="Completed Price Recommendations"
+                    description="These are recommendations that you have already acted upon."
+                    type="success"
+                    showIcon
+                    style={{ marginBottom: '16px' }}
+                  />
+                  {completedRecommendations.map((rec: AgentPricingRecommendation) => (
+                    <Card 
+                      key={rec.id} 
+                      size="small" 
+                      style={{ marginBottom: '16px' }}
+                    >
+                      <Row gutter={16} align="middle">
+                        <Col span={5}>
+                          <strong>{rec.item_name}</strong>
+                        </Col>
+                        <Col span={4}>
+                          Current: <span style={{ fontWeight: 500 }}>${Number(rec.current_price).toFixed(2)}</span>
+                        </Col>
+                        <Col span={4}>
+                          Suggested: <span style={{ fontWeight: 500, color: '#1890ff' }}>${Number(rec.recommended_price).toFixed(2)}</span>
+                        </Col>
+                        <Col span={3}>
+                          <Tag color={rec.price_change_amount >= 0 ? 'green' : 'red'}>
+                            {rec.price_change_amount >= 0 ? '+' : ''}
+                            {Math.abs(rec.price_change_percent) > 1 ? 
+                              rec.price_change_percent.toFixed(1) : 
+                              (rec.price_change_percent * 100).toFixed(1)
+                            }%
+                          </Tag>
+                        </Col>
+                        <Col span={4}>
+                          <Tag color="blue">Confidence: {(rec.confidence_score * 100).toFixed(0)}%</Tag>
+                        </Col>
+                        <Col span={4}>
+                          {rec.user_action === 'accept' ? (
+                            <Tag color="success" icon={<CheckOutlined />}>Accepted</Tag>
+                          ) : (
+                            <Tag color="error" icon={<CloseOutlined />}>Rejected</Tag>
+                          )}
+                        </Col>
+                      </Row>
+                      <div style={{ marginTop: '10px' }}>
+                        <strong>Rationale:</strong> {rec.rationale}
+                      </div>
+                      {rec.user_feedback && (
+                        <div style={{ marginTop: '8px', background: '#f5f5f5', padding: '8px', borderRadius: '4px' }}>
+                          <strong>Your feedback:</strong> {rec.user_feedback}
+                        </div>
+                      )}
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <Empty description="No completed pricing recommendations" />
+              )}
+            </TabPane>
           </Tabs>
         )}
 
@@ -392,8 +756,15 @@ const DynamicPricingAgents: React.FC = () => {
           </div>
         )}
       </Card>
+
+      <FeedbackModal 
+        visible={feedbackModal.visible}
+        recommendation={feedbackModal.recommendation}
+        action={feedbackModal.action}
+        onSubmit={handleActionConfirm}
+        onCancel={() => setFeedbackModal({ ...feedbackModal, visible: false })}
+      />
     </div>
   );
 };
-
 export default DynamicPricingAgents;

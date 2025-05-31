@@ -7,6 +7,9 @@ from datetime import datetime, timedelta
 import json
 import numpy as np
 import random
+from sqlalchemy import desc
+from sqlalchemy.orm import Session
+from models import AgentMemory, PricingExperiment, ExperimentLearning
 from ..base_agent import BaseAgent
 
 
@@ -28,7 +31,7 @@ class ExperimentationAgent(BaseAgent):
         Focus on scientific methodology and actionable results."""
     
     def process(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Design and manage pricing experiments"""
+        """Design and manage pricing experiments with memory functionality"""
         db = context['db']
         user_id = context['user_id']
         strategy_recommendations = context.get('strategy_recommendations', {})
@@ -36,18 +39,29 @@ class ExperimentationAgent(BaseAgent):
         
         self.log_action("experimentation_started", {"user_id": user_id})
         
+        # Retrieve memory context
+        memory_context = self.get_memory_context(db, user_id, 
+                                             memory_types=['pricing_experiment', 'experiment_learning',
+                                                          'market_insight', 'pricing_decision'])
+        
+        # Get experiment history from memory
+        experiment_history = self._get_experiment_history(db, user_id)
+        
         # Get current experiments
-        active_experiments = self._get_active_experiments(db, user_id)
-        completed_experiments = self._get_completed_experiments(db, user_id)
+        active_experiments = self._get_active_experiments_with_memory(db, user_id, memory_context)
+        completed_experiments = self._get_completed_experiments_with_memory(db, user_id, memory_context)
         
-        # Analyze completed experiments
-        experiment_results = self._analyze_experiment_results(completed_experiments, db)
+        # Analyze completed experiments with historical learnings
+        experiment_results = self._analyze_experiment_results_with_memory(
+            completed_experiments, experiment_history, db
+        )
         
-        # Design new experiments
-        new_experiments = self._design_new_experiments(
+        # Design new experiments using memory context
+        new_experiments = self._design_new_experiments_with_memory(
             strategy_recommendations,
             active_experiments,
             experiment_results,
+            memory_context,
             db,
             user_id
         )
@@ -55,11 +69,17 @@ class ExperimentationAgent(BaseAgent):
         # Update active experiments
         updated_experiments = self._update_active_experiments(active_experiments, db)
         
-        # Generate experiment insights
-        insights = self._generate_experiment_insights({
+        # Save experiments and learnings to memory
+        self._save_experiments_to_memory(db, user_id, updated_experiments, experiment_results)
+        self._save_experiment_learnings(db, user_id, experiment_results)
+        
+        # Generate experiment insights with memory enhancement
+        insights = self._generate_experiment_insights_with_memory({
             "active_experiments": updated_experiments,
             "completed_results": experiment_results,
-            "new_experiments": new_experiments
+            "new_experiments": new_experiments,
+            "experiment_history": experiment_history,
+            "memory_context": memory_context
         })
         
         experimentation_results = {
@@ -68,18 +88,20 @@ class ExperimentationAgent(BaseAgent):
             "completed_experiments": experiment_results,
             "new_experiment_proposals": new_experiments,
             "insights": insights,
-            "recommendations": self._generate_experimentation_recommendations(
-                experiment_results, updated_experiments, new_experiments
+            "recommendations": self._generate_experimentation_recommendations_with_memory(
+                experiment_results, updated_experiments, new_experiments, memory_context
             ),
             "experiment_calendar": self._create_experiment_calendar(
                 updated_experiments, new_experiments
-            )
+            ),
+            "historical_performance": self._analyze_historical_experiment_performance(experiment_history)
         }
         
         self.log_action("experimentation_completed", {
             "active_experiments": len(updated_experiments),
             "new_proposals": len(new_experiments),
-            "completed_analyzed": len(experiment_results)
+            "completed_analyzed": len(experiment_results),
+            "experiment_history_used": len(experiment_history)
         })
         
         return experimentation_results
@@ -312,66 +334,84 @@ class ExperimentationAgent(BaseAgent):
     
     def _generate_experiment_insights(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Generate insights from experiment data using LLM"""
-        import json
+        # Extract key data
+        active = data["active_experiments"]
+        completed = data["completed_results"]
+        proposals = data["new_experiments"]
         
-        # Convert any NumPy types to Python native types for JSON serialization
-        safe_data = self._convert_numpy_to_python(data)
-        
-        messages = [
-            {"role": "system", "content": self.get_system_prompt()},
-            {"role": "user", "content": f"""
-            Analyze the following experimentation data and provide insights:
-            
-            Active Experiments: {json.dumps(safe_data['active_experiments'], indent=2)}
-            
-            Completed Results: {json.dumps(safe_data['completed_results'], indent=2)}
-            
-            New Proposals: {json.dumps([{
-                    "name": exp["name"],
-                    "type": exp["type"],
-                    "hypothesis": exp["hypothesis"],
-                    "duration": exp["duration_days"]
-                } for exp in safe_data['new_experiments']], indent=2)}
-            
-            Provide insights on:
-            1. Key learnings from completed experiments
-            2. Current experiment performance and early indicators
-            3. Recommendations for new experiment priorities
-            4. Overall experimentation strategy effectiveness
-            5. Risk management considerations
-            """}
-        ]
-        
-        response = self.call_llm(messages)
-        
-        if response.get("error"):
-            self.logger.error(f"LLM Error: {response.get('error')}")
-            return {"error": response.get("content", "Failed to generate experiments")}
-        
-        content = response.get("content", "")
-        if content:
-            try:
-                return json.loads(content)
-            except:
-                return {"experiments": content}
-        else:
-            return {"error": "No content in response"}
+        # Generate insights
+        insights = {
+            "current_strategy": "diversified_testing" if len(active) > 1 else "focused_testing",
     
+            "success_rate": f"{sum(1 for r in completed if r.get('recommendation') == 'implement_treatment') / len(completed) * 100:.1f}%" if completed else "No completed experiments",
+            "key_findings": [],
+            "recommended_focus_areas": []
+        }
+        
+        return insights
+        
+    def _generate_experiment_insights_with_memory(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate insights from experiment data using LLM with memory enhancement"""
+        # Get base insights
+        insights = self._generate_experiment_insights(data)
+        
+        # Enhance with historical context if available
+        if 'experiment_history' in data and data['experiment_history']:
+            history = data['experiment_history']
+            memory_context = data.get('memory_context', {})
+            
+            # Calculate historical success metrics
+            successful_experiments = sum(1 for exp in history 
+                                      if exp.get('status') == 'completed' and 
+                                      exp.get('results', {}).get('revenue_lift', 0) > 0)
+            total_completed = sum(1 for exp in history if exp.get('status') == 'completed')
+            historical_success_rate = f"{(successful_experiments / total_completed * 100) if total_completed > 0 else 0:.1f}%"
+            
+            # Add historical context to insights
+            insights['historical_success_rate'] = historical_success_rate
+            insights['experiments_to_date'] = len(history)
+            insights['trend'] = 'improving' if successful_experiments > 0 and total_completed > 0 and successful_experiments/total_completed > 0.5 else 'needs_improvement'
+            
+            # Add learning patterns
+            all_learnings = []
+            for exp in history:
+                all_learnings.extend(exp.get('learnings', []))
+            
+            # Find recurring learnings
+            from collections import Counter
+            learning_texts = [l.get('learning') for l in all_learnings if isinstance(l, dict) and 'learning' in l]
+            if not learning_texts:
+                learning_texts = [l for l in all_learnings if isinstance(l, str)]
+            
+            if learning_texts:
+                # Simple approach - look for common substrings/themes
+                common_themes = []
+                if 'price' in ' '.join(learning_texts).lower():
+                    common_themes.append('price_sensitivity')
+                if 'elastic' in ' '.join(learning_texts).lower():
+                    common_themes.append('elasticity_patterns')
+                if 'season' in ' '.join(learning_texts).lower() or 'time' in ' '.join(learning_texts).lower():
+                    common_themes.append('seasonal_effects')
+                
+                insights['recurring_patterns'] = common_themes
+        
+        return insights
+
     def _generate_experimentation_recommendations(self, results: List[Dict], 
-                                                   active: List[Dict], 
-                                                   proposals: List[Dict]) -> List[Dict[str, Any]]:
+                                                 active: List[Dict], 
+                                                 proposals: List[Dict]) -> List[Dict[str, Any]]:
         """Generate recommendations for experimentation strategy"""
         recommendations = []
         
         # Based on completed experiments
-        successful_experiments = [r for r in results if r["revenue_lift"] > 0.05 and r["statistically_significant"]]
+        successful_experiments = [r for r in results if r.get("revenue_lift", 0) > 0.05 and r.get("statistically_significant", False)]
         if successful_experiments:
             recommendations.append({
                 "priority": "high",
                 "category": "scale_success",
                 "recommendation": "Roll out successful experiment results to all customers",
                 "experiments": [exp["name"] for exp in successful_experiments],
-                "expected_impact": f"{np.mean([exp['revenue_lift'] for exp in successful_experiments])*100:.1f}% revenue increase"
+                "expected_impact": f"{np.mean([exp.get('revenue_lift', 0) for exp in successful_experiments])*100:.1f}% revenue increase"
             })
         
         # Based on active experiments
@@ -393,21 +433,372 @@ class ExperimentationAgent(BaseAgent):
                 "category": "launch_new",
                 "recommendation": "Launch low-risk experiments to continue learning",
                 "experiments": [exp["name"] for exp in high_priority],
-                "timeline": "Within next week"
             })
         
         return recommendations
     
-    def _create_experiment_calendar(self, active: List[Dict], proposals: List[Dict]) -> List[Dict[str, Any]]:
+    def _generate_experimentation_recommendations_with_memory(self, results: List[Dict], 
+                                                       active: List[Dict], 
+                                                       proposals: List[Dict],
+                                                       memory_context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Generate recommendations for experimentation strategy with memory enhancement"""
+        # Get base recommendations
+        recommendations = self._generate_experimentation_recommendations(results, active, proposals)
+        
+        # Enhance with memory context
+        if memory_context:
+            # Incorporate market insights if available
+            market_insights = memory_context.get('market_insight', [])
+            if market_insights:
+                # Extract relevant insights about seasonality, trends, etc.
+                seasonal_insights = [insight for insight in market_insights 
+                                  if 'season' in str(insight.get('content', {})).lower() or 
+                                  'trend' in str(insight.get('content', {})).lower()]
+                
+                if seasonal_insights:
+                    # Add seasonal testing recommendation
+                    recommendations.append({
+                        "priority": "medium",
+                        "category": "seasonal_testing",
+                        "recommendation": "Design experiments accounting for identified seasonal patterns",
+                        "rationale": "Historical market data shows seasonal patterns that should be accounted for in experiment design"
+                    })
+            
+            # Incorporate past experiment learnings
+            experiment_learning = memory_context.get('experiment_learning', [])
+            if experiment_learning:
+                # Find common successful experiment types
+                experiment_types = {}
+                for learning in experiment_learning:
+                    content = learning.get('content', {})
+                    exp_type = content.get('experiment_type', 'unknown')
+                    if exp_type not in experiment_types:
+                        experiment_types[exp_type] = {
+                            'count': 0,
+                            'success_count': 0
+                        }
+                    experiment_types[exp_type]['count'] += 1
+                    if content.get('successful', False):
+                        experiment_types[exp_type]['success_count'] += 1
+                
+                # Find most successful experiment type
+                most_successful_type = None
+                highest_success_rate = 0
+                for exp_type, stats in experiment_types.items():
+                    if stats['count'] >= 3:  # Need minimum sample size
+                        success_rate = stats['success_count'] / stats['count']
+                        if success_rate > highest_success_rate:
+                            highest_success_rate = success_rate
+                            most_successful_type = exp_type
+                
+                if most_successful_type:
+                    # Add recommendation to focus on successful experiment type
+                    recommendations.append({
+                        "priority": "high",
+                        "category": "focus_on_success",
+                        "recommendation": f"Prioritize {most_successful_type} experiments based on historical success",
+                        "rationale": f"This experiment type has shown a {highest_success_rate:.0%} success rate historically"
+                    })
+        
+        return recommendations
+    
+    def _analyze_experiment_results_with_memory(self, experiments: List[Dict], 
+                                               experiment_history: List[Dict], 
+                                               db) -> List[Dict[str, Any]]:
+        """Analyze results from completed experiments with memory enhancement"""
+        # Get base experiment results
+        results = self._analyze_experiment_results(experiments, db)
+        
+        # Enhance with historical patterns from memory
+        if experiment_history and results:
+            # Create a mapping of item_id to historical performance
+            item_history = {}
+            for hist_exp in experiment_history:
+                if hist_exp.get('status') == 'completed' and 'items' in hist_exp and 'results' in hist_exp:
+                    for item_id in hist_exp.get('items', []):
+                        if item_id not in item_history:
+                            item_history[item_id] = []
+                        item_history[item_id].append({
+                            'experiment_name': hist_exp.get('name'),
+                            'experiment_type': hist_exp.get('type'),
+                            'treatment': hist_exp.get('results', {}).get('treatment', {}),
+                            'revenue_lift': hist_exp.get('results', {}).get('revenue_lift', 0),
+                            'units_lift': hist_exp.get('results', {}).get('units_lift', 0)
+                        })
+            
+            # Enhance current results with historical context
+            for result in results:
+                relevant_history = []
+                for item_id in result.get('items', []):
+                    if item_id in item_history:
+                        relevant_history.extend(item_history[item_id])
+                
+                if relevant_history:
+                    # Add historical context to the result
+                    result['historical_context'] = {
+                        'previous_experiments': len(relevant_history),
+                        'avg_revenue_lift': np.mean([h.get('revenue_lift', 0) for h in relevant_history]),
+                        'avg_units_lift': np.mean([h.get('units_lift', 0) for h in relevant_history]),
+                        'consistent_pattern': self._detect_consistent_pattern(relevant_history),
+                        'similar_experiments': relevant_history[:2]  # Include top 2 similar experiments
+                    }
+                    
+                    # Adjust confidence based on historical data
+                    if 'confidence' in result:
+                        # Higher confidence if results match historical patterns
+                        if result.get('historical_context', {}).get('consistent_pattern'):
+                            result['confidence'] = min(result.get('confidence', 0.5) + 0.2, 0.95)
+        
+        return results
+    
+    def _detect_consistent_pattern(self, experiment_history: List[Dict]) -> bool:
+        """Detect if there's a consistent pattern in experiment history"""
+        if len(experiment_history) < 2:
+            return False
+            
+        # Check for consistent revenue lift direction
+        revenue_lifts = [h.get('revenue_lift', 0) for h in experiment_history]
+        all_positive = all(lift > 0 for lift in revenue_lifts)
+        all_negative = all(lift < 0 for lift in revenue_lifts)
+        
+        return all_positive or all_negative
+        
+    def _design_new_experiments_with_memory(self, strategy: Dict, active: List[Dict], 
+                                      results: List[Dict], memory_context: Dict[str, Any],
+                                      db, user_id: int) -> List[Dict[str, Any]]:
+        """Design new experiments based on strategy, past results, and memory"""
+        # Get base experiment designs
+        new_experiments = self._design_new_experiments(strategy, active, results, db, user_id)
+        
+        # Enhance with memory context
+        if memory_context:
+            # Look for successful experiments in memory to replicate
+            past_experiments = []
+            for mem_type in ['pricing_experiment', 'experiment_learning']:
+                for memory in memory_context.get(mem_type, []):
+                    content = memory.get('content', {})
+                    if isinstance(content, dict):
+                        if content.get('results', {}).get('revenue_lift', 0) > 0.05 and \
+                           content.get('status', '') == 'completed':
+                            past_experiments.append(content)
+            
+            # Use successful past experiments to inform new ones
+            if past_experiments and new_experiments:
+                for i, new_exp in enumerate(new_experiments):
+                    # Find a similar past experiment that was successful
+                    similar_past = next((p for p in past_experiments 
+                                       if p.get('experiment_type', '') == new_exp.get('type', '')), None)
+                    
+                    if similar_past:
+                        # Adjust experiment parameters based on past success
+                        if 'design' in new_exp and 'treatment' in new_exp['design']:
+                            # Use successful treatment from past as starting point
+                            if 'price_multiplier' in new_exp['design']['treatment'] and \
+                               'price_multiplier' in similar_past.get('treatment_group', {}):
+                                past_multiplier = similar_past['treatment_group']['price_multiplier']
+                                new_exp['design']['treatment']['price_multiplier'] = past_multiplier
+                                
+                                # Add context about why this design was chosen
+                                new_exp['historical_basis'] = {
+                                    'based_on_experiment': similar_past.get('name', 'Past experiment'),
+                                    'past_revenue_lift': similar_past.get('results', {}).get('revenue_lift', 0),
+                                    'confidence': 'high' if similar_past.get('results', {}).get('statistically_significant', False) else 'medium'
+                                }
+        
+        return new_experiments
+        
+    def _save_experiments_to_memory(self, db: Session, user_id: int, active_experiments: List[Dict], experiment_results: List[Dict]):
+        """Save experiments to memory for future reference"""
+        import numpy as np
+        
+        # Convert NumPy data types to Python native types before database operations
+        active_experiments = self._convert_numpy_to_python(active_experiments)
+        experiment_results = self._convert_numpy_to_python(experiment_results)
+        
+        # Save active experiments
+        for experiment in active_experiments:
+            exp_id = experiment.get('experiment_id')
+            if not exp_id:
+                continue
+                
+            # Check if experiment already exists in database
+            existing = db.query(PricingExperiment).filter(
+                PricingExperiment.user_id == user_id,
+                PricingExperiment.experiment_id == exp_id
+            ).first()
+            
+            if existing:
+                # Update existing experiment
+                existing.metrics = experiment.get('metrics', {})
+                existing.status = 'active'
+                existing.last_updated = datetime.now()
+            else:
+                # Create new experiment record
+                new_experiment = PricingExperiment(
+                    user_id=user_id,
+                    experiment_id=exp_id,
+                    name=experiment.get('name', 'Unnamed Experiment'),
+                    experiment_type=experiment.get('type', 'a_b_test'),
+                    item_ids=experiment.get('items', []),  # Changed from items to item_ids
+                    started_at=datetime.now(),  # Changed from start_date to started_at
+                    status='active',
+                    control_prices=experiment.get('control_group', {}),  # Changed from control_group to control_prices
+                    treatment_prices=experiment.get('treatment_group', {}),  # Changed from treatment_group to treatment_prices
+                    control_metrics={},  # Added control_metrics instead of metrics
+                    treatment_metrics={},  # Added treatment_metrics 
+                    success_criteria=experiment.get('success_criteria', {})  # Changed from success_metrics to success_criteria
+                )
+                db.add(new_experiment)
+        
+        # Save completed experiments
+        for result in experiment_results:
+            exp_id = result.get('experiment_id')
+            if not exp_id:
+                continue
+                
+            # Check if experiment already exists in database
+            existing = db.query(PricingExperiment).filter(
+                PricingExperiment.user_id == user_id,
+                PricingExperiment.experiment_id == exp_id
+            ).first()
+            
+            if existing:
+                # Update existing experiment
+                existing.status = 'completed'
+                existing.ended_at = datetime.now()  # Changed from end_date to ended_at
+                
+                # Set individual metrics fields instead of results
+                existing.control_metrics = existing.control_metrics or {}
+                existing.treatment_metrics = existing.treatment_metrics or {}
+                
+                # Add performance metrics - convert NumPy values to Python types
+                existing.p_value = float(self._convert_numpy_to_python(result.get('p_value', 1)))
+                existing.confidence_interval = self._convert_numpy_to_python({
+                    'lower': result.get('confidence_interval_lower', 0),
+                    'upper': result.get('confidence_interval_upper', 0)
+                })
+                
+                # Update treatment metrics with lift information - convert NumPy values to Python types
+                if existing.treatment_metrics:
+                    existing.treatment_metrics.update(self._convert_numpy_to_python({
+                        'revenue_lift': result.get('revenue_lift', 0),
+                        'units_lift': result.get('units_lift', 0),
+                        'statistically_significant': result.get('statistically_significant', False)
+                    }))
+            else:
+                # Create new completed experiment record
+                new_experiment = PricingExperiment(
+                    user_id=user_id,
+                    experiment_id=exp_id,
+                    name=result.get('name', 'Unnamed Experiment'),
+                    experiment_type='a_b_test',
+                    item_ids=[],  # No item data available in results
+                    started_at=datetime.now() - timedelta(days=14),  # Estimate
+                    ended_at=datetime.now(),
+                    status='completed',
+                    control_metrics={},
+                    treatment_metrics=self._convert_numpy_to_python({
+                        'revenue_lift': result.get('revenue_lift', 0),
+                        'units_lift': result.get('units_lift', 0),
+                        'statistically_significant': result.get('statistically_significant', False)
+                    }),
+                    p_value=float(self._convert_numpy_to_python(result.get('p_value', 1))),
+                    confidence_interval=self._convert_numpy_to_python({
+                        'lower': result.get('confidence_interval_lower', 0),
+                        'upper': result.get('confidence_interval_upper', 0)
+                    }),
+                    success_criteria=result.get('success_criteria', {})
+                )
+                db.add(new_experiment)
+        
+        db.commit()
+    
+    def _save_experiment_learnings(self, db: Session, user_id: int, experiment_results: List[Dict]):
+        """Save learnings from experiments to memory"""
+        for result in experiment_results:
+            exp_id = result.get('experiment_id')
+            if not exp_id or not result.get('learnings'):
+                continue
+                
+            # Save each learning as a separate record
+            for learning in result.get('learnings', []):
+                new_learning = ExperimentLearning(
+                    user_id=user_id,
+                    experiment_id=exp_id,
+                    learning=learning,
+                    confidence=0.8 if result.get('statistically_significant', False) else 0.5,
+                    created_at=datetime.now()
+                )
+                db.add(new_learning)
+        
+        db.commit()
+    
+    def _analyze_historical_experiment_performance(self, experiment_history: List[Dict]) -> Dict[str, Any]:
+        """Analyze historical experiment performance patterns"""
+        if not experiment_history:
+            return {"message": "No historical data available"}
+            
+        # Calculate aggregate statistics
+        total_experiments = len(experiment_history)
+        completed_experiments = sum(1 for exp in experiment_history if exp.get('status') == 'completed')
+        successful_experiments = sum(1 for exp in experiment_history 
+                                   if exp.get('status') == 'completed' and 
+                                   exp.get('results', {}).get('revenue_lift', 0) > 0)
+        
+        # Calculate success rate
+        success_rate = successful_experiments / completed_experiments if completed_experiments > 0 else 0
+        
+        # Identify most successful experiment types
+        experiment_types = {}
+        for exp in experiment_history:
+            if exp.get('status') == 'completed':
+                exp_type = exp.get('type', 'unknown')
+                if exp_type not in experiment_types:
+                    experiment_types[exp_type] = {
+                        'count': 0,
+                        'success_count': 0,
+                        'avg_revenue_lift': 0
+                    }
+                    
+                experiment_types[exp_type]['count'] += 1
+                if exp.get('results', {}).get('revenue_lift', 0) > 0:
+                    experiment_types[exp_type]['success_count'] += 1
+                experiment_types[exp_type]['avg_revenue_lift'] += exp.get('results', {}).get('revenue_lift', 0)
+        
+        # Calculate averages
+        for exp_type in experiment_types:
+            if experiment_types[exp_type]['count'] > 0:
+                experiment_types[exp_type]['avg_revenue_lift'] /= experiment_types[exp_type]['count']
+                experiment_types[exp_type]['success_rate'] = experiment_types[exp_type]['success_count'] / experiment_types[exp_type]['count']
+        
+        return {
+            "total_experiments": total_experiments,
+            "completed_experiments": completed_experiments,
+            "successful_experiments": successful_experiments,
+            "overall_success_rate": success_rate,
+            "experiment_type_performance": experiment_types,
+            "avg_experiment_duration_days": np.mean([((datetime.fromisoformat(exp.get('end_date', datetime.now().isoformat())) - 
+                                         datetime.fromisoformat(exp.get('start_date', datetime.now().isoformat()))).days) 
+                                       for exp in experiment_history if exp.get('start_date') and exp.get('end_date')]) 
+                                      if any(exp.get('start_date') and exp.get('end_date') for exp in experiment_history) else 14
+        }
+    
+    def _create_experiment_calendar(self, active: List[Dict], proposals: List[Dict]) -> Dict[str, Any]:
         """Create experiment timeline and calendar"""
-        calendar = []
+        # Simple calendar showing experiment timelines
+        calendar = {
+            "current_month": datetime.now().strftime("%B %Y"),
+            "next_month": (datetime.now() + timedelta(days=30)).strftime("%B %Y"),
+            "active_timelines": [],
+            "proposed_timelines": []
+        }
         
         # Add active experiments
         for exp in active:
-            start_date = datetime.fromisoformat(exp["started_at"].replace('Z', '+00:00'))
-            calendar.append({
+            start_date = datetime.fromisoformat(exp["started_at"].replace('Z', '+00:00')) if "started_at" in exp else datetime.now() - timedelta(days=7)
+            calendar["active_timelines"].append({
                 "experiment": exp["name"],
-                "type": exp["type"],
+                "type": exp.get("type", "a_b_test"),
                 "phase": "active",
                 "start_date": start_date.isoformat(),
                 "end_date": (start_date + timedelta(days=14)).isoformat(),
@@ -417,17 +808,17 @@ class ExperimentationAgent(BaseAgent):
         # Add proposed experiments
         next_start = datetime.now() + timedelta(days=3)  # Start in 3 days
         for exp in proposals:
-            calendar.append({
+            calendar["proposed_timelines"].append({
                 "experiment": exp["name"],
-                "type": exp["type"],
+                "type": exp.get("type", "a_b_test"),
                 "phase": "proposed",
                 "start_date": next_start.isoformat(),
-                "end_date": (next_start + timedelta(days=exp["duration_days"])).isoformat(),
+                "end_date": (next_start + timedelta(days=exp.get("duration_days", 14))).isoformat(),
                 "status": "pending_approval"
             })
             next_start += timedelta(days=7)  # Stagger starts by a week
         
-        return sorted(calendar, key=lambda x: x["start_date"])
+        return calendar
     
     # Helper methods
     def _calculate_p_value(self, control_value: float, treatment_value: float,
@@ -473,3 +864,104 @@ class ExperimentationAgent(BaseAgent):
             learnings.append("Demand was relatively inelastic to price changes")
         
         return learnings
+    
+    def _get_experiment_history(self, db: Session, user_id: int) -> List[Dict[str, Any]]:
+        """Get historical experiments from memory"""
+        # Query experiment records from memory
+        experiments = db.query(PricingExperiment).filter(
+            PricingExperiment.user_id == user_id
+        ).order_by(desc(PricingExperiment.ended_at)).limit(10).all()
+        
+        # Query experiment learnings from memory
+        learnings = db.query(ExperimentLearning).filter(
+            ExperimentLearning.user_id == user_id
+        ).order_by(desc(ExperimentLearning.created_at)).limit(20).all()
+        
+        # Create a mapping of experiment IDs to learnings
+        learning_map = {}
+        for learning in learnings:
+            if learning.experiment_id not in learning_map:
+                learning_map[learning.experiment_id] = []
+            learning_map[learning.experiment_id].append({
+                "learning": learning.learning,
+                "confidence": learning.confidence,
+                "created_at": learning.created_at.isoformat()
+            })
+        
+        # Combine experiments with their learnings
+        history = []
+        for exp in experiments:
+            exp_dict = {
+                "experiment_id": exp.experiment_id,
+                "name": exp.name,
+                "type": exp.experiment_type,
+                "items": exp.item_ids,  # Changed from exp.items to exp.item_ids
+                "start_date": exp.started_at.isoformat() if exp.started_at else None,  # Changed from start_date to started_at
+                "end_date": exp.ended_at.isoformat() if exp.ended_at else None,  # Changed from end_date to ended_at
+                "status": exp.status,
+                "results": {
+                    "control": exp.control_metrics,
+                    "treatment": exp.treatment_metrics,
+                    "p_value": exp.p_value,
+                    "confidence_interval": exp.confidence_interval
+                },  # Restructured from exp.results to actual model attributes
+                "success_metrics": exp.success_criteria,  # Changed from success_metrics to success_criteria
+                "learnings": learning_map.get(exp.experiment_id, [])
+            }
+            history.append(exp_dict)
+        
+        return history
+    
+    def _get_active_experiments_with_memory(self, db: Session, user_id: int, memory_context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Get active experiments with memory enhancement"""
+        # Get base active experiments
+        active_experiments = self._get_active_experiments(db, user_id)
+        
+        # Enhance with memory data if available
+        experiment_memories = memory_context.get('pricing_experiment', [])
+        if experiment_memories:
+            # Find active experiments in memory
+            for memory in experiment_memories:
+                content = memory.get('content', {})
+                if content.get('status') == 'active':
+                    # Check if this experiment is already in our list
+                    exp_id = content.get('experiment_id')
+                    if exp_id:
+                        existing = next((e for e in active_experiments if e.get('experiment_id') == exp_id), None)
+                        if not existing:
+                            # Add this experiment from memory
+                            active_experiments.append(content)
+                        else:
+                            # Enhance existing experiment with memory data
+                            for key, value in content.items():
+                                if key not in existing or not existing[key]:
+                                    existing[key] = value
+        
+        return active_experiments
+    
+    def _get_completed_experiments_with_memory(self, db: Session, user_id: int, memory_context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Get completed experiments with memory enhancement"""
+        # Get base completed experiments
+        completed_experiments = self._get_completed_experiments(db, user_id)
+        
+        # Enhance with memory data if available
+        experiment_memories = memory_context.get('pricing_experiment', [])
+        if experiment_memories:
+            # Find completed experiments in memory
+            for memory in experiment_memories:
+                content = memory.get('content', {})
+                if content.get('status') == 'completed':
+                    # Check if this experiment is already in our list
+                    exp_id = content.get('experiment_id')
+                    if exp_id:
+                        existing = next((e for e in completed_experiments if e.get('experiment_id') == exp_id), None)
+                        if not existing:
+                            # Add this experiment from memory
+                            completed_experiments.append(content)
+                        else:
+                            # Enhance existing experiment with memory data
+                            for key, value in content.items():
+                                if key not in existing or not existing[key]:
+                                    existing[key] = value
+        
+        return completed_experiments

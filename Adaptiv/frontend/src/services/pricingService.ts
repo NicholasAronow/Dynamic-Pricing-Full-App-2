@@ -4,6 +4,24 @@ import itemService, { PriceHistory } from './itemService';
 import authService from './authService';
 import orderService, { Order, OrderItem } from './orderService';
 
+// New interface for agent-based pricing recommendations
+export interface AgentPricingRecommendation {
+  id: number;
+  item_id: number;
+  item_name: string;
+  current_price: number;
+  recommended_price: number;
+  price_change_amount: number;
+  price_change_percent: number;
+  confidence_score: number;
+  rationale: string;
+  implementation_status: string;
+  user_action: string | null;
+  user_feedback: string | null;
+  recommendation_date: string;
+  reevaluation_date: string | null;
+}
+
 export interface PriceRecommendation {
   id: number;
   name: string;
@@ -32,6 +50,31 @@ export interface PriceRecommendation {
 let _usingMock = false;
 
 export const pricingService = {
+  // Get agent pricing recommendations from the database
+  getAgentRecommendations: async (status?: string): Promise<AgentPricingRecommendation[]> => {
+    try {
+      const params = status ? `?status=${status}` : '';
+      const response = await api.get(`pricing/recommendations${params}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching agent pricing recommendations:', error);
+      return [];
+    }
+  },
+
+  // Accept or reject a pricing recommendation
+  updateRecommendationAction: async (recommendationId: number, action: 'accept' | 'reject', feedback?: string): Promise<AgentPricingRecommendation | null> => {
+    try {
+      const response = await api.put(`pricing/recommendations/${recommendationId}/action`, {
+        action,
+        feedback
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error updating recommendation action:', error);
+      return null;
+    }
+  },
   // Get price recommendations (actually returns summaries for ALL items)
   getPriceRecommendations: async (timeFrame: string): Promise<PriceRecommendation[]> => {
     try {
