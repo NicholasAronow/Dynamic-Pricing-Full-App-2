@@ -20,6 +20,7 @@ export interface AgentPricingRecommendation {
   user_feedback: string | null;
   recommendation_date: string;
   reevaluation_date: string | null;
+  batch_id: string;
 }
 
 export interface PriceRecommendation {
@@ -51,9 +52,16 @@ let _usingMock = false;
 
 export const pricingService = {
   // Get agent pricing recommendations from the database
-  getAgentRecommendations: async (status?: string): Promise<AgentPricingRecommendation[]> => {
+  getAgentRecommendations: async (status?: string, batchId?: string): Promise<AgentPricingRecommendation[]> => {
     try {
-      const params = status ? `?status=${status}` : '';
+      let params = '';
+      if (status || batchId) {
+        params = '?';
+        if (status) params += `status=${status}`;
+        if (status && batchId) params += '&';
+        if (batchId) params += `batch_id=${batchId}`;
+      }
+      
       const response = await api.get(`pricing/recommendations${params}`);
       return response.data;
     } catch (error) {
@@ -75,6 +83,17 @@ export const pricingService = {
       return null;
     }
   },
+  // Get available recommendation batches
+  getAvailableBatches: async (): Promise<{batch_id: string, recommendation_date: string}[]> => {
+    try {
+      const response = await api.get('pricing/recommendation-batches');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching recommendation batches:', error);
+      return [];
+    }
+  },
+  
   // Get price recommendations (actually returns summaries for ALL items)
   getPriceRecommendations: async (timeFrame: string): Promise<PriceRecommendation[]> => {
     try {

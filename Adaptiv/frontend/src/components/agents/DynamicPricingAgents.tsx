@@ -1,17 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, message, Spin, Alert, Tabs, Badge, Progress, Statistic, Row, Col, Timeline, Tag, Tooltip, Space, Divider, Modal, Input, Empty } from 'antd';
-import { RobotOutlined, PlayCircleOutlined, CheckCircleOutlined, ClockCircleOutlined, ExperimentOutlined, LineChartOutlined, SearchOutlined, ThunderboltOutlined, WarningOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
+import { Alert, Badge, Button, Card, Col, Empty, Input, Modal, Radio, Row, Select, Space, Spin, Statistic, Steps, Tabs, Tag, Timeline, message } from 'antd';
+import { CheckCircleOutlined, CheckOutlined, ClockCircleOutlined, CloseOutlined, DownOutlined, ExperimentOutlined, LineChartOutlined, PlayCircleOutlined, RobotOutlined, SearchOutlined, ThunderboltOutlined, UpOutlined, WarningOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { API_BASE_URL } from 'config';
 import pricingService, { AgentPricingRecommendation } from '../../services/pricingService';
 
 const { TabPane } = Tabs;
+const { Option } = Select;
 
 interface AgentStatus {
   name: string;
   status: 'idle' | 'running' | 'completed' | 'error';
   lastRun?: string;
   icon: React.ReactNode;
+}
+
+interface BatchInfo {
+  batch_id: string;
+  recommendation_date: string;
+  count: number;
 }
 
 interface AnalysisResults {
@@ -112,6 +119,9 @@ const DynamicPricingAgents: React.FC = () => {
   const [completedRecommendations, setCompletedRecommendations] = useState<AgentPricingRecommendation[]>([]);
   const [loadingRecommendations, setLoadingRecommendations] = useState<boolean>(false);
   const [lastFetchTime, setLastFetchTime] = useState<number>(0);
+  const [availableBatches, setAvailableBatches] = useState<BatchInfo[]>([]);
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
+  const [loadingBatches, setLoadingBatches] = useState<boolean>(false);
   const [feedbackModal, setFeedbackModal] = useState<{
     visible: boolean;
     recommendation: AgentPricingRecommendation | null;
@@ -129,8 +139,9 @@ const DynamicPricingAgents: React.FC = () => {
     { name: 'Experimentation', status: 'idle', icon: <ExperimentOutlined /> }
   ]);
 
-  // Load recommendations from localStorage on component mount
+  // Load recommendations and previous analysis results on component mount
   useEffect(() => {
+    // Load recommendations from localStorage
     const savedRecommendations = localStorage.getItem('adaptiv_pricing_recommendations');
     const savedTimestamp = localStorage.getItem('adaptiv_recommendations_timestamp');
     
@@ -166,20 +177,202 @@ const DynamicPricingAgents: React.FC = () => {
       // No saved data, fetch fresh data
       fetchAgentRecommendations();
     }
+    
+    // Load available batches
+    fetchAvailableBatches();
+    
+    // Load previous analysis results
+    fetchLatestAnalysisResults();
   }, []);
+  
+  // Fetch available recommendation batches
+  const fetchAvailableBatches = async () => {
+    try {
+      setLoadingBatches(true);
+      const batchesResponse = await pricingService.getAvailableBatches();
+      
+      if (batchesResponse && batchesResponse.length > 0) {
+        console.log('Available batches:', batchesResponse);
+        
+        // Type assertion to handle potential shape differences in the API response
+        type ApiResponse = {
+          batch_id: string;
+          recommendation_date: string;
+          count?: number;
+        }[];
+        
+        // Ensure all batch objects have the expected properties from the BatchInfo interface
+        const validBatches: BatchInfo[] = (batchesResponse as ApiResponse).map(batch => ({
+          batch_id: batch.batch_id,
+          recommendation_date: batch.recommendation_date,
+          count: typeof batch.count === 'number' ? batch.count : 0 // Default to 0 if count is missing
+        }));
+        
+        setAvailableBatches(validBatches);
+        
+        // Select the most recent batch by default (already sorted by date)
+        if (!selectedBatchId && validBatches.length > 0) {
+          setSelectedBatchId(validBatches[0].batch_id);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching recommendation batches:', error);
+    } finally {
+      setLoadingBatches(false);
+    }
+  };
+  
+  // State variable for analysis date
+  const [analysisDate, setAnalysisDate] = useState<string | null>(null);
+  
+  // State to track expanded rationale cards
+  const [expandedRationales, setExpandedRationales] = useState<{[key: string]: boolean}>({});
+  
+  // State for recommendation sorting
+  const [sortOption, setSortOption] = useState<string>('default');
+  
+  // Fetch the latest analysis results from the backend
+  const fetchLatestAnalysisResults = async () => {
+    try {
+      console.log('Fetching latest analysis results from API...');
+      
+      // First, try to get results from the API
+      const response = await axios.get(
+        `${API_BASE_URL}/api/agents/dynamic-pricing/latest-results`,
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+      
+      console.log('Latest analysis results response:', response.data);
+      
+      if (response.data && response.data.results) {
+        // Set the results in state
+        setResults(response.data.results);
+        setAnalysisStatus('completed');
+        
+        // Store the analysis date from the API response
+        if (response.data.analysis_date) {
+          setAnalysisDate(response.data.analysis_date);
+          console.log('Analysis date from API:', response.data.analysis_date);
+        }
+        
+        // Update agent statuses based on the latest run
+        if (response.data.agent_statuses) {
+          setAgentStatuses(prev => prev.map(agent => {
+            const matchingStatus = response.data.agent_statuses.find((status: any) => 
+              status.name === agent.name
+            );
+            
+            if (matchingStatus) {
+              return {
+                ...agent,
+                status: matchingStatus.status || 'completed',
+                lastRun: matchingStatus.lastRun || ''
+              };
+            }
+            return {
+              ...agent,
+              status: 'completed',
+              lastRun: ''
+            };
+          }));
+        } else {
+          // If no agent statuses in response, mark all as completed
+          // Use timestamp from the response instead of current time
+          const reportTimestamp = response.data.timestamp || '';
+          setAgentStatuses(prev => prev.map(agent => ({
+            ...agent,
+            status: 'completed',
+            lastRun: reportTimestamp
+          })));
+        }
+        
+        // Save results to localStorage
+        localStorage.setItem('adaptiv_analysis_results', JSON.stringify(response.data.results));
+        localStorage.setItem('adaptiv_analysis_timestamp', Date.now().toString());
+        
+        console.log('Analysis results loaded from API and saved to localStorage');
+      } else {
+        // If API doesn't return results, try localStorage
+        const savedResults = localStorage.getItem('adaptiv_analysis_results');
+        const savedTimestamp = localStorage.getItem('adaptiv_analysis_timestamp');
+        
+        if (savedResults && savedTimestamp) {
+          try {
+            const results = JSON.parse(savedResults);
+            const timestamp = parseInt(savedTimestamp, 10);
+            
+            // Only use saved results if they're less than 24 hours old
+            const isRecent = (Date.now() - timestamp) < 24 * 60 * 60 * 1000;
+            
+            if (isRecent) {
+              setResults(results);
+              setAnalysisStatus('completed');
+              
+              // Mark all agents as completed with the saved timestamp
+              setAgentStatuses(prev => prev.map(agent => ({
+                ...agent,
+                status: 'completed',
+                lastRun: new Date(timestamp).toLocaleTimeString()
+              })));
+              
+              console.log('Loaded saved analysis results from localStorage');
+            }
+          } catch (e) {
+            console.error('Error parsing saved analysis results:', e);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching latest analysis results:', error);
+      
+      // Try to load from localStorage if API fails
+      const savedResults = localStorage.getItem('adaptiv_analysis_results');
+      const savedTimestamp = localStorage.getItem('adaptiv_analysis_timestamp');
+      
+      if (savedResults && savedTimestamp) {
+        try {
+          const results = JSON.parse(savedResults);
+          const timestamp = parseInt(savedTimestamp, 10);
+          
+          // Only use saved results if they're less than 24 hours old
+          const isRecent = (Date.now() - timestamp) < 24 * 60 * 60 * 1000;
+          
+          if (isRecent) {
+            setResults(results);
+            setAnalysisStatus('completed');
+            
+            // Mark all agents as completed with the saved timestamp
+            setAgentStatuses(prev => prev.map(agent => ({
+              ...agent,
+              status: 'completed',
+              lastRun: new Date(timestamp).toLocaleTimeString()
+            })));
+            
+            console.log('Loaded saved analysis results from localStorage after API failure');
+          }
+        } catch (e) {
+          console.error('Error parsing saved analysis results:', e);
+        }
+      }
+    }
+  };
 
-  const fetchAgentRecommendations = async () => {
+  const fetchAgentRecommendations = async (batchId?: string) => {
     try {
       setLoadingRecommendations(true);
       
-      // Fetch ALL recommendations, not just pending ones
-      const data = await pricingService.getAgentRecommendations();
+      // Fetch recommendations, optionally filtered by batch_id
+      const data = await pricingService.getAgentRecommendations(undefined, batchId || selectedBatchId || undefined);
       
       // Debug log the received data
       console.log('Pricing recommendations received:', data);
       if (data && data.length > 0) {
         data.forEach((rec: AgentPricingRecommendation) => {
-          console.log(`${rec.item_name}: Current: $${rec.current_price}, Recommended: $${rec.recommended_price}, Change %: ${rec.price_change_percent}`);
+          console.log(`${rec.item_name}: Current: $${rec.current_price}, Recommended: $${rec.recommended_price}, Change %: ${rec.price_change_percent}, Batch: ${rec.batch_id}`);
         });
       }
       
@@ -201,6 +394,12 @@ const DynamicPricingAgents: React.FC = () => {
     } finally {
       setLoadingRecommendations(false);
     }
+  };
+  
+  // Handle batch selection change
+  const handleBatchChange = (batchId: string) => {
+    setSelectedBatchId(batchId);
+    fetchAgentRecommendations(batchId);
   };
 
   const handleActionClick = (recommendation: AgentPricingRecommendation, action: 'accept' | 'reject') => {
@@ -372,6 +571,42 @@ const DynamicPricingAgents: React.FC = () => {
     }, 1000);
   };
 
+  // Helper function to get first sentence of rationale
+  const getFirstSentence = (text: string) => {
+    const firstSentenceMatch = text.match(/^.*?[.!?](?:\s|$)/i);
+    return text.substring(0, 170);
+  };
+  
+  // Toggle rationale expansion
+  const toggleRationale = (id: string | number) => {
+    const strId = String(id);
+    setExpandedRationales(prev => ({
+      ...prev,
+      [strId]: !prev[strId]
+    }));
+  };
+  
+  // Function to sort recommendations based on selected option
+  const sortRecommendations = (recommendations: AgentPricingRecommendation[], sortType: string) => {
+    const sortedRecs = [...recommendations];
+    
+    switch (sortType) {
+      case 'a-z':
+        return sortedRecs.sort((a, b) => a.item_name.localeCompare(b.item_name));
+      case 'percent-inc':
+        return sortedRecs.sort((a, b) => a.price_change_percent - b.price_change_percent);
+      case 'percent-dec':
+        return sortedRecs.sort((a, b) => b.price_change_percent - a.price_change_percent);
+      default:
+        return sortedRecs;
+    }
+  };
+  
+  // Handle sort option change
+  const handleSortChange = (option: string) => {
+    setSortOption(option);
+  };
+  
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'healthy': return '#52c41a';
@@ -391,242 +626,261 @@ const DynamicPricingAgents: React.FC = () => {
   };
 
   return (
-    <div style={{ padding: '24px' }}>
-      <Card
-        title={
-          <Space>
-            <RobotOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
-            <span>Dynamic Pricing Agent System</span>
-          </Space>
-        }
-        extra={
-          <Button
-            type="primary"
-            icon={<PlayCircleOutlined />}
-            loading={loading}
-            onClick={runFullAnalysis}
-            disabled={analysisStatus === 'running'}
-          >
-            {analysisStatus === 'running' ? 'Analysis Running...' : 'Run Full Analysis'}
-          </Button>
-        }
-      >
-        {/* Agent Status Grid */}
-        <Row gutter={16} style={{ marginBottom: '24px' }}>
-          {agentStatuses.map((agent, index) => (
-            <Col span={4} key={index}>
-              <Card size="small" bordered={false} style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '24px', marginBottom: '8px' }}>
-                  {agent.status === 'running' ? (
-                    <Spin />
-                  ) : (
-                    <span style={{ 
-                      color: agent.status === 'completed' ? '#52c41a' : 
-                             agent.status === 'error' ? '#f5222d' : '#8c8c8c' 
-                    }}>
-                      {agent.icon}
-                    </span>
-                  )}
-                </div>
-                <div style={{ fontWeight: 500 }}>{agent.name}</div>
-                {agent.lastRun && (
-                  <div style={{ fontSize: '12px', color: '#8c8c8c' }}>
-                    Last run: {agent.lastRun}
-                  </div>
-                )}
-              </Card>
-            </Col>
-          ))}
-        </Row>
+    <div style={{ 
+      minHeight: '100vh', 
+      padding: '32px'
+    }}>
+      {/* Modern Header */}
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        marginBottom: '32px',
+        background: 'rgba(255, 255, 255, 0.9)',
+        backdropFilter: 'blur(10px)',
+        borderRadius: '16px',
+        padding: '24px 32px',
+        boxShadow: '0 4px 24px rgba(0, 0, 0, 0.06)'
+      }}>
+        <Space size="large" align="center">
+          <div style={{
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            borderRadius: '12px',
+            padding: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}>
+            <RobotOutlined style={{ fontSize: '32px', color: '#fff' }} />
+          </div>
+          <div>
+            <h1 style={{ 
+              fontSize: '28px', 
+              margin: 0, 
+              fontWeight: '700',
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent'
+            }}>
+              Dynamic Pricing Agent
+            </h1>
+            <p style={{ margin: 0, color: '#8492a6', fontSize: '14px' }}>
+              AI-powered pricing optimization system
+            </p>
+          </div>
+        </Space>
+        <Button
+          type="primary"
+          icon={<PlayCircleOutlined />}
+          loading={loading}
+          onClick={runFullAnalysis}
+          disabled={analysisStatus === 'running'}
+          size="large"
+          style={{
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            border: 'none',
+            height: '48px',
+            paddingLeft: '32px',
+            paddingRight: '32px',
+            borderRadius: '12px',
+            fontWeight: '600',
+            boxShadow: '0 4px 12px rgba(102, 126, 234, 0.4)'
+          }}
+        >
+          {analysisStatus === 'running' ? 'Analysis Running...' : 'Run Full Analysis'}
+        </Button>
+      </div>
+      
+      {/* Main Content Area */}
+      <div style={{ 
+        background: 'rgba(255, 255, 255, 0.95)',
+        backdropFilter: 'blur(10px)',
+        padding: '32px',
+        borderRadius: '16px',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.08)'
+      }}>
+        {/* Report Header */}
+        <div style={{ 
+          marginBottom: '32px', 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          borderBottom: '1px solid #e8ecf1',
+          paddingBottom: '24px'
+        }}>
+          <div>
+            <h2 style={{ 
+              margin: 0, 
+              fontSize: '24px', 
+              fontWeight: '600',
+              color: '#1a202c'
+            }}>
+              Pricing Analysis Report
+            </h2>
+            <div style={{ 
+              color: '#718096', 
+              marginTop: '8px',
+              fontSize: '14px'
+            }}>
+              <span style={{ fontWeight: '500' }}>Report Date:</span> {analysisDate ? new Date(analysisDate).toLocaleDateString('en-US', { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+              }) : 'Not available'}
+            </div>
+          </div>
+          {analysisStatus === 'running' && (
+            <Badge 
+              status="processing" 
+              text="Analysis in progress"
+              style={{ 
+                fontSize: '14px',
+                color: '#667eea'
+              }}
+            />
+          )}
+        </div>
 
         {results && (
-          <Tabs defaultActiveKey="summary">
+          <Tabs 
+            defaultActiveKey="agent-recommendations"
+            style={{
+              marginBottom: '24px'
+            }}
+          >
             <TabPane 
               tab={
-                <span>
-                  Executive Summary
+                <span style={{ fontSize: '16px', fontWeight: '500' }}>
                   <Badge 
-                    status={results.executive_summary?.overall_status === 'healthy' ? 'success' : 
-                            results.executive_summary?.overall_status === 'stable' ? 'warning' : 'error'} 
-                    style={{ marginLeft: '8px' }}
+                    count={pendingRecommendations.length} 
+                    style={{ 
+                      marginRight: '8px',
+                      backgroundColor: '#667eea'
+                    }} 
                   />
-                </span>
-              } 
-              key="summary"
-            >
-              {results.executive_summary && (
-                <div>
-                  <Row gutter={24} style={{ marginBottom: '24px' }}>
-                    <Col span={8}>
-                      <Card>
-                        <Statistic
-                          title="Overall Status"
-                          value={results.executive_summary.overall_status}
-                          valueStyle={{ 
-                            color: getStatusColor(results.executive_summary.overall_status),
-                            textTransform: 'capitalize'
-                          }}
-                        />
-                      </Card>
-                    </Col>
-                    <Col span={8}>
-                      <Card>
-                        <Statistic
-                          title="Revenue Trend"
-                          value={results.executive_summary.revenue_trend}
-                          valueStyle={{ 
-                            color: results.executive_summary.revenue_trend === 'improving' ? '#52c41a' : '#f5222d',
-                            textTransform: 'capitalize'
-                          }}
-                          prefix={results.executive_summary.revenue_trend === 'improving' ? '↑' : '↓'}
-                        />
-                      </Card>
-                    </Col>
-                    <Col span={8}>
-                      <Card>
-                        <Statistic
-                          title="Active Alerts"
-                          value={results.executive_summary.risk_factors?.length || 0}
-                          valueStyle={{ color: results.executive_summary.risk_factors?.length > 0 ? '#f5222d' : '#52c41a' }}
-                        />
-                      </Card>
-                    </Col>
-                  </Row>
-
-                  {results.executive_summary.immediate_actions?.length > 0 && (
-                    <Alert
-                      message="Immediate Actions Required"
-                      description={
-                        <ul style={{ marginBottom: 0 }}>
-                          {results.executive_summary.immediate_actions.map((action, index) => (
-                            <li key={index}>{action}</li>
-                          ))}
-                        </ul>
-                      }
-                      type="warning"
-                      icon={<WarningOutlined />}
-                      showIcon
-                      style={{ marginBottom: '16px' }}
-                    />
-                  )}
-
-                  <Card title="Key Opportunities" size="small" style={{ marginBottom: '16px' }}>
-                    {results.executive_summary.key_opportunities?.map((opportunity, index) => (
-                      <Tag key={index} color="blue" style={{ marginBottom: '8px' }}>
-                        {opportunity}
-                      </Tag>
-                    ))}
-                  </Card>
-
-                  {results.executive_summary.risk_factors?.length > 0 && (
-                    <Card title="Risk Factors" size="small">
-                      {results.executive_summary.risk_factors.map((risk, index) => (
-                        <Tag key={index} color="red" style={{ marginBottom: '8px' }}>
-                          {risk}
-                        </Tag>
-                      ))}
-                    </Card>
-                  )}
-                </div>
-              )}
-            </TabPane>
-
-            <TabPane 
-              tab={
-                <span>
-                  Recommendations 
-                  <Badge count={results.consolidated_recommendations?.length || 0} style={{ marginLeft: '8px' }} />
-                </span>
-              } 
-              key="recommendations"
-            >
-              {results.consolidated_recommendations?.map((rec, index) => (
-                <Card 
-                  key={index} 
-                  size="small" 
-                  style={{ marginBottom: '12px' }}
-                  title={
-                    <Space>
-                      <Tag color={getPriorityColor(rec.priority)}>
-                        {rec.priority.toUpperCase()}
-                      </Tag>
-                      <span>{rec.category?.replace(/_/g, ' ').toUpperCase()}</span>
-                    </Space>
-                  }
-                >
-                  <p style={{ marginBottom: '8px' }}>{rec.recommendation}</p>
-                  {rec.expected_impact && (
-                    <div style={{ color: '#52c41a', fontWeight: 500 }}>
-                      Expected Impact: {rec.expected_impact}
-                    </div>
-                  )}
-                </Card>
-              ))}
-            </TabPane>
-
-            <TabPane tab="Next Steps" key="next-steps">
-              {results.next_steps && (
-                <Timeline>
-                  {results.next_steps.map((step, index) => (
-                    <Timeline.Item 
-                      key={index}
-                      color={index === 0 ? 'blue' : 'gray'}
-                      dot={index === 0 ? <ClockCircleOutlined /> : undefined}
-                    >
-                      <Card size="small">
-                        <h4>Step {step.step}: {step.action}</h4>
-                        <p>Expected Impact: {step.expected_impact}</p>
-                        <Tag>{step.timeline}</Tag>
-                      </Card>
-                    </Timeline.Item>
-                  ))}
-                </Timeline>
-              )}
-            </TabPane>
-
-            <TabPane 
-              tab={
-                <span>
-                  <Badge count={pendingRecommendations.length} style={{ marginRight: '6px' }} />
-                  Actionable Recommendations
+                  Recommendations
                 </span>
               } 
               key="agent-recommendations"
             >
               {loadingRecommendations ? (
-                <div style={{ textAlign: 'center', padding: '20px' }}>
+                <div style={{ textAlign: 'center', padding: '60px' }}>
                   <Spin size="large" />
-                  <div style={{ marginTop: '10px' }}>Loading recommendations...</div>
+                  <div style={{ marginTop: '16px', color: '#718096' }}>
+                    Loading recommendations...
+                  </div>
                 </div>
               ) : pendingRecommendations.length > 0 ? (
                 <div>
-                  <Alert
-                    message="Pending Price Recommendations"
-                    description="Review and accept/reject these AI-generated price recommendations to help improve your pricing strategy. These recommendations require your decision."
-                    type="info"
-                    showIcon
-                    style={{ marginBottom: '16px' }}
-                  />
-                  {pendingRecommendations.map((rec) => (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
+                    <div>
+                      <span style={{ marginRight: '8px', color: '#4b5563' }}>Batch:</span>
+                      <Select
+                        placeholder="Select batch"
+                        loading={loadingBatches}
+                        style={{ width: 300 }}
+                        onChange={handleBatchChange}
+                        value={selectedBatchId || undefined}
+                      >
+                        {availableBatches.map(batch => (
+                          <Option key={batch.batch_id} value={batch.batch_id}>
+                            {batch.batch_id.startsWith('legacy_batch_') 
+                              ? `Legacy Batch (${new Date(batch.recommendation_date).toLocaleDateString()})` 
+                              : `Batch ${batch.batch_id.substring(0, 8)}... (${new Date(batch.recommendation_date).toLocaleDateString()}) - ${batch.count} items`}
+                          </Option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div>
+                      <span style={{ marginRight: '8px', color: '#4b5563' }}>Sort by:</span>
+                      <Radio.Group 
+                        value={sortOption} 
+                        onChange={(e) => handleSortChange(e.target.value)}
+                        size="small"
+                        buttonStyle="solid"
+                      >
+                        <Radio.Button value="default">Default</Radio.Button>
+                        <Radio.Button value="a-z">A-Z</Radio.Button>
+                        <Radio.Button value="percent-dec">% ↓</Radio.Button>
+                        <Radio.Button value="percent-inc">% ↑</Radio.Button>
+                      </Radio.Group>
+                    </div>
+                  </div>
+                  
+                  {sortRecommendations(pendingRecommendations, sortOption).map((rec) => (
                     <Card 
                       key={rec.id} 
                       size="small" 
-                      style={{ marginBottom: '16px' }}
+                      style={{ 
+                        marginBottom: '20px',
+                        borderRadius: '12px',
+                        border: '1px solid #e8ecf1',
+                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+                        transition: 'all 0.3s ease',
+                        cursor: 'default'
+                      }}
+                      bodyStyle={{ padding: '24px' }}
+                      hoverable
                     >
-                      <Row gutter={16} align="middle">
+                      <Row gutter={24} align="middle">
                         <Col span={5}>
-                          <strong>{rec.item_name}</strong>
+                          <div>
+                            <div style={{ 
+                              color: '#718096', 
+                              fontSize: '12px', 
+                              marginBottom: '4px',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.5px'
+                            }}>
+                              Product
+                            </div>
+                            <strong style={{ fontSize: '16px', color: '#1a202c' }}>
+                              {rec.item_name}
+                            </strong>
+                          </div>
                         </Col>
                         <Col span={4}>
-                          Current: <span style={{ fontWeight: 500 }}>${Number(rec.current_price).toFixed(2)}</span>
+                          <div>
+                            <div style={{ color: '#718096', fontSize: '12px', marginBottom: '4px' }}>
+                              Current Price
+                            </div>
+                            <span style={{ 
+                              fontWeight: '600', 
+                              fontSize: '18px',
+                              color: '#4a5568'
+                            }}>
+                              ${Number(rec.current_price).toFixed(2)}
+                            </span>
+                          </div>
                         </Col>
                         <Col span={4}>
-                          Suggested: <span style={{ fontWeight: 500, color: '#1890ff' }}>${Number(rec.recommended_price).toFixed(2)}</span>
+                          <div>
+                            <div style={{ color: '#718096', fontSize: '12px', marginBottom: '4px' }}>
+                              Recommended
+                            </div>
+                            <span style={{ 
+                              fontWeight: '600', 
+                              fontSize: '18px',
+                              color: '#667eea'
+                            }}>
+                              ${Number(rec.recommended_price).toFixed(2)}
+                            </span>
+                          </div>
                         </Col>
                         <Col span={3}>
-                          <Tag color={rec.price_change_amount >= 0 ? 'green' : 'red'}>
+                          <Tag 
+                            color={rec.price_change_amount >= 0 ? '#f0fdf4' : '#fef2f2'}
+                            style={{
+                              color: rec.price_change_amount >= 0 ? '#15803d' : '#dc2626',
+                              border: `1px solid ${rec.price_change_amount >= 0 ? '#86efac' : '#fca5a5'}`,
+                              borderRadius: '6px',
+                              padding: '4px 12px',
+                              fontSize: '14px',
+                              fontWeight: '600'
+                            }}
+                          >
                             {rec.price_change_amount >= 0 ? '+' : ''}
-                            {/* Check if price_change_percent is already in percentage format */}
                             {Math.abs(rec.price_change_percent) > 1 ? 
                               rec.price_change_percent.toFixed(1) : 
                               (rec.price_change_percent * 100).toFixed(1)
@@ -634,43 +888,110 @@ const DynamicPricingAgents: React.FC = () => {
                           </Tag>
                         </Col>
                         <Col span={4}>
-                          <Tag color="blue">Confidence: {(rec.confidence_score * 100).toFixed(0)}%</Tag>
+                          <div>
+                            <div style={{ color: '#718096', fontSize: '12px', marginBottom: '4px' }}>
+                              Reevaluation Date
+                            </div>
+                            <span style={{ 
+                              fontWeight: '500', 
+                              fontSize: '14px',
+                              color: '#4b5563',
+                              display: 'flex',
+                              alignItems: 'center'
+                            }}>
+                              <ClockCircleOutlined style={{ marginRight: '4px', color: '#667eea', fontSize: '12px' }} />
+                              {rec.reevaluation_date ? 
+                                new Date(rec.reevaluation_date).toLocaleDateString('en-US', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  year: 'numeric'
+                                }) : 
+                                'Not scheduled'}
+                            </span>
+                          </div>
                         </Col>
                         <Col span={4}>
-                          <Space>
+                          <Space size={12}>
                             <Button 
                               type="primary" 
-                              size="small" 
+                              size="middle" 
                               icon={<CheckOutlined />} 
                               onClick={() => handleActionClick(rec, 'accept')}
+                              style={{
+                                background: '#10b981',
+                                border: 'none',
+                                borderRadius: '8px',
+                                fontWeight: '500',
+                                boxShadow: '0 2px 4px rgba(16, 185, 129, 0.2)'
+                              }}
                             >
                               Accept
                             </Button>
                             <Button 
-                              size="small" 
+                              size="middle" 
                               icon={<CloseOutlined />} 
                               onClick={() => handleActionClick(rec, 'reject')}
+                              style={{
+                                borderRadius: '8px',
+                                fontWeight: '500',
+                                border: '1px solid #e5e7eb'
+                              }}
                             >
                               Reject
                             </Button>
                           </Space>
                         </Col>
                       </Row>
-                      <div style={{ marginTop: '10px' }}>
-                        <strong>Rationale:</strong> {rec.rationale}
+                      <div 
+                        style={{ 
+                          marginTop: '20px',
+                          padding: '16px',
+                          background: '#f9fafb',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          position: 'relative'
+                        }}
+                        onClick={() => toggleRationale(rec.id)}
+                      >
+                        <Button 
+                          type="link" 
+                          icon={expandedRationales[String(rec.id)] ? <UpOutlined /> : <DownOutlined />}
+                          size="small"
+                          style={{ 
+                            color: '#4b5563', 
+                            position: 'absolute',
+                            top: '12px',
+                            right: '12px'
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleRationale(rec.id);
+                          }}
+                        />
+                        <p style={{ margin: '0', color: '#6b7280', lineHeight: '1.6', paddingRight: '30px' }}>
+                          {expandedRationales[String(rec.id)] ? rec.rationale : getFirstSentence(rec.rationale) + (rec.rationale.length > getFirstSentence(rec.rationale).length ? '...' : '')}
+                        </p>
                       </div>
                     </Card>
                   ))}
                 </div>
               ) : (
-                <Empty description="No pending pricing recommendations" />
+                <Empty 
+                  description="No pending pricing recommendations"
+                  style={{ padding: '60px 0' }}
+                />
               )}
             </TabPane>
             <TabPane 
               tab={
-                <span>
-                  <Tag color="#108ee9">{completedRecommendations.length}</Tag>
-                  Completed Recommendations
+                <span style={{ fontSize: '16px', fontWeight: '500' }}>
+                  <Tag 
+                    color="#52c41a"
+                    style={{ marginRight: '8px' }}
+                  >
+                    {completedRecommendations.length}
+                  </Tag>
+                  Completed
                 </span>
               } 
               key="completed-recommendations"
@@ -682,26 +1003,88 @@ const DynamicPricingAgents: React.FC = () => {
                     description="These are recommendations that you have already acted upon."
                     type="success"
                     showIcon
-                    style={{ marginBottom: '16px' }}
+                    style={{ 
+                      marginBottom: '16px',
+                      borderRadius: '12px',
+                      border: '1px solid #d9f7be',
+                      background: '#f6ffed'
+                    }}
                   />
-                  {completedRecommendations.map((rec: AgentPricingRecommendation) => (
+                  
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
+                    <div>
+                      <span style={{ marginRight: '8px', borderRadius: '8px',
+                                fontWeight: '500',
+                                border: '1px solid #e5e7eb'}}>Sort by:</span>
+                      <Radio.Group 
+                        value={sortOption} 
+                        onChange={(e) => handleSortChange(e.target.value)}
+                        size="small"
+                        buttonStyle="solid"
+                      >
+                        <Radio.Button value="default">Default</Radio.Button>
+                        <Radio.Button value="a-z">A-Z</Radio.Button>
+                        <Radio.Button value="percent-dec">% ↓</Radio.Button>
+                        <Radio.Button value="percent-inc">% ↑</Radio.Button>
+                      </Radio.Group>
+                    </div>
+                  </div>
+                  
+                  {sortRecommendations(completedRecommendations, sortOption).map((rec) => (
                     <Card 
                       key={rec.id} 
                       size="small" 
-                      style={{ marginBottom: '16px' }}
+                      style={{ 
+                        marginBottom: '20px',
+                        borderRadius: '12px',
+                        border: '1px solid #e8ecf1',
+                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)'
+                      }}
+                      bodyStyle={{ padding: '24px' }}
                     >
-                      <Row gutter={16} align="middle">
+                      <Row gutter={24} align="middle">
                         <Col span={5}>
-                          <strong>{rec.item_name}</strong>
+                          <div>
+                            <div style={{ color: '#718096', fontSize: '12px', marginBottom: '4px' }}>
+                              Product
+                            </div>
+                            <strong style={{ fontSize: '16px', color: '#1a202c' }}>
+                              {rec.item_name}
+                            </strong>
+                          </div>
                         </Col>
                         <Col span={4}>
-                          Current: <span style={{ fontWeight: 500 }}>${Number(rec.current_price).toFixed(2)}</span>
+                          <div>
+                            <div style={{ color: '#718096', fontSize: '12px', marginBottom: '4px' }}>
+                              Original
+                            </div>
+                            <span style={{ fontWeight: '600', fontSize: '18px', color: '#4a5568' }}>
+                              ${Number(rec.current_price).toFixed(2)}
+                            </span>
+                          </div>
                         </Col>
                         <Col span={4}>
-                          Suggested: <span style={{ fontWeight: 500, color: '#1890ff' }}>${Number(rec.recommended_price).toFixed(2)}</span>
+                          <div>
+                            <div style={{ color: '#718096', fontSize: '12px', marginBottom: '4px' }}>
+                              Suggested
+                            </div>
+                            <span style={{ fontWeight: '600', fontSize: '18px', color: '#667eea' }}>
+                              ${Number(rec.recommended_price).toFixed(2)}
+                            </span>
+                          </div>
                         </Col>
                         <Col span={3}>
-                          <Tag color={rec.price_change_amount >= 0 ? 'green' : 'red'}>
+                          <Tag 
+                            color={rec.price_change_amount >= 0 ? '#f0fdf4' : '#fef2f2'}
+                            style={{
+                              color: rec.price_change_amount >= 0 ? '#15803d' : '#dc2626',
+                              border: `1px solid ${rec.price_change_amount >= 0 ? '#86efac' : '#fca5a5'}`,
+                              borderRadius: '6px',
+                              padding: '4px 12px',
+                              fontSize: '14px',
+                              fontWeight: '600'
+                            }}
+                          >
                             {rec.price_change_amount >= 0 ? '+' : ''}
                             {Math.abs(rec.price_change_percent) > 1 ? 
                               rec.price_change_percent.toFixed(1) : 
@@ -710,52 +1093,179 @@ const DynamicPricingAgents: React.FC = () => {
                           </Tag>
                         </Col>
                         <Col span={4}>
-                          <Tag color="blue">Confidence: {(rec.confidence_score * 100).toFixed(0)}%</Tag>
+                          <div>
+                            <div style={{ color: '#718096', fontSize: '12px', marginBottom: '4px' }}>
+                              Reevaluation Date
+                            </div>
+                            <span style={{ 
+                              fontWeight: '500', 
+                              fontSize: '14px',
+                              color: '#4b5563',
+                              display: 'flex',
+                              alignItems: 'center'
+                            }}>
+                              <ClockCircleOutlined style={{ marginRight: '4px', color: '#667eea', fontSize: '12px' }} />
+                              {rec.reevaluation_date ? 
+                                new Date(rec.reevaluation_date).toLocaleDateString('en-US', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  year: 'numeric'
+                                }) : 
+                                'Not scheduled'}
+                            </span>
+                          </div>
                         </Col>
                         <Col span={4}>
                           {rec.user_action === 'accept' ? (
-                            <Tag color="success" icon={<CheckOutlined />}>Accepted</Tag>
+                            <Tag 
+                              color="#f0fdf4" 
+                              icon={<CheckOutlined />}
+                              style={{
+                                color: '#15803d',
+                                border: '1px solid #86efac',
+                                borderRadius: '6px',
+                                padding: '4px 12px',
+                                fontSize: '14px'
+                              }}
+                            >
+                              Accepted
+                            </Tag>
                           ) : (
-                            <Tag color="error" icon={<CloseOutlined />}>Rejected</Tag>
+                            <Tag 
+                              color="#fef2f2" 
+                              icon={<CloseOutlined />}
+                              style={{
+                                color: '#dc2626',
+                                border: '1px solid #fca5a5',
+                                borderRadius: '6px',
+                                padding: '4px 12px',
+                                fontSize: '14px'
+                              }}
+                            >
+                              Rejected
+                            </Tag>
                           )}
                         </Col>
                       </Row>
-                      <div style={{ marginTop: '10px' }}>
-                        <strong>Rationale:</strong> {rec.rationale}
+                      <div 
+                        style={{ 
+                          marginTop: '20px',
+                          padding: '16px',
+                          background: '#f9fafb',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          position: 'relative'
+                        }}
+                        onClick={() => toggleRationale(rec.id)}
+                      >
+                        <Button 
+                          type="link" 
+                          icon={expandedRationales[String(rec.id)] ? <UpOutlined /> : <DownOutlined />}
+                          size="small"
+                          style={{ 
+                            color: '#4b5563', 
+                            position: 'absolute',
+                            top: '12px',
+                            right: '12px'
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleRationale(rec.id);
+                          }}
+                        />
+                        <p style={{ margin: '0', color: '#6b7280', lineHeight: '1.6', paddingRight: '30px' }}>
+                          {expandedRationales[String(rec.id)] ? rec.rationale : getFirstSentence(rec.rationale) + (rec.rationale.length > getFirstSentence(rec.rationale).length ? '...' : '')}
+                        </p>
                       </div>
                       {rec.user_feedback && (
-                        <div style={{ marginTop: '8px', background: '#f5f5f5', padding: '8px', borderRadius: '4px' }}>
-                          <strong>Your feedback:</strong> {rec.user_feedback}
+                        <div style={{ 
+                          marginTop: '12px',
+                          padding: '16px',
+                          background: '#eef2ff',
+                          borderRadius: '8px',
+                          border: '1px solid #e0e7ff'
+                        }}>
+                          <strong style={{ color: '#4338ca' }}>Your feedback:</strong>
+                          <p style={{ margin: '8px 0 0 0', color: '#6366f1' }}>
+                            {rec.user_feedback}
+                          </p>
                         </div>
                       )}
                     </Card>
                   ))}
                 </div>
               ) : (
-                <Empty description="No completed pricing recommendations" />
+                <Empty 
+                  description="No completed pricing recommendations"
+                  style={{ padding: '60px 0' }}
+                />
               )}
             </TabPane>
           </Tabs>
         )}
 
         {!results && analysisStatus === 'idle' && (
-          <Alert
-            message="No Analysis Results"
-            description="Click 'Run Full Analysis' to start the dynamic pricing agent system and get recommendations."
-            type="info"
-            showIcon
-          />
+          <div style={{ textAlign: 'center', padding: '80px 0' }}>
+            <div style={{
+              width: '80px',
+              height: '80px',
+              margin: '0 auto 24px',
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              borderRadius: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <RobotOutlined style={{ fontSize: '40px', color: '#fff' }} />
+            </div>
+            <h3 style={{ fontSize: '20px', color: '#1a202c', marginBottom: '12px' }}>
+              No Analysis Results Yet
+            </h3>
+            <p style={{ color: '#718096', fontSize: '16px', marginBottom: '32px' }}>
+              Click 'Run Full Analysis' to start the AI pricing optimization
+            </p>
+            <Button
+              type="primary"
+              size="large"
+              icon={<PlayCircleOutlined />}
+              onClick={runFullAnalysis}
+              style={{
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                border: 'none',
+                height: '48px',
+                paddingLeft: '32px',
+                paddingRight: '32px',
+                borderRadius: '12px',
+                fontWeight: '600',
+                boxShadow: '0 4px 12px rgba(102, 126, 234, 0.4)'
+              }}
+            >
+              Start Analysis
+            </Button>
+          </div>
         )}
 
         {analysisStatus === 'running' && (
-          <div style={{ textAlign: 'center', padding: '48px' }}>
+          <div style={{ textAlign: 'center', padding: '80px 0' }}>
             <Spin size="large" />
-            <p style={{ marginTop: '16px', color: '#8c8c8c' }}>
-              Agents are analyzing your pricing data...
+            <h3 style={{ 
+              marginTop: '24px', 
+              color: '#1a202c',
+              fontSize: '20px',
+              fontWeight: '600'
+            }}>
+              AI Agents Analyzing Your Data
+            </h3>
+            <p style={{ 
+              marginTop: '12px',
+              color: '#718096',
+              fontSize: '16px'
+            }}>
+              This may take a few moments...
             </p>
           </div>
         )}
-      </Card>
+      </div>
 
       <FeedbackModal 
         visible={feedbackModal.visible}
@@ -766,5 +1276,5 @@ const DynamicPricingAgents: React.FC = () => {
       />
     </div>
   );
-};
+}
 export default DynamicPricingAgents;

@@ -98,6 +98,21 @@ class PricingStrategyAgent(BaseAgent):
             })
             self.logger.info("Comprehensive strategy generated")
             
+            # Process and store data
+            performance = self._analyze_pricing_performance(consolidated_data, memory_context)
+            item_strategies = self._generate_item_strategies(consolidated_data, market_analysis, business_goals, memory_context)
+            bundle_strategies = self._develop_bundle_strategies(consolidated_data, market_analysis)
+            category_strategies = self._develop_category_strategies(item_strategies)
+            
+            # Generate a batch ID to share between item and bundle recommendations
+            import uuid
+            shared_batch_id = str(uuid.uuid4())
+            self.logger.info(f"Generated shared batch ID: {shared_batch_id} for pricing strategy run")
+            
+            # Store recommendations in the database using the same batch ID
+            self._store_recommendations_in_memory(db, consolidated_data.get('user_id', 1), item_strategies, comprehensive_strategy, shared_batch_id)
+            self._store_bundle_recommendations(db, consolidated_data.get('user_id', 1), bundle_strategies, shared_batch_id)
+            
             strategy_results = {
                 "strategy_timestamp": datetime.now().isoformat(),
                 "current_performance": performance_analysis,
@@ -757,7 +772,15 @@ class PricingStrategyAgent(BaseAgent):
             - Addresses any risks associated with the recommended price change
             
             Be creative and intelligent in your pricing analysis, considering the nuances of the specific product category.
-            The price should be strategic, not just a simple formula, and there should be no bias for action versus inaction. Simply find the best price, and if the change is seasonal, suggest a date for reevaluation.
+            The price should be strategic, not just a simple formula, and there should be no bias for action versus inaction. Simply find the best price, and provide a specific reevaluation date (YYYY-MM-DD) considering:
+            
+            - Product seasonality (e.g., pumpkin spice products should be reevaluated after fall, holiday items after their season ends)
+            - Sales velocity (fast-selling items need more frequent reevaluation, generally 10-20 days)
+            - Category characteristics (different product categories have different optimal windows)
+            - Market volatility (items in competitive markets need more frequent reevaluation, generally 10-20 days)
+            
+            The reevaluation date should NEVER be generic (e.g., not just 90 days from now for every product).
+            Instead, provide a date that makes sense for this specific product's characteristics and market position.
             
             When recommending a price, consider the business type for appropriate price points:
             - For coffee shops, cafes, bakeries, and quick service restaurants, prefer prices ending in multiples of .05 (e.g., $3.25, $4.35, $3.95)
@@ -941,9 +964,8 @@ class PricingStrategyAgent(BaseAgent):
         # Return the final recommended price
         return round(rounded_price, 2)
     
-    def _generate_price_change_rationale(self, item: Dict, current_price: float, optimal_price: float, 
-                                      elasticity_data: Dict, competitor_prices: List[float], goals: Dict, item_history: List[Dict] = None) -> str:
-        """Generate rationale for price change using LLM to provide detailed, insightful explanations"""
+    def _generate_price_change_rationale(self, item: Dict, current_price: float, optimal_price: float, elasticity_data: Dict, competitor_prices: List[float], goals: Dict, item_history: List[Dict] = None) -> str:
+        """Generate rationale for price change using LLM to provide detailed, insightful explanations and reevaluation date"""
         # Check if we have an LLM-generated rationale from our pricing analysis
         if 'llm_pricing_analysis' in item and isinstance(item['llm_pricing_analysis'], dict) and 'rationale' in item['llm_pricing_analysis']:
             return item['llm_pricing_analysis']['rationale']
@@ -1007,7 +1029,7 @@ class PricingStrategyAgent(BaseAgent):
         # Construct the prompt for the LLM
         messages = [
             {"role": "system", "content": f"""You are an expert pricing strategist AI specializing in creating clear, compelling rationales for price changes.
-            Your task is to generate a detailed explanation for why a specific price change is being recommended.
+            Your task is to generate a detailed explanation for why a specific price change is being recommended and determine the optimal date for reevaluating this price.
             
             Focus on creating a rationale that is:
             1. Data-driven and insightful, referencing specific metrics and analysis
@@ -1017,14 +1039,27 @@ class PricingStrategyAgent(BaseAgent):
             5. Concise but comprehensive (about 3-5 sentences)
             
             Do not use phrases like 'I recommend' or 'I suggest'. Instead, present the rationale in objective, third-person language.
-            The output should be a single paragraph with no bullet points, section headers, or other formatting."""},
-            {"role": "user", "content": f"""Generate a detailed rationale for the following price change recommendation:
+            The rationale should be a single paragraph with no bullet points, section headers, or other formatting.
+            
+            For the reevaluation date, consider product seasonality, market dynamics, and product category characteristics.
+            For example:
+            - Seasonal products should be reevaluated before their next season begins
+            - Holiday items should be reevaluated after the holiday season ends
+            - Fast-selling items need more frequent reevaluation (10-20 days)
+            - Products in volatile markets need frequent reevaluation (10-20 days)
+            - Stable products can be reevaluated after 30-90 days depending on category
+            
+            IMPORTANT: The reevaluation date must be product-specific and in YYYY-MM-DD format.
+            Do not use a generic date (e.g., don't just default to 90 days from now for every product).
+            The date should reflect the specific seasonality, market position, and characteristics of this particular product."""},
+            {"role": "user", "content": f"""Generate a detailed rationale and a specific reevaluation date for the following price change recommendation:
             
             Product: {item_name}
             Category: {category}
             Current Price: ${current_price:.2f}
             Recommended Price: ${optimal_price:.2f}
             Price Change: {price_change_pct:.1f}% {'increase' if price_change > 0 else 'decrease'}
+            Today's Date: {datetime.now().strftime('%Y-%m-%d')}
             
             Additional Data:
             - Cost: ${item.get('cost', 'Unknown')}
@@ -1034,6 +1069,14 @@ class PricingStrategyAgent(BaseAgent):
             - Inventory Level: {inventory_level.get('value', 'Unknown')} {inventory_level.get('status', '')}
             - Business Goal: {focus_description}
             - Historical Performance:\n{history_summary}
+            
+            Return your response in the following JSON format:
+            ```json
+            {{
+              "rationale": "Your detailed rationale here",
+              "reevaluation_date": "YYYY-MM-DD"
+            }}
+            ```
             """}
         ]
         
@@ -1050,12 +1093,68 @@ class PricingStrategyAgent(BaseAgent):
                 fallback_rationale += f"pricing elasticity, and business goals. This change aligns with the objective of {focus_description.lower()}."
                 return fallback_rationale
             else:
-                # Return the LLM-generated rationale
-                rationale = response.get("content", "").strip()
-                # Store the rationale in the item data for future reference
+                # Extract rationale and reevaluation date from LLM response
+                content = response.get("content", "").strip()
+                
+                # Initialize defaults
+                rationale = content
+                reevaluation_date = None
+                
+                # Try to parse JSON response
+                try:
+                    # Extract JSON from the response if it's wrapped in ```json blocks
+                    import re
+                    import json
+                    
+                    # Look for JSON block in the response
+                    json_match = re.search(r'```(?:json)?([\s\S]*?)```', content)
+                    if json_match:
+                        json_str = json_match.group(1).strip()
+                    else:
+                        json_str = content  # Try parsing the entire content
+                    
+                    # Parse the JSON
+                    data = json.loads(json_str)
+                    
+                    # Extract the rationale and reevaluation date
+                    if isinstance(data, dict):
+                        if 'rationale' in data:
+                            rationale = data['rationale']
+                        if 'reevaluation_date' in data:
+                            reevaluation_date = data['reevaluation_date']
+                            
+                            # Validate date format
+                            try:
+                                datetime.strptime(reevaluation_date, '%Y-%m-%d')
+                                self.logger.info(f"Successfully parsed reevaluation date: {reevaluation_date} for {item_name}")
+                            except ValueError:
+                                self.logger.warning(f"Invalid date format for {item_name}: {reevaluation_date}, will use fallback")
+                                reevaluation_date = None
+                except Exception as json_error:
+                    self.logger.warning(f"Error parsing JSON from LLM response: {json_error}. Using fallback parsing.")
+                    
+                    # Try regex fallback for reevaluation date if JSON parsing failed
+                    date_pattern = r'reevaluation_date"?\s*:\s*"?(\d{4}-\d{2}-\d{2})'
+                    date_match = re.search(date_pattern, content)
+                    if date_match:
+                        reevaluation_date = date_match.group(1)
+                        try:
+                            datetime.strptime(reevaluation_date, '%Y-%m-%d')
+                            self.logger.info(f"Extracted reevaluation date via regex: {reevaluation_date} for {item_name}")
+                        except ValueError:
+                            self.logger.warning(f"Invalid regex-extracted date: {reevaluation_date}, will use fallback")
+                            reevaluation_date = None
+                
+                # Store the extracted data in the item for future reference
                 if "llm_pricing_analysis" not in item:
                     item["llm_pricing_analysis"] = {}
+                    
                 item["llm_pricing_analysis"]["rationale"] = rationale
+                
+                # Only store valid reevaluation date
+                if reevaluation_date:
+                    item["llm_pricing_analysis"]["reevaluation_date"] = reevaluation_date
+                    
                 return rationale
         except Exception as e:
             self.logger.error(f"Error processing LLM response for rationale generation: {e}")
@@ -1149,10 +1248,18 @@ class PricingStrategyAgent(BaseAgent):
         else:
             return "item_specific_optimization"
             
-    def _store_recommendations_in_memory(self, db: Session, user_id: int, item_strategies: List[Dict], comprehensive_strategy: Dict):
+    def _store_recommendations_in_memory(self, db: Session, user_id: int, item_strategies: List[Dict], comprehensive_strategy: Dict, batch_id=None):
         """Store pricing recommendations in memory for future reference"""
         from datetime import datetime
         import models
+        import uuid
+        
+        # Generate a unique batch ID for this set of recommendations if not provided
+        if not batch_id:
+            batch_id = str(uuid.uuid4())
+            self.logger.info(f"Generated new batch ID: {batch_id} for {len(item_strategies)} recommendations")
+        else:
+            self.logger.info(f"Using provided batch ID: {batch_id} for {len(item_strategies)} recommendations")
         
         # Store individual item recommendations
         for strategy in item_strategies:
@@ -1185,17 +1292,22 @@ class PricingStrategyAgent(BaseAgent):
                 # First check the LLM output, then the analysis metadata, then default to 3 months from now
                 reevaluation_date_str = llm_analysis.get('reevaluation_date') or analysis_metadata.get('reevaluation_date')
                 
+                self.logger.info(f"REEVAL-DEBUG: Item {item.name if hasattr(item, 'name') else 'Unknown'} has reevaluation_date_str: {reevaluation_date_str}")
+                
                 if reevaluation_date_str:
                     try:
                         # Parse the date string from the LLM output (YYYY-MM-DD format)
                         reevaluation_date = datetime.strptime(reevaluation_date_str, '%Y-%m-%d')
+                        self.logger.info(f"REEVAL-DEBUG: Successfully parsed {reevaluation_date_str} to datetime object {reevaluation_date} for {item.name if hasattr(item, 'name') else 'Unknown'}")
                     except (ValueError, TypeError):
                         # If parsing fails, default to 3 months from now
                         self.logger.warning(f"Could not parse reevaluation date: {reevaluation_date_str}. Using default.")
                         reevaluation_date = datetime.now() + timedelta(days=90)
+                        self.logger.info(f"REEVAL-DEBUG: Using default reevaluation date {reevaluation_date} for {item.name if hasattr(item, 'name') else 'Unknown'}")
                 else:
                     # Default to 3 months from now
                     reevaluation_date = datetime.now() + timedelta(days=90)
+                    self.logger.info(f"REEVAL-DEBUG: No reevaluation_date_str, using default {reevaluation_date} for {item.name if hasattr(item, 'name') else 'Unknown'}")
                 
                 # Create price change percent
                 price_change_percent = ((recommended_price - current_price) / current_price * 100) if current_price > 0 else 0
@@ -1204,6 +1316,7 @@ class PricingStrategyAgent(BaseAgent):
                 recommendation = models.PricingRecommendation(
                     user_id=user_id,
                     item_id=item_id,
+                    batch_id=batch_id,  # Include the batch_id for this set of recommendations
                     recommendation_date=datetime.utcnow(),
                     current_price=current_price,
                     recommended_price=recommended_price,
@@ -1231,8 +1344,13 @@ class PricingStrategyAgent(BaseAgent):
                     implementation_status='pending'
                 )
                 
+                # Debug the reevaluation date being saved
+                self.logger.info(f"REEVAL-DEBUG: About to save recommendation for {strategy.get('item_name', '')} with reevaluation_date: {reevaluation_date}")
+                
                 # Add to the database
                 db.add(recommendation)
+                db.commit()  # Explicitly commit to ensure the unique reevaluation date is persisted
+                self.logger.info(f"REEVAL-DEBUG: Successfully committed recommendation for {strategy.get('item_name', '')} with reevaluation_date: {reevaluation_date}")
                 
                 # Also save as a general memory for historical context
                 self.save_memory(
@@ -1240,6 +1358,7 @@ class PricingStrategyAgent(BaseAgent):
                     {
                         'item_id': item_id,
                         'item_name': strategy.get('item_name', ''),
+                        'batch_id': batch_id,  # Include batch_id in memory
                         'current_price': current_price,
                         'recommended_price': recommended_price,
                         'price_change_percent': price_change_percent,
@@ -1283,10 +1402,18 @@ class PricingStrategyAgent(BaseAgent):
                 self.logger.error(f"Error storing comprehensive strategy: {e}")
                 db.rollback()
                 
-    def _store_bundle_recommendations(self, db: Session, user_id: int, bundle_strategies: List[Dict]):
+    def _store_bundle_recommendations(self, db: Session, user_id: int, bundle_strategies: List[Dict], batch_id=None):
         """Store bundle pricing recommendations in memory"""
         from datetime import datetime
         import models
+        import uuid
+        
+        # Generate a unique batch ID if none provided
+        if not batch_id:
+            batch_id = str(uuid.uuid4())
+            self.logger.info(f"Generated new batch ID: {batch_id} for {len(bundle_strategies)} bundle recommendations")
+        else:
+            self.logger.info(f"Using provided batch ID: {batch_id} for {len(bundle_strategies)} bundle recommendations")
         
         for bundle in bundle_strategies:
             try:
@@ -1296,6 +1423,7 @@ class PricingStrategyAgent(BaseAgent):
                 # Create a bundle recommendation record
                 bundle_rec = models.BundleRecommendation(
                     user_id=user_id,
+                    batch_id=batch_id,  # Include the batch_id for this bundle recommendation
                     recommendation_date=datetime.utcnow(),
                     bundle_items=bundle.get('items', []),
                     bundle_name=bundle.get('name', 'Bundle'),

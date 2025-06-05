@@ -56,7 +56,6 @@ async def run_full_analysis(
     # Run analysis in background
     background_tasks.add_task(
         _run_analysis_task,
-        db,
         user_id,
         task_id,
         "api_trigger"
@@ -151,18 +150,122 @@ async def get_latest_results(
     """
     user_id = current_user.id
     
-    # Check if we have cached results
+    # Check if we have cached results in memory
     if user_id in running_tasks:
         task_info = running_tasks[user_id]
         if task_info.get('status') == 'completed' and 'results' in task_info:
-            return task_info['results']
+            logger.info(f"Returning cached results for user {user_id}")
+            return {
+                "status": "success",
+                "source": "cache",
+                "results": task_info['results']
+            }
     
-    # Otherwise, return a message to run analysis
-    return {
-        "status": "no_results",
-        "message": "No recent analysis results found. Please run a new analysis.",
-        "timestamp": datetime.now().isoformat()
-    }
+    # No cached results, try to retrieve from database
+    try:
+        logger.info(f"Retrieving latest analysis results from database for user {user_id}")
+        
+        # Get the latest data collection snapshot
+        latest_data_snapshot = db.query(models.DataCollectionSnapshot)\
+            .filter(models.DataCollectionSnapshot.user_id == user_id)\
+            .order_by(models.DataCollectionSnapshot.snapshot_date.desc())\
+            .first()
+            
+        # Get the latest market analysis snapshot
+        latest_market_snapshot = db.query(models.MarketAnalysisSnapshot)\
+            .filter(models.MarketAnalysisSnapshot.user_id == user_id)\
+            .order_by(models.MarketAnalysisSnapshot.analysis_date.desc())\
+            .first()
+            
+        # Get pricing recommendations (limit to 50 most recent)
+        recent_recommendations = db.query(models.PricingRecommendation)\
+            .filter(models.PricingRecommendation.user_id == user_id)\
+            .order_by(models.PricingRecommendation.recommendation_date.desc())\
+            .limit(50)\
+            .all()
+            
+        # Get performance data
+        latest_performance = db.query(models.PerformanceBaseline)\
+            .filter(models.PerformanceBaseline.user_id == user_id)\
+            .order_by(models.PerformanceBaseline.baseline_date.desc())\
+            .first()
+            
+        # Check if we have results
+        if not (latest_data_snapshot or latest_market_snapshot or recent_recommendations):
+            logger.info(f"No analysis data found in database for user {user_id}")
+            return {
+                "status": "no_results",
+                "message": "No previous analysis results found. Please run a new analysis.",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # Get the latest date from either market analysis or recommendations
+        analysis_date = None
+        if latest_market_snapshot and latest_market_snapshot.analysis_date:
+            analysis_date = latest_market_snapshot.analysis_date
+        elif recent_recommendations and recent_recommendations[0].recommendation_date:
+            analysis_date = recent_recommendations[0].recommendation_date
+        elif latest_data_snapshot and latest_data_snapshot.snapshot_date:
+            analysis_date = latest_data_snapshot.snapshot_date
+            
+        # Compile results from database records
+        compiled_results = {
+            "status": "success",
+            "source": "database",
+            "timestamp": datetime.now().isoformat(),
+            "analysis_date": analysis_date.isoformat() if analysis_date else None,
+            "results": {
+                "executive_summary": {
+                    "overall_status": latest_market_snapshot.market_position if latest_market_snapshot else "stable",
+                    "revenue_trend": "improving" if latest_market_snapshot and latest_market_snapshot.avg_price_vs_market > 0 else "stable",
+                    "key_opportunities": latest_market_snapshot.competitive_opportunities if latest_market_snapshot and latest_market_snapshot.competitive_opportunities else [],
+                    "immediate_actions": [],
+                    "risk_factors": latest_market_snapshot.competitive_threats if latest_market_snapshot and latest_market_snapshot.competitive_threats else []
+                },
+                "consolidated_recommendations": [],
+                "next_steps": [
+                    {"step": 1, "action": "Review pricing recommendations", "expected_impact": "Increased revenue", "timeline": "Immediate"}
+                ]
+            },
+            "agent_statuses": [
+                {"name": "Data Collection", "status": "completed", "lastRun": latest_data_snapshot.snapshot_date.isoformat() if latest_data_snapshot else datetime.now().isoformat()},
+                {"name": "Market Analysis", "status": "completed", "lastRun": latest_market_snapshot.analysis_date.isoformat() if latest_market_snapshot else datetime.now().isoformat()},
+                {"name": "Pricing Strategy", "status": "completed", "lastRun": recent_recommendations[0].recommendation_date.isoformat() if recent_recommendations else datetime.now().isoformat()},
+                {"name": "Performance Monitor", "status": "completed", "lastRun": latest_performance.baseline_date.isoformat() if latest_performance else datetime.now().isoformat()},
+                {"name": "Experimentation", "status": "completed", "lastRun": datetime.now().isoformat()}
+            ]
+        }
+        
+        # Add recommendations to the results
+        if recent_recommendations:
+            for rec in recent_recommendations:
+                compiled_results["results"]["consolidated_recommendations"].append({
+                    "priority": "high" if rec.price_change_percent > 10 else "medium" if rec.price_change_percent > 5 else "low",
+                    "recommendation": f"Adjust price for {rec.item.name if rec.item else 'item'} from ${rec.current_price:.2f} to ${rec.recommended_price:.2f}",
+                    "expected_impact": f"${rec.expected_revenue_change:.2f} revenue increase" if rec.expected_revenue_change else "Improved pricing alignment",
+                    "category": "pricing"
+                })
+        
+        # Cache these results for future quick access
+        running_tasks[user_id] = {
+            'task_id': f"historical_{user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            'status': 'completed',
+            'results': compiled_results,
+            'started_at': datetime.now().isoformat(),
+            'completed_at': datetime.now().isoformat(),
+            'message': 'Retrieved from database'
+        }
+        
+        logger.info(f"Successfully retrieved and compiled analysis results from database for user {user_id}")
+        return compiled_results
+        
+    except Exception as e:
+        logger.error(f"Error retrieving analysis results from database: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Error retrieving previous analysis results: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
 
 
 @router.post("/agent/{agent_name}/action")
@@ -273,10 +376,15 @@ async def get_execution_history(
 
 
 # Background task function
-def _run_analysis_task(db: Session, user_id: int, task_id: str, trigger_source: str):
+def _run_analysis_task(user_id: int, task_id: str, trigger_source: str):
     """
     Background task to run the full analysis
     """
+    # Import get_db inside the function to avoid circular imports
+    from database import get_db
+    
+    # Create a fresh database session
+    db = next(get_db())
     try:
         # Run the analysis
         results = orchestrator.run_full_analysis(db, user_id, trigger_source)

@@ -17,7 +17,7 @@ import AgentPricingRecommendations from './components/pricing/AgentPricingRecomm
 import CompetitorAnalysis from './components/competitor/CompetitorAnalysis';
 import CompetitorDetail from './components/competitor/CompetitorDetail';
 import ProductDetail from './components/products/ProductDetail';
-import AgentDashboard from './components/agents/AgentDashboard';
+import DynamicPricingAgents from './components/agents/DynamicPricingAgents';
 
 // Integration components
 import SquareCallback from './components/integrations/SquareCallback';
@@ -69,7 +69,7 @@ function App() {
             <Route path="competitor-analysis" element={<CompetitorAnalysis />} />
             <Route path="competitor/:competitorId" element={<CompetitorDetail />} />
             <Route path="product/:productId" element={<ProductDetail />} />
-            <Route path="agents" element={<AgentDashboard />} />
+            <Route path="agents" element={<DynamicPricingAgents />} />
             <Route path="square-test" element={<SquareOrderTester />} />
             <Route path="integrations/square" element={<SquareIntegrationPage />} />
           </Route>

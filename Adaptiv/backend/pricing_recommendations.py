@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, func
+from sqlalchemy.exc import SQLAlchemyError
 from typing import List, Optional
 from datetime import datetime, timedelta
 from pydantic import BaseModel
@@ -10,6 +11,11 @@ from models import PricingRecommendation, Item, User
 from auth import get_current_user
 
 pricing_recommendations_router = APIRouter()
+
+class BatchInfo(BaseModel):
+    batch_id: str
+    recommendation_date: datetime
+    count: int
 
 class PricingRecommendationResponse(BaseModel):
     id: int
@@ -25,6 +31,7 @@ class PricingRecommendationResponse(BaseModel):
     user_action: Optional[str] = None
     recommendation_date: datetime
     reevaluation_date: Optional[datetime] = None
+    batch_id: str
 
 class PricingRecommendationAction(BaseModel):
     action: str  # "accept" or "reject"
@@ -33,6 +40,7 @@ class PricingRecommendationAction(BaseModel):
 @pricing_recommendations_router.get("/recommendations", response_model=List[PricingRecommendationResponse])
 def get_pricing_recommendations(
     status: Optional[str] = None,
+    batch_id: Optional[str] = None,
     days: int = 7,  # Default to last 7 days
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -56,17 +64,54 @@ def get_pricing_recommendations(
     
     # Get the latest recommendations first
     query = query.order_by(desc(PricingRecommendation.recommendation_date))
+    
+    # Check if batch_id attribute exists (handle case where migration hasn't been run yet)
+    has_batch_id = hasattr(PricingRecommendation, 'batch_id')
+    
+    # If we have a specific batch_id filter parameter and batch_id exists in the model
+    if batch_id and has_batch_id:
+        try:
+            # Apply the batch_id filter
+            query = query.filter(PricingRecommendation.batch_id == batch_id)
+        except (AttributeError, SQLAlchemyError) as e:
+            print(f"Error filtering by batch_id: {e}")
+            # Fallback to old method if any error with batch_id
+            has_batch_id = False
+    
+    # Execute query to get all recommendations
     all_recommendations = query.all()
     
-    # Deduplicate recommendations - keep only the most recent one per item
-    seen_items = set()
-    unique_recommendations = []
-    for rec in all_recommendations:
-        if rec.item_id not in seen_items:
-            seen_items.add(rec.item_id)
-            unique_recommendations.append(rec)
+    # If there are no recommendations, return an empty list
+    if not all_recommendations:
+        return []
     
-    recommendations = unique_recommendations
+    if has_batch_id and not batch_id:  # If we have batch_id in the model but no specific batch requested
+        try:
+            # Use batch_id to get the most recent batch
+            most_recent_rec = all_recommendations[0]  # We already sorted by date
+            most_recent_batch_id = most_recent_rec.batch_id
+            
+            # Get all recommendations from the most recent batch
+            recommendations = [rec for rec in all_recommendations if rec.batch_id == most_recent_batch_id]
+        except (AttributeError, SQLAlchemyError) as e:
+            print(f"Error processing batch_id: {e}")
+            # Fallback to old method if any error with batch_id
+            has_batch_id = False
+    elif has_batch_id and batch_id:  # If we filtered by a specific batch
+        # All recommendations already filtered by batch_id in query
+        recommendations = all_recommendations
+    else:  # No batch_id in model or error occurred
+        has_batch_id = False
+    
+    if not has_batch_id:
+        # Fallback to previous behavior: deduplicate by item_id
+        seen_items = set()
+        unique_recommendations = []
+        for rec in all_recommendations:
+            if rec.item_id not in seen_items:
+                seen_items.add(rec.item_id)
+                unique_recommendations.append(rec)
+        recommendations = unique_recommendations
     
     # Get item names
     result = []
@@ -88,8 +133,9 @@ def get_pricing_recommendations(
             print(f"Fixing amount mismatch for {item_name}: {rec.price_change_amount:.2f} → {calculated_amount:.2f}")
             rec.price_change_amount = calculated_amount
         
-        # Print debug info to verify data
+        # Print debug info to verify data - with detailed reevaluation date
         print(f"Recommendation - {item_name}: Current: ${rec.current_price:.2f}, Recommended: ${rec.recommended_price:.2f}, Change: {rec.price_change_percent*100:.2f}%")
+        print(f"   Reevaluation date (DB): {rec.reevaluation_date} (Type: {type(rec.reevaluation_date).__name__})") 
         
         result.append(
             PricingRecommendationResponse(
@@ -105,11 +151,85 @@ def get_pricing_recommendations(
                 implementation_status=rec.implementation_status,
                 user_action=rec.user_action,
                 recommendation_date=rec.recommendation_date,
-                reevaluation_date=rec.reevaluation_date
+                reevaluation_date=rec.reevaluation_date,
+                batch_id=rec.batch_id if has_batch_id else 'legacy_batch'
             )
         )
     
     return result
+
+@pricing_recommendations_router.get("/recommendation-batches", response_model=List[BatchInfo])
+def get_recommendation_batches(
+    days: int = 30,  # Default to last 30 days
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get available recommendation batches for the current user.
+    Returns a list of batch_ids with their dates and count of recommendations.
+    """
+    user_id = current_user.id
+    
+    # Filter by date - get batches from the last 'days' days
+    date_cutoff = datetime.utcnow() - timedelta(days=days)
+    
+    # Check if batch_id attribute exists (handle case where migration hasn't been run yet)
+    has_batch_id = hasattr(PricingRecommendation, 'batch_id')
+    
+    if not has_batch_id:
+        # Return a single legacy batch if batch_id column doesn't exist
+        count = db.query(PricingRecommendation).filter(
+            PricingRecommendation.user_id == user_id,
+            PricingRecommendation.recommendation_date >= date_cutoff
+        ).count()
+        
+        if count > 0:
+            # Get the most recent recommendation date
+            most_recent = db.query(PricingRecommendation).filter(
+                PricingRecommendation.user_id == user_id,
+                PricingRecommendation.recommendation_date >= date_cutoff
+            ).order_by(desc(PricingRecommendation.recommendation_date)).first()
+            
+            return [BatchInfo(
+                batch_id="legacy_batch",
+                recommendation_date=most_recent.recommendation_date,
+                count=count
+            )]
+        return []
+    
+    try:
+        # Use SQL to get distinct batch_ids, their dates, and counts
+        result = []
+        
+        # Get distinct batch_ids and their most recent dates
+        batch_query = db.query(
+            PricingRecommendation.batch_id,
+            desc(PricingRecommendation.recommendation_date),
+            # Use func.count to count recommendations per batch
+            func.count(PricingRecommendation.id).label('count')
+        ).filter(
+            PricingRecommendation.user_id == user_id,
+            PricingRecommendation.recommendation_date >= date_cutoff
+        ).group_by(
+            PricingRecommendation.batch_id
+        ).order_by(
+            desc(PricingRecommendation.recommendation_date)
+        )
+        
+        # Execute the query and format results
+        batches = batch_query.all()
+        
+        for batch in batches:
+            result.append(BatchInfo(
+                batch_id=batch.batch_id,
+                recommendation_date=batch[1],  # Most recent date for this batch
+                count=batch.count
+            ))
+            
+        return result
+    except (AttributeError, SQLAlchemyError) as e:
+        print(f"Error retrieving batches: {e}")
+        return []
 
 @pricing_recommendations_router.put("/recommendations/{recommendation_id}/action", response_model=PricingRecommendationResponse)
 def update_recommendation_action(

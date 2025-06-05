@@ -425,6 +425,7 @@ class PricingRecommendation(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
     item_id = Column(Integer, ForeignKey('items.id'), nullable=False, index=True)
+    batch_id = Column(String(100), nullable=False, index=True)  # Unique identifier for a batch of recommendations
     recommendation_date = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     
     # Recommendation details
@@ -473,6 +474,7 @@ class BundleRecommendation(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    batch_id = Column(String(100), nullable=False, index=True)  # Unique identifier for a batch of recommendations
     recommendation_date = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     
     # Bundle details
