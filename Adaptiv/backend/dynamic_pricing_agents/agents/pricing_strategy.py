@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 import json
 import logging
 import numpy as np
+import re
+import hashlib
 from sqlalchemy.orm import Session
 from ..base_agent import BaseAgent
 from models import PricingRecommendation, PricingDecision
@@ -18,6 +20,20 @@ class PricingStrategyAgent(BaseAgent):
     def __init__(self):
         super().__init__("PricingStrategyAgent", model="gpt-4o-mini")
         self.logger.info("Pricing Strategy Agent initialized")
+        
+    def llm_call(self, prompt: str) -> str:
+        """
+        Call the LLM with a prompt and return the response text
+        """
+        # Make the actual LLM call
+        messages = [
+            {"role": "system", "content": self.get_system_prompt()},
+            {"role": "user", "content": prompt}
+        ]
+        
+        response = self.call_llm(messages)
+        return response.get("content", "")
+            
         
     def get_system_prompt(self) -> str:
         return """You are a Pricing Strategy Agent specializing in dynamic pricing optimization. Your role is to:
@@ -260,6 +276,12 @@ class PricingStrategyAgent(BaseAgent):
     def _generate_item_strategies(self, data: Dict[str, Any], market: Dict[str, Any], goals: Dict[str, Any], memory_context: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """Generate pricing strategies for each item, incorporating historical context"""
         items = data.get("pos_data", {}).get("items", [])
+        
+        # In development mode, limit to first 5 items for faster testing
+        # Limit number of items to process for performance reasons
+        original_count = len(items)
+        items = items[:5]  # Only process first 7 items
+        self.logger.info(f"Performance optimization: Processing only {len(items)}/{original_count} items")
         elasticities = {e["item_id"]: e for e in market.get("price_elasticity", {}).get("item_elasticities", [])}
         competitive_data = market.get("competitive_landscape", {})
         competitor_items = data.get("competitor_data", {}).get("items", [])
@@ -356,20 +378,8 @@ class PricingStrategyAgent(BaseAgent):
             
             # Ensure the price change is meaningful and not effectively zero
             if abs(price_change) < 0.01 or abs(price_change_pct) < 0.1:
-                # Add a small percentage increase (between 3-10%) to ensure recommendations are actionable
-                adjustment_pct = random.uniform(0.03, 0.10)  # 3% to 10% adjustment
-                optimal_price = round(current_price * (1 + adjustment_pct), 2)
-                price_change = optimal_price - current_price
-                price_change_pct = (price_change / current_price) * 100 if current_price > 0 else 0
-                self.logger.info(f"Adding meaningful price change for {item_name}: ${current_price:.2f} → ${optimal_price:.2f} ({price_change_pct:.1f}%)")
-                
-                # Re-generate the rationale with the adjusted price to ensure consistency
-                detailed_rationale = self._generate_price_change_rationale(
-                    item, current_price, optimal_price, 
-                    elasticity_data, competitor_prices.get(item_name, []),
-                    goals,
-                    item_history
-                )
+                self.logger.info("Price change is too small, skipping recommendation")
+                continue
             
             # Generate specific rationale for this recommendation
             else:
@@ -383,9 +393,46 @@ class PricingStrategyAgent(BaseAgent):
                     item_history
                 )
             
-            # Calculate base confidence
-            base_confidence = self._calculate_confidence(elasticity_data, competitive_data)
+            # Calculate base confidence with debug info
+            self.logger.info(f"\n=== ITEM CONFIDENCE DEBUG: {item_name} ====")
+            self.logger.info(f"Item: {item_name}, ID: {item_id}")
+            self.logger.info(f"Calculating confidence for {item_name} with elasticity_data={bool(elasticity_data)} and competitive_data={bool(competitive_data)}")
             
+            base_confidence = self._calculate_confidence(
+                item_data=item,
+                item_name=item_name,
+                current_price=current_price,
+                optimal_price=optimal_price,
+                elasticity=elasticity_data,
+                competitive=competitive_data,
+                item_history=item_history
+            )
+            self.logger.info(f"Base confidence for {item_name}: {base_confidence}")
+            self.logger.info(f"Confidence adjustment for {item_name}: {confidence_adjustment}")
+            
+            # Calculate adjusted confidence
+            adjusted_confidence = min(1.0, base_confidence + confidence_adjustment)  # Cap at 1.0
+            self.logger.info(f"Final adjusted confidence for {item_name}: {adjusted_confidence}")
+            self.logger.info(f"Current price: ${current_price:.2f}, Recommended price: ${optimal_price:.2f}, Change: {price_change_pct:.1f}%")
+            self.logger.info(f"====================================")
+            
+            reevaluation_days = self._calculate_reevaluation(
+                item_data=item,
+                item_name=item_name,
+                current_price=current_price,
+                optimal_price=optimal_price,
+                elasticity=elasticity_data,
+                competitive=competitive_data,
+                item_history=item_history
+            )
+
+            self.logger.info(f"Reevaluation days for {item_name}: {reevaluation_days}")
+            
+            # Calculate the actual reevaluation date
+            reevaluation_date = datetime.utcnow() + timedelta(days=reevaluation_days)
+            self.logger.info(f"Reevaluation date for {item_name}: {reevaluation_date}")
+            
+
             strategy = {
                 "item_id": item_id,
                 "item_name": item_name,
@@ -399,7 +446,8 @@ class PricingStrategyAgent(BaseAgent):
                 "implementation_timing": self._recommend_timing(item, market),
                 "expected_impact": self._estimate_impact(item, elasticity_data),
                 "confidence": min(1.0, base_confidence + confidence_adjustment),  # Cap at 1.0
-                "historical_context": bool(item_history['previous_recommendations'] or item_history['previous_outcomes'])
+                "historical_context": bool(item_history['previous_recommendations'] or item_history['previous_outcomes']),
+                "reevaluation_date": reevaluation_date.isoformat()
             }
             strategies.append(strategy)
         
@@ -1042,16 +1090,21 @@ class PricingStrategyAgent(BaseAgent):
             The rationale should be a single paragraph with no bullet points, section headers, or other formatting.
             
             For the reevaluation date, consider product seasonality, market dynamics, and product category characteristics.
-            For example:
-            - Seasonal products should be reevaluated before their next season begins
-            - Holiday items should be reevaluated after the holiday season ends
-            - Fast-selling items need more frequent reevaluation (10-20 days)
-            - Products in volatile markets need frequent reevaluation (10-20 days)
-            - Stable products can be reevaluated after 30-90 days depending on category
+            Based on the data provided, determine when this SPECIFIC PRODUCT should be reevaluated:
+            - Seasonal products: reevaluate 15-30 days before their next season begins
+            - Holiday items: reevaluate 1-2 weeks after the holiday season ends
+            - Fast-selling items with high velocity: reevaluate in 10-20 days
+            - Products in volatile/competitive markets: reevaluate in 10-20 days
+            - Products with changing elasticity: reevaluate in 20-30 days
+            - Stable products with consistent sales: reevaluate in 30-90 days
             
-            IMPORTANT: The reevaluation date must be product-specific and in YYYY-MM-DD format.
-            Do not use a generic date (e.g., don't just default to 90 days from now for every product).
-            The date should reflect the specific seasonality, market position, and characteristics of this particular product."""},
+            *** CRITICAL DATE FORMAT INSTRUCTIONS ***
+            1. The reevaluation_date field MUST be in YYYY-MM-DD format (e.g., 2025-07-15)
+            2. The date MUST be a valid calendar date in the future
+            3. Each product must get its own unique, carefully considered reevaluation date
+            4. DO NOT use the same generic date for every product (especially avoid defaulting to exactly 90 days)
+            5. The date should be precisely calculated based on this specific product's characteristics
+            """},
             {"role": "user", "content": f"""Generate a detailed rationale and a specific reevaluation date for the following price change recommendation:
             
             Product: {item_name}
@@ -1102,47 +1155,128 @@ class PricingStrategyAgent(BaseAgent):
                 
                 # Try to parse JSON response
                 try:
-                    # Extract JSON from the response if it's wrapped in ```json blocks
+                    # Enhanced JSON extraction and parsing
                     import re
                     import json
                     
-                    # Look for JSON block in the response
+                    # Debug raw response
+                    self.logger.info(f"DEBUG-RAW-LLM-RESPONSE for {item_name}:\n{content[:200]}...")
+                    
+                    # Step 1: Look for JSON block in the response with flexible pattern matching
                     json_match = re.search(r'```(?:json)?([\s\S]*?)```', content)
                     if json_match:
                         json_str = json_match.group(1).strip()
+                        self.logger.info(f"Found JSON block for {item_name}: {json_str[:100]}...")
                     else:
-                        json_str = content  # Try parsing the entire content
+                        # If no JSON block markers found, try to identify JSON by finding opening/closing braces
+                        json_pattern = r'(\{[\s\S]*\})'
+                        json_without_ticks = re.search(json_pattern, content)
+                        if json_without_ticks:
+                            json_str = json_without_ticks.group(1).strip()
+                            self.logger.info(f"Found JSON-like content for {item_name} without ticks: {json_str[:100]}...")
+                        else:
+                            json_str = content  # Try parsing the entire content
+                            self.logger.info(f"No JSON structure found for {item_name}, trying to parse entire content")
                     
-                    # Parse the JSON
-                    data = json.loads(json_str)
+                    # Clean up common JSON formatting issues
+                    # Replace single quotes with double quotes for JSON compatibility
+                    json_str = re.sub(r"(?<!\\\\)'([^']*?)(?<!\\\\)'", r'"\g<1>"', json_str)
                     
-                    # Extract the rationale and reevaluation date
+                    # Try to parse the JSON with detailed error reporting
+                    try:
+                        data = json.loads(json_str)
+                        self.logger.info(f"Successfully parsed JSON for {item_name}")
+                    except json.JSONDecodeError as json_err:
+                        self.logger.warning(f"JSON parse error at position {json_err.pos}: {json_err.msg} for {item_name}. Partial JSON: {json_str[max(0, json_err.pos-20):min(json_err.pos+20, len(json_str))]}")
+                        # Try more aggressive cleaning
+                        try:
+                            # Sometimes there are stray characters before/after the JSON object
+                            cleaner_match = re.search(r'(\{[^{]*\"rationale\"[^}]*\"reevaluation_date\"[^}]*\})', json_str)
+                            if cleaner_match:
+                                cleaner_json = cleaner_match.group(1)
+                                self.logger.info(f"Attempting with cleaned JSON for {item_name}: {cleaner_json}")
+                                data = json.loads(cleaner_json)
+                            else:
+                                raise ValueError("Could not find valid JSON structure")
+                        except Exception as e:
+                            self.logger.warning(f"Failed JSON cleaning attempt for {item_name}: {e}")
+                            raise  # Re-raise to be caught by outer exception handler
+                    
+                    # Extract the rationale and reevaluation date with detailed logging
                     if isinstance(data, dict):
+                        # Extract rationale with logging
                         if 'rationale' in data:
                             rationale = data['rationale']
+                            self.logger.info(f"Extracted rationale for {item_name} (first 50 chars): {rationale[:50]}...")
+                        else:
+                            self.logger.warning(f"No 'rationale' field found in LLM response for {item_name}")
+                        
+                        # Extract and validate reevaluation date with extensive logging
                         if 'reevaluation_date' in data:
                             reevaluation_date = data['reevaluation_date']
+                            self.logger.info(f"Found reevaluation_date in JSON for {item_name}: {reevaluation_date} (type: {type(reevaluation_date).__name__})")
                             
-                            # Validate date format
+                            # Handle case where date might be a nested object
+                            if isinstance(reevaluation_date, dict):
+                                self.logger.warning(f"reevaluation_date is a dict for {item_name}: {reevaluation_date}")
+                                # Try to extract date string from the dict
+                                for k, v in reevaluation_date.items():
+                                    if isinstance(v, str) and re.match(r'^\d{4}-\d{2}-\d{2}$', v):
+                                        reevaluation_date = v
+                                        self.logger.info(f"Extracted date from dict: {reevaluation_date}")
+                                        break
+                            
+                            # Validate and standardize date format
                             try:
-                                datetime.strptime(reevaluation_date, '%Y-%m-%d')
-                                self.logger.info(f"Successfully parsed reevaluation date: {reevaluation_date} for {item_name}")
-                            except ValueError:
-                                self.logger.warning(f"Invalid date format for {item_name}: {reevaluation_date}, will use fallback")
+                                # Support multiple date formats
+                                for fmt in ['%Y-%m-%d', '%Y/%m/%d', '%m/%d/%Y', '%d-%m-%Y']:
+                                    try:
+                                        parsed_date = datetime.strptime(str(reevaluation_date), fmt)
+                                        reevaluation_date = parsed_date.strftime('%Y-%m-%d')  # Standardize format
+                                        self.logger.info(f"Successfully parsed reevaluation date: {reevaluation_date} for {item_name} using format {fmt}")
+                                        break
+                                    except ValueError:
+                                        continue
+                                else:
+                                    # No format matched
+                                    raise ValueError(f"Could not parse date with any format: {reevaluation_date}")
+                                    
+                                # Verify the date is in the future
+                                parsed_date = datetime.strptime(reevaluation_date, '%Y-%m-%d')
+                                if parsed_date <= datetime.now():
+                                    self.logger.warning(f"Date {reevaluation_date} for {item_name} is not in the future, will use fallback")
+                                    reevaluation_date = None
+                            except Exception as e:
+                                self.logger.warning(f"Invalid date validation for {item_name}: {reevaluation_date}, error: {str(e)}")
                                 reevaluation_date = None
+                        else:
+                            self.logger.warning(f"No 'reevaluation_date' field in JSON for {item_name}")
                 except Exception as json_error:
                     self.logger.warning(f"Error parsing JSON from LLM response: {json_error}. Using fallback parsing.")
                     
-                    # Try regex fallback for reevaluation date if JSON parsing failed
+                    # Try multiple regex fallbacks for reevaluation date if JSON parsing failed
+                    # First try the standard JSON format
                     date_pattern = r'reevaluation_date"?\s*:\s*"?(\d{4}-\d{2}-\d{2})'
                     date_match = re.search(date_pattern, content)
+                    
+                    # If that doesn't work, try finding any YYYY-MM-DD pattern in the response
+                    if not date_match:
+                        date_pattern = r'(\d{4}-\d{2}-\d{2})'
+                        date_match = re.search(date_pattern, content)
+                    
                     if date_match:
                         reevaluation_date = date_match.group(1)
                         try:
-                            datetime.strptime(reevaluation_date, '%Y-%m-%d')
-                            self.logger.info(f"Extracted reevaluation date via regex: {reevaluation_date} for {item_name}")
+                            parsed_date = datetime.strptime(reevaluation_date, '%Y-%m-%d')
+                            
+                            # Validate the date is in the future
+                            if parsed_date <= datetime.now():
+                                self.logger.warning(f"Reevaluation date is not in the future: {reevaluation_date} for {item_name}, will use fallback")
+                                reevaluation_date = None
+                            else:
+                                self.logger.info(f"Successfully extracted reevaluation date: {reevaluation_date} for {item_name}")
                         except ValueError:
-                            self.logger.warning(f"Invalid regex-extracted date: {reevaluation_date}, will use fallback")
+                            self.logger.warning(f"Invalid date format: {reevaluation_date}, will use fallback")
                             reevaluation_date = None
                 
                 # Store the extracted data in the item for future reference
@@ -1151,9 +1285,14 @@ class PricingStrategyAgent(BaseAgent):
                     
                 item["llm_pricing_analysis"]["rationale"] = rationale
                 
-                # Only store valid reevaluation date
+                # Enhanced logging and storage for reevaluation date
                 if reevaluation_date:
                     item["llm_pricing_analysis"]["reevaluation_date"] = reevaluation_date
+                    # Log success with date info for tracking
+                    self.logger.info(f"✅ Successfully set reevaluation_date for {item_name}: {reevaluation_date}")
+                else:
+                    # Log warning about missing date
+                    self.logger.warning(f"❌ Failed to extract valid reevaluation_date for {item_name} from LLM response")
                     
                 return rationale
         except Exception as e:
@@ -1203,17 +1342,354 @@ class PricingStrategyAgent(BaseAgent):
                 "expected_revenue_change": 0.03
             }
     
-    def _calculate_confidence(self, elasticity: Dict, competitive: Dict) -> float:
-        """Calculate confidence in the recommendation"""
-        confidence = 0.5  # Base confidence
+    def _calculate_confidence(self, item_data: Dict, item_name: str, current_price: float, 
+                          optimal_price: float, elasticity: Dict, competitive: Dict, 
+                          item_history: Dict = None) -> float:
+        """Calculate confidence in the recommendation using LLM analysis"""
+        self.logger.info("========== CONFIDENCE CALCULATION DEBUG INFO ===========")
+        self.logger.info(f"Elasticity data: {elasticity}")
+        self.logger.info(f"Competitive data: {competitive}")
         
-        if elasticity and "elasticity" in elasticity:
-            confidence += 0.3  # Have elasticity data
+        # Default to simulated confidence during development to avoid API calls
+        if getattr(self, 'DEVELOPMENT_MODE', False):
+            # Generate a pseudorandom but deterministic confidence score based on item name
+            # This ensures consistent but varied results during development
+            import hashlib
+            name_hash = int(hashlib.md5(item_name.encode()).hexdigest(), 16)
+            confidence = 0.5 + ((name_hash % 1000) / 2000)  # Range from 0.5 to 1.0
+            self.logger.info(f"DEVELOPMENT MODE: Simulated confidence for {item_name}: {confidence:.2f}")
+            return confidence
         
-        if competitive and competitive.get("competitors"):
-            confidence += 0.2  # Have competitive data
+        try:
+            # Prepare elasticity assessment
+            elasticity_assessment = "No elasticity data available."
+            if elasticity and "elasticity" in elasticity:
+                e_value = elasticity.get("elasticity", 0)
+                elasticity_assessment = f"Elasticity value: {e_value}. "
+                if abs(e_value) < 0.5:
+                    elasticity_assessment += "Low elasticity suggests price changes will have minimal impact on demand."
+                elif abs(e_value) < 1.0:
+                    elasticity_assessment += "Moderate elasticity suggests reasonable balance between price and demand."
+                else:
+                    elasticity_assessment += "High elasticity suggests demand is very sensitive to price changes."
+            
+            # Prepare competitive assessment
+            competitive_assessment = "No competitive data available."
+            market_positioning = "unknown"
+            if competitive and competitive.get("competitors"):
+                comp_count = len(competitive.get("competitors", []))
+                price_positions = []
+                threat_levels = []
+                strategies = []
+                
+                for comp in competitive.get("competitors", []):
+                    # Extract competitor strategies and threat levels
+                    threat_level = comp.get("competitive_threat_level", "unknown")
+                    threat_levels.append(threat_level)
+                    strategy = comp.get("current_strategy", "unknown")
+                    strategies.append(strategy)
+                    
+                    # Extract price positioning vs competitors
+                    avg_diff = comp.get("avg_price_difference", 0)
+                    if avg_diff > 10:
+                        price_positions.append("lower than us")
+                    elif avg_diff < -10:
+                        price_positions.append("higher than us")
+                    else:
+                        price_positions.append("similar to us")
+                
+                # Summarize competitive landscape
+                high_threats = sum(1 for t in threat_levels if t == "high")
+                premium_competitors = sum(1 for s in strategies if s in ["luxury_positioning", "premium_pricing"])
+                discount_competitors = sum(1 for s in strategies if s in ["discount_leader", "value_pricing"])
+                
+                # Determine our market positioning
+                higher_count = sum(1 for p in price_positions if p == "higher than us")
+                lower_count = sum(1 for p in price_positions if p == "lower than us")
+                if higher_count > lower_count:
+                    market_positioning = "value-oriented"
+                elif lower_count > higher_count:
+                    market_positioning = "premium"
+                else:
+                    market_positioning = "mid-market"
+                
+                competitive_assessment = f"We have data on {comp_count} competitors. "
+                competitive_assessment += f"{high_threats} pose a high competitive threat. "
+                competitive_assessment += f"We are positioned as a {market_positioning} offering compared to competitors. "
+                competitive_assessment += f"There are {premium_competitors} premium competitors and {discount_competitors} discount competitors."
+            
+            # Prepare pricing recommendation assessment
+            price_change_pct = ((optimal_price - current_price) / current_price) * 100 if current_price else 0
+            price_assessment = f"Current price: ${current_price:.2f}, recommended price: ${optimal_price:.2f} ({price_change_pct:.1f}% change). "
+            
+            if abs(price_change_pct) < 2:
+                price_assessment += "This is a minor price adjustment."
+            elif abs(price_change_pct) < 10:
+                price_assessment += "This is a moderate price adjustment."
+            else:
+                price_assessment += "This is a significant price adjustment."
+            
+            # Prepare historical context assessment
+            history_assessment = "No historical pricing data available."
+            if item_history:
+                prev_recs = len(item_history.get('previous_recommendations', []))
+                prev_outcomes = item_history.get('previous_outcomes', [])
+                successful_outcomes = [o for o in prev_outcomes if o.get('success_rating', 0) >= 4]
+                
+                if prev_recs > 0:
+                    history_assessment = f"We have made {prev_recs} previous price recommendations. "
+                    if successful_outcomes:
+                        history_assessment += f"{len(successful_outcomes)} previous price changes were successful."
+                    else:
+                        history_assessment += "No information on successful previous price changes."
+            
+            # Construct the LLM prompt
+            prompt = f"""
+            You are analyzing data to determine the confidence level for a pricing recommendation for {item_name}.
+            Provide a confidence score between 0.0 and 1.0 based on the following data:
+            
+            ELASTICITY INFORMATION:
+            {elasticity_assessment}
+            
+            COMPETITIVE LANDSCAPE:
+            {competitive_assessment}
+            
+            PRICE RECOMMENDATION:
+            {price_assessment}
+            
+            HISTORICAL CONTEXT:
+            {history_assessment}
+            
+            Consider these factors when determining confidence:
+            - Quality and completeness of elasticity data
+            - Competition and our market positioning
+            - Magnitude of the price change (extreme changes should reduce confidence)
+            - Consistency with previous successful recommendations
+            - Market stability and competitive threat levels
+            
+            Return ONLY a numeric confidence score between 0.0 and 1.0, with higher numbers indicating greater confidence.
+            Format: {{"confidence": X.X}}
+            """
+            
+            # Call the LLM to get the confidence score
+            llm_response = self.llm_call(prompt)
+            self.logger.info(f"LLM Response: {llm_response}")
+            
+            # Parse the response to extract the confidence score
+            import re
+            import json
+            
+            try:
+                # First try parsing as JSON
+                confidence_data = json.loads(llm_response)
+                confidence = float(confidence_data.get("confidence", 0.7))
+            except (json.JSONDecodeError, ValueError):
+                # Fall back to regex pattern matching
+                confidence_pattern = r'\"confidence\":\s*([0-9]*\.?[0-9]+)'  # Look for "confidence": X.X
+                match = re.search(confidence_pattern, llm_response)
+                
+                if match:
+                    confidence = float(match.group(1))
+                else:
+                    # If all else fails, just try to find any float between 0 and 1
+                    number_pattern = r'([0-9]*\.?[0-9]+)'
+                    numbers = re.findall(number_pattern, llm_response)
+                    valid_numbers = [float(n) for n in numbers if 0 <= float(n) <= 1]
+                    confidence = valid_numbers[0] if valid_numbers else 0.7  # Default if parsing fails
+            
+            # Ensure value is within valid range
+            confidence = max(0.0, min(1.0, confidence))
+            self.logger.info(f"Extracted confidence score: {confidence}")
+            
+        except Exception as e:
+            # Fallback to the heuristic method if LLM approach fails
+            self.logger.error(f"Error calculating LLM confidence: {str(e)}. Falling back to heuristic method.")
+            
+            # Simple heuristic fallback
+            confidence = 0.5  # Base confidence
+            self.logger.info(f"Fallback - Base confidence: {confidence}")
+            
+            # Check elasticity data
+            has_elasticity = elasticity and "elasticity" in elasticity
+            if has_elasticity:
+                confidence += 0.3
+                self.logger.info(f"Fallback - Added 0.3 for elasticity data, confidence now: {confidence}")
+            
+            # Check competitive data
+            has_competitors = bool(competitive and competitive.get("competitors"))
+            if has_competitors:
+                confidence += 0.2
+                self.logger.info(f"Fallback - Added 0.2 for competitor data, confidence now: {confidence}")
+            
+            # Ensure value is within valid range
+            confidence = min(confidence, 1.0)
+            
+        self.logger.info(f"Final confidence score for {item_name}: {confidence}")
+        self.logger.info("=======================================================\n")
         
-        return min(confidence, 1.0)
+        return confidence
+
+    def _calculate_reevaluation(self, item_data: Dict, item_name: str, current_price: float, 
+                          optimal_price: float, elasticity: Dict, competitive: Dict, 
+                          item_history: Dict = None) -> float:
+        """Calculate reevaluation in the recommendation using LLM analysis"""
+        self.logger.info("========== REEVALUATION DEBUG INFO ===========")
+        self.logger.info(f"Elasticity data: {elasticity}")
+        self.logger.info(f"Competitive data: {competitive}")
+        
+        try:
+            # Prepare elasticity assessment
+            elasticity_assessment = "No elasticity data available."
+            if elasticity and "elasticity" in elasticity:
+                e_value = elasticity.get("elasticity", 0)
+                elasticity_assessment = f"Elasticity value: {e_value}. "
+                if abs(e_value) < 0.5:
+                    elasticity_assessment += "Low elasticity suggests price changes will have minimal impact on demand."
+                elif abs(e_value) < 1.0:
+                    elasticity_assessment += "Moderate elasticity suggests reasonable balance between price and demand."
+                else:
+                    elasticity_assessment += "High elasticity suggests demand is very sensitive to price changes."
+            
+            # Prepare competitive assessment
+            competitive_assessment = "No competitive data available."
+            market_positioning = "unknown"
+            if competitive and competitive.get("competitors"):
+                comp_count = len(competitive.get("competitors", []))
+                price_positions = []
+                threat_levels = []
+                strategies = []
+                
+                for comp in competitive.get("competitors", []):
+                    # Extract competitor strategies and threat levels
+                    threat_level = comp.get("competitive_threat_level", "unknown")
+                    threat_levels.append(threat_level)
+                    strategy = comp.get("current_strategy", "unknown")
+                    strategies.append(strategy)
+                    
+                    # Extract price positioning vs competitors
+                    avg_diff = comp.get("avg_price_difference", 0)
+                    if avg_diff > 10:
+                        price_positions.append("lower than us")
+                    elif avg_diff < -10:
+                        price_positions.append("higher than us")
+                    else:
+                        price_positions.append("similar to us")
+                
+                # Summarize competitive landscape
+                high_threats = sum(1 for t in threat_levels if t == "high")
+                premium_competitors = sum(1 for s in strategies if s in ["luxury_positioning", "premium_pricing"])
+                discount_competitors = sum(1 for s in strategies if s in ["discount_leader", "value_pricing"])
+                
+                # Determine our market positioning
+                higher_count = sum(1 for p in price_positions if p == "higher than us")
+                lower_count = sum(1 for p in price_positions if p == "lower than us")
+                if higher_count > lower_count:
+                    market_positioning = "value-oriented"
+                elif lower_count > higher_count:
+                    market_positioning = "premium"
+                else:
+                    market_positioning = "mid-market"
+                
+                competitive_assessment = f"We have data on {comp_count} competitors. "
+                competitive_assessment += f"{high_threats} pose a high competitive threat. "
+                competitive_assessment += f"We are positioned as a {market_positioning} offering compared to competitors. "
+                competitive_assessment += f"There are {premium_competitors} premium competitors and {discount_competitors} discount competitors."
+            
+            # Prepare pricing recommendation assessment
+            price_change_pct = ((optimal_price - current_price) / current_price) * 100 if current_price else 0
+            price_assessment = f"Current price: ${current_price:.2f}, recommended price: ${optimal_price:.2f} ({price_change_pct:.1f}% change). "
+            
+            if abs(price_change_pct) < 2:
+                price_assessment += "This is a minor price adjustment."
+            elif abs(price_change_pct) < 10:
+                price_assessment += "This is a moderate price adjustment."
+            else:
+                price_assessment += "This is a significant price adjustment."
+            
+            # Prepare historical context assessment
+            history_assessment = "No historical pricing data available."
+            if item_history:
+                prev_recs = len(item_history.get('previous_recommendations', []))
+                prev_outcomes = item_history.get('previous_outcomes', [])
+                successful_outcomes = [o for o in prev_outcomes if o.get('success_rating', 0) >= 4]
+                
+                if prev_recs > 0:
+                    history_assessment = f"We have made {prev_recs} previous price recommendations. "
+                    if successful_outcomes:
+                        history_assessment += f"{len(successful_outcomes)} previous price changes were successful."
+                    else:
+                        history_assessment += "No information on successful previous price changes."
+            
+            # Construct the LLM prompt
+            prompt = f"""
+                You are analyzing data to determine the optimal timeframe for reevaluating the new price for {item_name}. The new price will take effect tomorrow.
+                Provide a recommended timeframe (in days) for when this pricing should be reviewed based on the following data:
+                
+                ELASTICITY INFORMATION:
+                {elasticity_assessment}
+                
+                COMPETITIVE LANDSCAPE:
+                {competitive_assessment}
+                
+                PRICE RECOMMENDATION:
+                {price_assessment}
+                
+                HISTORICAL CONTEXT:
+                {history_assessment}
+                
+                Consider these factors when determining the optimal reevaluation timeframe:
+                - Volatility of elasticity data (higher volatility requires more frequent reviews)
+                - Competitive response likelihood and timing
+                - Magnitude of the price change (larger changes should be reevaluated sooner)
+                - Seasonal factors that might affect performance
+                - Historical adaptation periods after previous price changes
+                - Current market stability and competitive threat levels
+                
+                Return ONLY the recommended number of days until reevaluation.
+                Format: {{"reevaluation_days": X}}
+                """
+            
+            # Call the LLM to get the confidence score
+            llm_response = self.llm_call(prompt)
+            self.logger.info(f"LLM Response: {llm_response}")
+            
+            try:
+                # First try parsing as JSON
+                reeval_data = json.loads(llm_response)
+                reeval_days = int(reeval_data.get("reevaluation_days", 30))
+            except (json.JSONDecodeError, ValueError):
+                # Fall back to regex pattern matching
+                reeval_pattern = r'\"reevaluation_days\":\s*([0-9]+)'  # Look for "reevaluation_days": X
+                match = re.search(reeval_pattern, llm_response)
+                
+                if match:
+                    reeval_days = int(match.group(1))
+                else:
+                    # If all else fails, just try to find any float between 0 and 1
+                    number_pattern = r'([0-9]*\.?[0-9]+)'
+                    numbers = re.findall(number_pattern, llm_response)
+                    valid_numbers = [float(n) for n in numbers if 0 <= float(n) <= 1]
+                    confidence = valid_numbers[0] if valid_numbers else 0.7  # Default if parsing fails
+            
+            # Ensure value is within valid range
+            reeval_days = max(1, min(90, reeval_days))
+            self.logger.info(f"Extracted reevaluation days: {reeval_days}")
+            
+        except Exception as e:
+            # Fallback to the heuristic method if LLM approach fails
+            self.logger.error(f"Error calculating LLM reevaluation days: {str(e)}. Falling back to heuristic method.")
+            
+            # Simple heuristic fallback
+            reeval_days = 30  # Base reevaluation days
+            self.logger.info(f"Fallback - Base reevaluation days: {reeval_days}")
+            
+            # Ensure value is within valid range
+            reeval_days = max(1, min(90, reeval_days))
+            
+        self.logger.info(f"Final reevaluation days for {item_name}: {reeval_days}")
+        self.logger.info("=======================================================\n")
+        
+        return reeval_days
     
     def _get_top_items(self, revenue: Dict[int, float], n: int) -> List[Tuple[int, float]]:
         """Get top n items by revenue"""
@@ -1288,26 +1764,30 @@ class PricingStrategyAgent(BaseAgent):
                 # Get a potentially more detailed rationale from the LLM
                 detailed_rationale = llm_analysis.get('rationale', strategy.get('rationale', ''))
                 
-                # Get the reevaluation date
+                # Enhanced reevaluation date retrieval with detailed logging
                 # First check the LLM output, then the analysis metadata, then default to 3 months from now
-                reevaluation_date_str = llm_analysis.get('reevaluation_date') or analysis_metadata.get('reevaluation_date')
+                reevaluation_date_str = strategy.get('reevaluation_date')
                 
-                self.logger.info(f"REEVAL-DEBUG: Item {item.name if hasattr(item, 'name') else 'Unknown'} has reevaluation_date_str: {reevaluation_date_str}")
+                # Get item name consistently whether it's a dict or an object
+                item_name = item.get('name', None) if isinstance(item, dict) else getattr(item, 'name', None) if hasattr(item, 'name') else 'Unknown'
                 
-                if reevaluation_date_str:
+                # Add detailed source tracking
+                self.logger.info(f"REEVAL-DEBUG: Item {item_name} has reevaluation_date_str: {reevaluation_date_str}")
+                
+                # Convert string to datetime if it's a string
+                if isinstance(reevaluation_date_str, str):
                     try:
-                        # Parse the date string from the LLM output (YYYY-MM-DD format)
-                        reevaluation_date = datetime.strptime(reevaluation_date_str, '%Y-%m-%d')
-                        self.logger.info(f"REEVAL-DEBUG: Successfully parsed {reevaluation_date_str} to datetime object {reevaluation_date} for {item.name if hasattr(item, 'name') else 'Unknown'}")
-                    except (ValueError, TypeError):
-                        # If parsing fails, default to 3 months from now
-                        self.logger.warning(f"Could not parse reevaluation date: {reevaluation_date_str}. Using default.")
-                        reevaluation_date = datetime.now() + timedelta(days=90)
-                        self.logger.info(f"REEVAL-DEBUG: Using default reevaluation date {reevaluation_date} for {item.name if hasattr(item, 'name') else 'Unknown'}")
+                        # Try parsing the ISO format string
+                        reevaluation_date = datetime.fromisoformat(reevaluation_date_str)
+                        self.logger.info(f"Successfully parsed reevaluation_date: {reevaluation_date}")
+                    except ValueError:
+                        # If parsing fails, use a default date
+                        self.logger.warning(f"Failed to parse reevaluation_date_str: {reevaluation_date_str}, using default")
+                        reevaluation_date = datetime.utcnow() + timedelta(days=90)
                 else:
-                    # Default to 3 months from now
-                    reevaluation_date = datetime.now() + timedelta(days=90)
-                    self.logger.info(f"REEVAL-DEBUG: No reevaluation_date_str, using default {reevaluation_date} for {item.name if hasattr(item, 'name') else 'Unknown'}")
+                    # If it's not a string (might be None), use a default date
+                    self.logger.warning(f"reevaluation_date_str is not a string: {type(reevaluation_date_str)}, using default")
+                    reevaluation_date = datetime.utcnow() + timedelta(days=90)
                 
                 # Create price change percent
                 price_change_percent = ((recommended_price - current_price) / current_price * 100) if current_price > 0 else 0
@@ -1339,13 +1819,10 @@ class PricingStrategyAgent(BaseAgent):
                         'risks': llm_analysis.get('risks', ''),
                         'alternative_strategy': llm_analysis.get('alternative_strategy', ''),
                         'analysis_timestamp': analysis_metadata.get('analysis_timestamp', datetime.now().isoformat()),
-                        'reevaluation_date_str': reevaluation_date_str  # Store the original string too for reference
+                        'reevaluation_date': reevaluation_date.isoformat()  # Store the original string too for reference
                     },
                     implementation_status='pending'
                 )
-                
-                # Debug the reevaluation date being saved
-                self.logger.info(f"REEVAL-DEBUG: About to save recommendation for {strategy.get('item_name', '')} with reevaluation_date: {reevaluation_date}")
                 
                 # Add to the database
                 db.add(recommendation)
@@ -1366,7 +1843,7 @@ class PricingStrategyAgent(BaseAgent):
                         'rationale': detailed_rationale,
                         'confidence': llm_analysis.get('confidence', strategy.get('confidence', 0)),
                         'date': datetime.utcnow().isoformat(),
-                        'reevaluation_date': reevaluation_date_str or reevaluation_date.strftime('%Y-%m-%d')
+                        'reevaluation_date': reevaluation_date.isoformat() if hasattr(reevaluation_date, 'isoformat') else reevaluation_date
                     }
                 )
             except Exception as e:
