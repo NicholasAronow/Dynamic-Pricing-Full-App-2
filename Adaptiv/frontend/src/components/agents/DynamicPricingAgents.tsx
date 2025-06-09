@@ -597,6 +597,10 @@ const DynamicPricingAgents: React.FC = () => {
         return sortedRecs.sort((a, b) => a.price_change_percent - b.price_change_percent);
       case 'percent-dec':
         return sortedRecs.sort((a, b) => b.price_change_percent - a.price_change_percent);
+      case 'date-new':
+        return sortedRecs.sort((a, b) => new Date(b.reevaluation_date || '').getTime() - new Date(a.reevaluation_date || '').getTime());
+      case 'date-old':
+        return sortedRecs.sort((a, b) => new Date(a.reevaluation_date || '').getTime() - new Date(b.reevaluation_date || '').getTime());
       default:
         return sortedRecs;
     }
@@ -804,6 +808,8 @@ const DynamicPricingAgents: React.FC = () => {
                         <Radio.Button value="a-z">A-Z</Radio.Button>
                         <Radio.Button value="percent-dec">% ↓</Radio.Button>
                         <Radio.Button value="percent-inc">% ↑</Radio.Button>
+                        <Radio.Button value="date-new">Newest</Radio.Button>
+                        <Radio.Button value="date-old">Oldest</Radio.Button>
                       </Radio.Group>
                     </div>
                   </div>
@@ -1026,6 +1032,8 @@ const DynamicPricingAgents: React.FC = () => {
                         <Radio.Button value="a-z">A-Z</Radio.Button>
                         <Radio.Button value="percent-dec">% ↓</Radio.Button>
                         <Radio.Button value="percent-inc">% ↑</Radio.Button>
+                        <Radio.Button value="date-new">Newest</Radio.Button>
+                        <Radio.Button value="date-old">Oldest</Radio.Button>
                       </Radio.Group>
                     </div>
                   </div>
