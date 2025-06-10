@@ -9,7 +9,8 @@ import {
   AreaChartOutlined,
   ShoppingOutlined,
   TeamOutlined,
-  RobotOutlined
+  RobotOutlined,
+  AppstoreOutlined
 } from '@ant-design/icons';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -60,6 +61,9 @@ const MainLayout: React.FC = () => {
           </Menu.Item>
           <Menu.Item key="/profile" icon={<UserOutlined />}>
             <Link to="/profile">Business Profile</Link>
+          </Menu.Item>
+          <Menu.Item key="/feature" icon={<AppstoreOutlined />}>
+            <Link to="/feature">Feature</Link>
           </Menu.Item>
         </Menu>
         </div>
