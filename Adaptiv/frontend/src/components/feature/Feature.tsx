@@ -14,6 +14,15 @@ interface Competitor {
   distance_km?: number;
   report_id?: number;
   created_at?: string;
+  menu_url?: string | null;
+  competitor_data?: {
+    name: string;
+    address: string;
+    category: string;
+    distance_km?: number;
+    menu_url?: string | null;
+    [key: string]: any;
+  };
 }
 
 // TypeScript interface for menu item data
@@ -388,11 +397,17 @@ const Feature: React.FC = () => {
   // Function to edit a competitor
   const handleEditCompetitor = (competitor: Competitor) => {
     setEditingCompetitor(competitor);
+    // Get menu_url from competitor.menu_url or from competitor_data if available
+    const menu_url = competitor.menu_url || 
+      (competitor.competitor_data && typeof competitor.competitor_data === 'object' ? 
+        competitor.competitor_data.menu_url : null);
+        
     editForm.setFieldsValue({
       name: competitor.name,
       address: competitor.address,
       category: competitor.category,
-      distance_km: competitor.distance_km
+      distance_km: competitor.distance_km,
+      menu_url: menu_url
     });
     setEditModalVisible(true);
   };
@@ -420,7 +435,8 @@ const Feature: React.FC = () => {
           name: values.name,
           address: values.address,
           category: values.category,
-          distance_km: values.distance_km ? parseFloat(values.distance_km) : null
+          distance_km: values.distance_km ? parseFloat(values.distance_km) : null,
+          menu_url: values.menu_url || null
         },
         {
           headers: {
@@ -463,7 +479,8 @@ const Feature: React.FC = () => {
           name: values.name,
           address: values.address,
           category: values.category,
-          distance_km: values.distance_km ? parseFloat(values.distance_km) : null
+          distance_km: values.distance_km ? parseFloat(values.distance_km) : null,
+          menu_url: values.menu_url || null
         },
         {
           headers: {
@@ -753,6 +770,14 @@ const Feature: React.FC = () => {
               label="Distance (km)"
             >
               <Input type="number" placeholder="Optional" step="0.1" />
+            </Form.Item>
+            
+            <Form.Item
+              name="menu_url"
+              label="Menu URL"
+              tooltip="Directly provide the URL to this competitor's menu. If provided, this will be used instead of automatic URL discovery."
+            >
+              <Input placeholder="https://restaurant-example.com/menu" />
             </Form.Item>
             
             <Form.Item>
@@ -1088,6 +1113,14 @@ const Feature: React.FC = () => {
             label="Distance (km)"
           >
             <InputNumber min={0} step={0.1} />
+          </Form.Item>
+          
+          <Form.Item
+            name="menu_url"
+            label="Menu URL"
+            tooltip="Directly provide the URL to this competitor's menu. If provided, this will be used instead of automatic URL discovery."
+          >
+            <Input placeholder="https://restaurant-example.com/menu" />
           </Form.Item>
           
           <Form.Item>

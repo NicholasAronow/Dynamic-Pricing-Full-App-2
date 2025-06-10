@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Body
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, attributes
 from sqlalchemy import desc
 from typing import List, Dict, Any
 from database import get_db
@@ -417,22 +417,49 @@ async def fetch_competitor_menu(
     3. Consolidate data and save to database
     """
     try:
-        # STEP 1: Find menu URLs
-        urls_response = await find_competitor_menu_urls(report_id, db, current_user)
+        # Get competitor details first
+        # Check if the competitor has a specified menu URL
+        competitor_report = db.query(models.CompetitorReport).filter(
+            models.CompetitorReport.id == report_id,
+            models.CompetitorReport.user_id == current_user.id
+        ).first()
         
-        if not urls_response.get("success") or not urls_response.get("urls"):
-            return {
-                "success": False,
-                "error": "Could not find any online menu sources for this competitor",
-                "competitor": urls_response.get("competitor"),
-                "menu_items": []
+        if not competitor_report:
+            raise HTTPException(status_code=404, detail="Competitor report not found")
+        
+        competitor_data = competitor_report.competitor_data
+        print(f"DEBUG: competitor_data = {competitor_data}")
+        competitor_name = competitor_data.get("name")
+        competitor_category = competitor_data.get("category", "")
+        direct_menu_url = competitor_data.get("menu_url")
+        print(f"DEBUG: direct_menu_url = {direct_menu_url}")
+        
+        # If a direct menu URL is provided, use that instead of searching
+        if direct_menu_url:
+            print(f"Using direct menu URL: {direct_menu_url}")
+            source_urls = [{"url": direct_menu_url, "confidence": "high"}]
+            competitor = {
+                "name": competitor_name,
+                "category": competitor_category,
+                "report_id": report_id
             }
+        else:
+            # STEP 1: Find menu URLs if no direct URL is provided
+            urls_response = await find_competitor_menu_urls(report_id, db, current_user)
             
-        # Get competitor details from the response
-        competitor = urls_response.get("competitor")
-        competitor_name = competitor.get("name")
-        competitor_category = competitor.get("category", "")
-        source_urls = urls_response.get("urls")
+            if not urls_response.get("success") or not urls_response.get("urls"):
+                return {
+                    "success": False,
+                    "error": "Could not find any online menu sources for this competitor",
+                    "competitor": urls_response.get("competitor"),
+                    "menu_items": []
+                }
+                
+            # Get competitor details from the response
+            competitor = urls_response.get("competitor")
+            competitor_name = competitor.get("name")
+            competitor_category = competitor.get("category", "")
+            source_urls = urls_response.get("urls")
             
         # STEP 2: Extract menu items from each URL
         all_menu_items = []
@@ -498,7 +525,8 @@ async def add_competitor_manually(
                 "name": name,
                 "address": address,
                 "category": category,
-                "distance_km": distance_km if distance_km else None
+                "distance_km": distance_km if distance_km else None,
+                "menu_url": menu_url if menu_url else None
             },
             created_at=datetime.utcnow()
         )
@@ -619,6 +647,10 @@ async def update_competitor(
         address = competitor_data.get("address")
         category = competitor_data.get("category")
         distance_km = competitor_data.get("distance_km")
+        menu_url = competitor_data.get("menu_url")  # Get menu_url from request data
+        
+        print(f"DEBUG UPDATE: Received competitor_data: {competitor_data}")
+        print(f"DEBUG UPDATE: Menu URL from request: {menu_url}")
         
         if not name or not address or not category:
             raise HTTPException(status_code=400, detail="Name, address, and category are required")
@@ -633,7 +665,22 @@ async def update_competitor(
         current_data["category"] = category
         current_data["distance_km"] = distance_km if distance_km else None
         
+        # Make sure menu_url is explicitly saved to competitor_data
+        if menu_url:
+            current_data["menu_url"] = menu_url
+        else:
+            # Remove menu_url if it's being set to None/empty
+            if "menu_url" in current_data:
+                del current_data["menu_url"]
+        
+        # Debug before setting competitor_data
+        print(f"DEBUG UPDATE: Before setting data: {current_data}")
+        
         competitor_report.competitor_data = current_data
+        
+        # Explicitly mark the JSON field as modified for SQLAlchemy
+        attributes.flag_modified(competitor_report, "competitor_data")
+        
         competitor_report.summary = f"Updated competitor: {name}"
         
         # Also update CompetitorItem entries if they exist
@@ -647,6 +694,12 @@ async def update_competitor(
         
         db.commit()
         
+        # Debug: Check the actual saved data in the database
+        updated_competitor = db.query(models.CompetitorReport).filter(
+            models.CompetitorReport.id == report_id
+        ).first()
+        print(f"DEBUG UPDATE: Data saved in DB: {updated_competitor.competitor_data}")
+        
         # Return the updated competitor
         return {
             "success": True,
@@ -655,6 +708,7 @@ async def update_competitor(
                 "address": address,
                 "category": category,
                 "distance_km": distance_km,
+                "menu_url": menu_url,
                 "report_id": competitor_report.id,
                 "created_at": competitor_report.created_at
             }
