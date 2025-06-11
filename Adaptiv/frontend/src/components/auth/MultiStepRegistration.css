@@ -1,0 +1,62 @@
+/* Multi-step registration styles */
+.multi-step-form {
+  max-width: 800px !important;
+  width: 90%;
+  padding: 24px;
+}
+
+.registration-steps {
+  margin-bottom: 30px;
+}
+
+.steps-content {
+  margin-top: 30px;
+  margin-bottom: 30px;
+  min-height: 400px;
+}
+
+.steps-action {
+  margin-top: 24px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.registration-step {
+  padding: 10px 0;
+}
+
+.error-message {
+  background-color: #fff2f0;
+  border: 1px solid #ffccc7;
+  color: #ff4d4f;
+  padding: 15px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+}
+
+.selection-card {
+  margin-bottom: 12px;
+  border: 1px solid #d9d9d9;
+}
+
+.selection-card.selected {
+  border: 1px solid #1890ff;
+  background-color: #e6f7ff;
+}
+
+.terms-card {
+  border: 1px solid #d9d9d9;
+  margin-bottom: 20px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .multi-step-form {
+    width: 95%;
+    padding: 16px;
+  }
+  
+  .steps-content {
+    min-height: 300px;
+  }
+}
