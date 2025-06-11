@@ -21,6 +21,7 @@ import {
 } from 'recharts';
 import competitorService, { CompetitorItem } from '../../services/competitorService';
 import itemService, { Item } from '../../services/itemService';
+import axios from 'axios';
 
 const { Title, Text } = Typography;
 
@@ -191,6 +192,31 @@ interface CompetitorData {
   categories: string[];
 }
 
+// Interface for competitor API response
+interface CompetitorMenuResponse {
+  success: boolean;
+  competitor: {
+    name: string;
+    address: string;
+    category: string;
+    report_id: number;
+  };
+  menu_items: any[];
+  batch?: {
+    batch_id: string;
+    sync_timestamp: string;
+  };
+}
+
+// Interface for competitor menu items
+interface CompetitorMenuItem {
+  item_name: string;
+  category: string;
+  price: number;
+  description?: string;
+  similarity_score?: number;
+}
+
 // Interface for common items between our menu and competitor menu
 interface CommonItem {
   key: string;
@@ -201,8 +227,8 @@ interface CommonItem {
   difference: string;
   diffValue: number;
   status: 'higher' | 'lower' | 'same';
-  productId: string; // Added product ID for navigation
-  ourItemName: string; // Our menu item name for reference
+  productId: string;
+  ourItemName: string;
 }
 
 // Interface for market position visualization
@@ -222,41 +248,92 @@ interface MarketPosition {
 }
 
 const CompetitorDetail: React.FC = () => {
-  // Renamed from competitorId to competitorName for clarity
-  const { competitorId: competitorName } = useParams<{ competitorId: string }>();
+  // Get competitor ID from URL params (could be either a name or report_id)
+  const { competitorId } = useParams<{ competitorId: string }>();
   const navigate = useNavigate();
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [commonItems, setCommonItems] = useState<CommonItem[]>([]);
   const [marketPositionData, setMarketPositionData] = useState<MarketPosition | null>(null);
   const [competitorData, setCompetitorData] = useState<CompetitorData | null>(null);
+  const [isReportId, setIsReportId] = useState<boolean>(false);
   
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         
-        if (!competitorName) {
-          setError('Competitor name is required');
+        if (!competitorId) {
+          setError('Competitor identifier is required');
           setLoading(false);
           return;
         }
+
+        // Check if competitorId is a report_id (numeric) or a competitor name
+        const isNumericId = !isNaN(Number(competitorId));
+        setIsReportId(isNumericId);
         
-        // Get all competitor names to find the right one
-        const competitorNames = await competitorService.getCompetitors();
+        let competitorItems: CompetitorMenuItem[] = [];
+        let competitorName = '';
         
-        // Decode the URI component to match with the actual competitor name
-        const decodedName = decodeURIComponent(competitorName);
-        
-        // Check if the name exists in our competitor list
-        if (!competitorNames.includes(decodedName)) {
-          setError(`Competitor '${decodedName}' not found`);
-          setLoading(false);
-          return;
+        if (isNumericId) {
+          // This is a report_id from the new Competitors.tsx
+          const token = localStorage.getItem('token');
+          if (!token) {
+            throw new Error('Authentication required');
+          }
+          
+          try {
+            // Get menu URL from API
+            const menuResponse = await axios.get(`/api/gemini-competitors/get-stored-menu/${competitorId}`, {
+              headers: {
+                Authorization: `Bearer ${token}`
+              }
+            });
+            
+            const responseData = menuResponse.data as CompetitorMenuResponse;
+            
+            if (responseData.success && responseData.menu_items) {
+              competitorItems = responseData.menu_items.map((item: any): CompetitorMenuItem => ({
+                item_name: item.item_name,
+                category: item.category,
+                price: item.price,
+                description: item.description || '',
+                similarity_score: 75 // Default similarity score since real API might not provide this
+              }));
+              competitorName = responseData.competitor?.name || 'Unknown Competitor';
+            } else {
+              setError('No menu items found for this competitor');
+              setLoading(false);
+              return;
+            }
+          } catch (err: any) {
+            console.error('Error fetching competitor data from API:', err);
+            setError(err.response?.data?.detail || 'Failed to load competitor data');
+            setLoading(false);
+            return;
+          }
+        } else {
+          // This is a competitor name from the old CompetitorAnalysis.tsx
+          // Get all competitor names to find the right one
+          const competitorNames = await competitorService.getCompetitors();
+          
+          // Decode the URI component to match with the actual competitor name
+          const decodedName = decodeURIComponent(competitorId);
+          competitorName = decodedName;
+          
+          // Check if the name exists in our competitor list
+          if (!competitorNames.includes(decodedName)) {
+            setError(`Competitor '${decodedName}' not found`);
+            setLoading(false);
+            return;
+          }
+          
+          // Get competitor items using the old service
+          competitorItems = await competitorService.getCompetitorItems(decodedName);
         }
         
-        // Get competitor items - use the decoded name
-        const competitorItems = await competitorService.getCompetitorItems(decodedName);
+        // Note: competitorItems are already fetched above based on whether we're using the old or new system
         
         // Get our items
         const ourItems = await itemService.getItems();
@@ -286,7 +363,7 @@ const CompetitorDetail: React.FC = () => {
         };
         
         // Find common items by category and name similarity
-        competitorItems.forEach((compItem, index) => {
+        competitorItems.forEach((compItem: CompetitorMenuItem, index: number) => {
           // Find our items in the same category
           const ourCategoryItems = ourItems.filter(item => item.category === compItem.category);
           
@@ -320,7 +397,7 @@ const CompetitorDetail: React.FC = () => {
               category: compItem.category,
               difference: formattedDiff,
               diffValue: priceDiff,
-              status: status as 'higher' | 'lower' | 'same',
+              status: status,
               productId: String(ourItem.id), // Store the actual product ID for navigation
               ourItemName: ourItem.name // Store our item name for reference
             });
@@ -335,14 +412,14 @@ const CompetitorDetail: React.FC = () => {
         // Create market position data
         const generateMarketData = (): MarketPosition => {
           // Get all price points for visualization
-          const allPrices = [...ourItems.map(item => item.current_price), ...competitorItems.map(item => item.price)];
+          const allPrices = [...ourItems.map((item: any) => item.current_price), ...competitorItems.map((item: CompetitorMenuItem) => item.price)];
           const marketLow = Math.min(...allPrices);
           const marketHigh = Math.max(...allPrices);
           
           // Calculate average prices
-          const ourAvgPrice = ourItems.reduce((acc, item) => acc + item.current_price, 0) / ourItems.length;
-          const competitorAvgPrice = competitorItems.reduce((acc, item) => acc + item.price, 0) / competitorItems.length;
-          const marketAvgPrice = allPrices.reduce((a, b) => a + b, 0) / allPrices.length;
+          const ourAvgPrice = ourItems.reduce((acc: number, item: any) => acc + item.current_price, 0) / ourItems.length;
+          const competitorAvgPrice = competitorItems.reduce((acc: number, item: CompetitorMenuItem) => acc + item.price, 0) / competitorItems.length;
+          const marketAvgPrice = allPrices.reduce((a: number, b: number) => a + b, 0) / allPrices.length;
           
           // Normalize prices to 1-10 scale
           const normalize = (price: number) => {
@@ -373,11 +450,11 @@ const CompetitorDetail: React.FC = () => {
         
         // Calculate overall competitor data
         const categoriesSet = new Set<string>();
-        competitorItems.forEach(item => categoriesSet.add(item.category));
+        competitorItems.forEach((item: CompetitorMenuItem) => item.category && categoriesSet.add(item.category));
         
         // Calculate average price difference based on the same data used for market position
-        const ourAvgPrice = ourItems.reduce((acc, item) => acc + item.current_price, 0) / ourItems.length;
-        const competitorAvgPrice = competitorItems.reduce((acc, item) => acc + item.price, 0) / competitorItems.length;
+        const ourAvgPrice = ourItems.reduce((acc: number, item: any) => acc + item.current_price, 0) / ourItems.length;
+        const competitorAvgPrice = competitorItems.reduce((acc: number, item: CompetitorMenuItem) => acc + item.price, 0) / competitorItems.length;
         
         // Use the same calculation method for both price difference and market position
         const avgPriceDiff = ((competitorAvgPrice - ourAvgPrice) / competitorAvgPrice) * 100;
@@ -385,48 +462,49 @@ const CompetitorDetail: React.FC = () => {
         const status = avgPriceDiff > 0 ? 'higher' : avgPriceDiff < 0 ? 'lower' : 'same';
         
         // Calculate average similarity score
-        const avgSimilarityScore = competitorItems.reduce((acc, item) => acc + (item.similarity_score || 75), 0) / competitorItems.length;
+        const avgSimilarityScore = competitorItems.reduce((acc: number, item: CompetitorMenuItem) => acc + (item.similarity_score || 75), 0) / competitorItems.length;
         
         setCompetitorData({
           id: '0', // Using a placeholder ID since we're now using names
-          name: decodedName,
+          name: competitorName,
           similarityScore: Math.round(avgSimilarityScore),
           priceDifference: formattedDiff,
-          status: status as 'higher' | 'lower' | 'same',
+          status: status,
           categories: Array.from(categoriesSet)
         });
         
         setLoading(false);
-      } catch (err) {
+      } catch (err: any) {
         console.error('Error fetching competitor data:', err);
         setError('Failed to load competitor data. Please try again later.');
         setLoading(false);
       }
     };
     
-    if (competitorName) {
-      fetchData();
-    }
-  }, [competitorName]);
+    // Always fetch data regardless of how we're identifying the competitor
+    fetchData();
+  }, [competitorId]);
 
   if (loading) {
     return (
-      <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', padding: '40px 0' }}>
         <Spin size="large" />
       </div>
     );
   }
   
-  if (error || !competitorData || !competitorName) {
+  if (error || !competitorData) {
     return (
       <div>
         <Button 
-          type="link" 
-          icon={<LeftOutlined />} 
-          onClick={() => navigate('/competitor-analysis')}
-          style={{ padding: 0, fontSize: 16, marginBottom: 16 }}
+          icon={<ArrowLeftOutlined />} 
+          onClick={() => {
+            // Navigate back to either the new or old component based on where we came from
+            navigate(isReportId ? '/competitors' : '/competitor-analysis');
+          }} 
+          style={{ marginBottom: 16 }}
         >
-          Back to Competitor Analysis
+          Back to {isReportId ? 'Competitors' : 'Competitor Analysis'}
         </Button>
         
         <Alert
@@ -470,7 +548,7 @@ const CompetitorDetail: React.FC = () => {
                   <ShopOutlined />
                 </div>
                 <div>
-                  <Title level={3} style={{ margin: 0 }}>{competitorData?.name}</Title>
+                  <Title level={5} type="secondary">In-Depth Analysis of {competitorData?.name}</Title>
                   <div style={{ marginTop: 8 }}>
                     {competitorData?.categories.map((category, index) => (
                       <Tag color="blue" key={index} style={{ marginBottom: 4 }}>{category}</Tag>
