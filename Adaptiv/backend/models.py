@@ -13,6 +13,7 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    competitor_tracking_enabled = Column(Boolean, default=False)
     
     # Relationship to BusinessProfile
     business = relationship("BusinessProfile", back_populates="owner", uselist=False)
@@ -88,8 +89,13 @@ class CompetitorItem(Base):
     price = Column(Float)
     similarity_score = Column(Float, nullable=True)  # Similarity score to a comparable item
     url = Column(String, nullable=True)
+    batch_id = Column(String, index=True)  # Unique identifier for a menu fetch batch
+    sync_timestamp = Column(DateTime(timezone=True), index=True)  # When this batch was synced
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Index for efficient batch queries
+    __table_args__ = (Index('idx_competitor_batch', 'competitor_name', 'batch_id'),)
 
 class Order(Base):
     __tablename__ = "orders"
@@ -187,6 +193,7 @@ class CompetitorReport(Base):
     insights = Column(JSON, nullable=True)  # Store structured insights
     competitor_data = Column(JSON, nullable=True)  # Store structured competitor data
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_selected = Column(Boolean, default=False)  # Flag to track if competitor is selected for tracking
     
     # Relationship to User
     user = relationship("User", backref="competitor_reports")

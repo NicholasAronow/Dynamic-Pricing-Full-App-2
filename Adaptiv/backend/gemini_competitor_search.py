@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from sqlalchemy.orm import Session, attributes
 from sqlalchemy import desc
 from typing import List, Dict, Any
@@ -290,6 +290,12 @@ RETURN ONLY THE JSON ARRAY, no explanations."""
                 # Fallback to raw items if consolidation fails
                 consolidated_items = menu_items[:30] if len(menu_items) > 30 else menu_items
         
+        # Generate a unique batch ID and current timestamp for this menu sync
+        import uuid
+        from datetime import datetime
+        batch_id = f"{report_id}_{uuid.uuid4().hex[:8]}_{int(datetime.now().timestamp())}"
+        sync_timestamp = datetime.now()
+        
         # Save menu items as CompetitorItems in the database
         saved_items = []
         for item in consolidated_items:
@@ -303,7 +309,9 @@ RETURN ONLY THE JSON ARRAY, no explanations."""
                 category=item.get("category"),
                 description=item.get("description") if item.get("description") else None,
                 price=price_float,
-                url=competitor_address  # Using address as a reference point
+                url=competitor_address,  # Using address as a reference point
+                batch_id=batch_id,
+                sync_timestamp=sync_timestamp
             )
             
             db.add(competitor_item)
@@ -339,9 +347,60 @@ RETURN ONLY THE JSON ARRAY, no explanations."""
         raise HTTPException(status_code=500, detail=f"Error consolidating menu: {str(e)}")
 
 
+@gemini_competitor_router.get("/get-menu-batches/{report_id}")
+async def get_competitor_menu_batches(
+    report_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Get available menu batches (syncs) for a competitor
+    """
+    competitor_report = db.query(models.CompetitorReport).filter(
+        models.CompetitorReport.id == report_id,
+        models.CompetitorReport.user_id == current_user.id
+    ).first()
+    
+    if not competitor_report:
+        raise HTTPException(status_code=404, detail="Competitor report not found")
+    
+    competitor_name = competitor_report.competitor_data.get("name")
+    
+    # Query distinct batch_ids with their timestamps
+    batches_query = db.query(
+        models.CompetitorItem.batch_id,
+        models.CompetitorItem.sync_timestamp
+    ).filter(
+        models.CompetitorItem.competitor_name == competitor_name
+    ).distinct()
+    
+    # Order by timestamp descending (newest first)
+    batches_query = batches_query.order_by(desc(models.CompetitorItem.sync_timestamp))
+    
+    batches_data = []
+    for batch_id, sync_timestamp in batches_query.all():
+        batch_item_count = db.query(models.CompetitorItem).filter(
+            models.CompetitorItem.competitor_name == competitor_name,
+            models.CompetitorItem.batch_id == batch_id
+        ).count()
+        
+        batches_data.append({
+            "batch_id": batch_id,
+            "sync_timestamp": sync_timestamp.isoformat() if sync_timestamp else None,
+            "item_count": batch_item_count
+        })
+    
+    return {
+        "success": True,
+        "competitor_name": competitor_name,
+        "batches": batches_data
+    }
+
+
 @gemini_competitor_router.get("/get-stored-menu/{report_id}")
 async def get_stored_competitor_menu(
     report_id: int,
+    batch_id: str = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
@@ -368,10 +427,43 @@ async def get_stored_competitor_menu(
         if not competitor_name:
             raise HTTPException(status_code=404, detail="Competitor name not found")
             
-        # Get stored menu items (using CompetitorItem model)
-        menu_items = db.query(models.CompetitorItem).filter(
+        # Create a query for the menu items
+        menu_query = db.query(models.CompetitorItem).filter(
             models.CompetitorItem.competitor_name == competitor_name
-        ).all()
+        )
+        
+        # If batch_id is provided, filter by that specific batch
+        # Otherwise, get the most recent batch
+        selected_batch = None
+        if batch_id:
+            menu_query = menu_query.filter(models.CompetitorItem.batch_id == batch_id)
+            # Get batch details for response
+            batch_info = db.query(models.CompetitorItem.batch_id, models.CompetitorItem.sync_timestamp) \
+                .filter(models.CompetitorItem.competitor_name == competitor_name, 
+                        models.CompetitorItem.batch_id == batch_id) \
+                .first()
+            if batch_info:
+                selected_batch = {
+                    "batch_id": batch_info[0],
+                    "sync_timestamp": batch_info[1].isoformat() if batch_info[1] else None
+                }
+        else:
+            # No batch_id provided, get the most recent batch
+            latest_batch = db.query(models.CompetitorItem.batch_id, models.CompetitorItem.sync_timestamp) \
+                .filter(models.CompetitorItem.competitor_name == competitor_name) \
+                .order_by(desc(models.CompetitorItem.sync_timestamp)) \
+                .first()
+            
+            if latest_batch:
+                batch_id = latest_batch[0]
+                menu_query = menu_query.filter(models.CompetitorItem.batch_id == batch_id)
+                selected_batch = {
+                    "batch_id": latest_batch[0],
+                    "sync_timestamp": latest_batch[1].isoformat() if latest_batch[1] else None
+                }
+        
+        # Execute the query
+        menu_items = menu_query.all()
         
         # Convert to response format
         menu_item_list = []
@@ -395,7 +487,8 @@ async def get_stored_competitor_menu(
                 "category": competitor_data.get("category", ""),
                 "report_id": competitor_report.id
             },
-            "menu_items": menu_item_list
+            "menu_items": menu_item_list,
+            "batch": selected_batch
         }
         
     except HTTPException as he:
@@ -517,6 +610,9 @@ async def add_competitor_manually(
         if not name or not address or not category:
             raise HTTPException(status_code=400, detail="Name, address, and category are required")
             
+        # Extract menu_url from the data if it exists
+        menu_url = competitor_data.get("menu_url")
+        
         # Create a competitor report to store all data
         competitor_report = models.CompetitorReport(
             user_id=current_user.id,
@@ -528,7 +624,8 @@ async def add_competitor_manually(
                 "distance_km": distance_km if distance_km else None,
                 "menu_url": menu_url if menu_url else None
             },
-            created_at=datetime.utcnow()
+            created_at=datetime.utcnow(),
+            is_selected=True  # Manually added competitors are automatically selected
         )
         db.add(competitor_report)
         
@@ -622,7 +719,7 @@ async def delete_competitor(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error deleting competitor: {str(e)}")
 
-@gemini_competitor_router.put("/competitors/{report_id}")
+@gemini_competitor_router.put("/{report_id}")
 async def update_competitor(
     report_id: int,
     competitor_data: Dict[str, Any] = Body(...),
@@ -630,7 +727,7 @@ async def update_competitor(
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Update a competitor's information
+    Update a competitor's information including selection status
     """
     try:
         # Find the competitor report
@@ -640,7 +737,12 @@ async def update_competitor(
         ).first()
         
         if not competitor_report:
-            raise HTTPException(status_code=404, detail="Competitor not found or you don't have permission to update it")
+            raise HTTPException(status_code=404, detail="Competitor not found")
+        
+        # Update is_selected flag if provided
+        if 'selected' in competitor_data:
+            competitor_report.is_selected = bool(competitor_data.get('selected'))
+            print(f"Updated competitor {competitor_report.id} selection status to {competitor_report.is_selected}")
         
         # Validate required fields
         name = competitor_data.get("name")
@@ -649,58 +751,110 @@ async def update_competitor(
         distance_km = competitor_data.get("distance_km")
         menu_url = competitor_data.get("menu_url")  # Get menu_url from request data
         
-        print(f"DEBUG UPDATE: Received competitor_data: {competitor_data}")
-        print(f"DEBUG UPDATE: Menu URL from request: {menu_url}")
-        
-        if not name or not address or not category:
-            raise HTTPException(status_code=400, detail="Name, address, and category are required")
-        
         # Update competitor_data in the CompetitorReport
         current_data = competitor_report.competitor_data
         if not isinstance(current_data, dict):
             current_data = {}
             
-        current_data["name"] = name
-        current_data["address"] = address
-        current_data["category"] = category
-        current_data["distance_km"] = distance_km if distance_km else None
+        # Only update fields that are provided
+        if name:
+            current_data["name"] = name
+        if address:
+            current_data["address"] = address
+        if category:
+            current_data["category"] = category
+        
+        current_data["distance_km"] = distance_km if distance_km is not None else current_data.get("distance_km")
         
         # Make sure menu_url is explicitly saved to competitor_data
-        if menu_url:
+        if menu_url is not None:
             current_data["menu_url"] = menu_url
-        else:
-            # Remove menu_url if it's being set to None/empty
-            if "menu_url" in current_data:
-                del current_data["menu_url"]
-        
-        # Debug before setting competitor_data
-        print(f"DEBUG UPDATE: Before setting data: {current_data}")
         
         competitor_report.competitor_data = current_data
         
         # Explicitly mark the JSON field as modified for SQLAlchemy
         attributes.flag_modified(competitor_report, "competitor_data")
         
-        competitor_report.summary = f"Updated competitor: {name}"
-        
-        # Also update CompetitorItem entries if they exist
-        competitor_items = db.query(models.CompetitorItem).filter(
-            models.CompetitorItem.competitor_name == current_data.get("name")
-        ).all()
-        
-        for item in competitor_items:
-            item.competitor_name = name
-            item.category = category
+        # Update summary
+        competitor_report.summary = f"Updated competitor: {current_data.get('name')}"
         
         db.commit()
         
-        # Debug: Check the actual saved data in the database
-        updated_competitor = db.query(models.CompetitorReport).filter(
-            models.CompetitorReport.id == report_id
-        ).first()
-        print(f"DEBUG UPDATE: Data saved in DB: {updated_competitor.competitor_data}")
+        # Also update CompetitorItem entries if they exist
+        competitor_items = db.query(models.CompetitorItem).filter(
+            models.CompetitorItem.competitor_name == current_data.get('name')
+        ).all()
         
-        # Return the updated competitor
+        if competitor_items:
+            for item in competitor_items:
+                item.competitor_name = current_data.get('name')
+            
+            print(f"Updated {len(competitor_items)} competitor items to match new name")
+            # No need for another commit as we'll do one final commit below
+        
+        # Final commit for all changes
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Competitor updated successfully",
+            "competitor": {
+                "name": current_data.get("name"),
+                "address": current_data.get("address"),
+                "category": current_data.get("category"),
+                "distance_km": current_data.get("distance_km"),
+                "menu_url": current_data.get("menu_url"),
+                "report_id": competitor_report.id,
+                "created_at": competitor_report.created_at,
+                "selected": competitor_report.is_selected
+            }
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error updating competitor: {str(e)}")
+
+@gemini_competitor_router.post("/bulk-select")
+async def bulk_select_competitors(
+    selection_data: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Set selection status for multiple competitors at once
+    """
+    try:
+        # Extract selected competitor IDs and unselected competitor IDs
+        selected_ids = selection_data.get("selected_ids", [])
+        unselected_ids = selection_data.get("unselected_ids", [])
+        
+        print(f"Setting selected status for competitors: {selected_ids}")
+        print(f"Setting unselected status for competitors: {unselected_ids}")
+        
+        # Mark selected competitors
+        if selected_ids:
+            db.query(models.CompetitorReport).filter(
+                models.CompetitorReport.id.in_(selected_ids),
+                models.CompetitorReport.user_id == current_user.id
+            ).update({models.CompetitorReport.is_selected: True}, synchronize_session=False)
+        
+        # Mark unselected competitors
+        if unselected_ids:
+            db.query(models.CompetitorReport).filter(
+                models.CompetitorReport.id.in_(unselected_ids),
+                models.CompetitorReport.user_id == current_user.id
+            ).update({models.CompetitorReport.is_selected: False}, synchronize_session=False)
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": f"Updated selection status for {len(selected_ids) + len(unselected_ids)} competitors"
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error updating competitor selection: {str(e)}")
         return {
             "success": True,
             "competitor": {
@@ -726,9 +880,10 @@ async def get_competitors(
     Get all competitors associated with the current user
     """
     try:
-        # Get competitor reports for this user
+        # Get only selected competitor reports for this user
         competitor_reports = db.query(models.CompetitorReport).filter(
-            models.CompetitorReport.user_id == current_user.id
+            models.CompetitorReport.user_id == current_user.id,
+            models.CompetitorReport.is_selected == True  # Only fetch selected competitors
         ).order_by(desc(models.CompetitorReport.created_at)).all()
         
         # Extract competitor data from reports
@@ -741,6 +896,7 @@ async def get_competitors(
                     "address": competitor_data.get('address'),
                     "category": competitor_data.get('category'),
                     "distance_km": competitor_data.get('distance_km'),
+                    "menu_url": competitor_data.get('menu_url'),  # Include menu_url in response
                     "report_id": report.id,
                     "created_at": report.created_at
                 })
@@ -754,10 +910,12 @@ async def get_competitors(
 
 @gemini_competitor_router.post("/search", response_model=Dict[str, Any])
 async def search_competitors(
-    search_data: Dict[str, str] = Body(...),
+    search_data: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
+    current_user: models.User = Depends(get_current_user),
 ):
+    # Extract save_to_db from the request body
+    save_to_db = search_data.get("save_to_db", False)
     """
     Search for nearby competitors based on business type and location using Google Gemini API
     """
@@ -814,53 +972,77 @@ async def search_competitors(
             
         competitors_data = json.loads(json_text)
         
-        # Save competitors to database
-        saved_competitors = []
+        # Process competitors
+        processed_competitors = []
         for competitor in competitors_data:
-            # Create a competitor report to store all data
-            competitor_report = models.CompetitorReport(
-                user_id=current_user.id,
-                summary=f"Nearby competitor: {competitor['name']}",
-                competitor_data=competitor,
-                created_at=datetime.utcnow()
-            )
-            db.add(competitor_report)
-            
-            # Also create CompetitorItem entries for any known pricing
-            # We might not have pricing info from this search, but the schema is prepared for future use
-            # Try to get user_id field from the model if it exists
-            try:
-                competitor_item = models.CompetitorItem(
-                    user_id=current_user.id,  # Associate with current user
-                    competitor_name=competitor['name'],
-                    item_name="General",  # Placeholder
-                    category=competitor['category'],
-                    price=0.0,  # Placeholder
-                    description=competitor['address']
-                )
-            except Exception as e:
-                # If user_id field doesn't exist, create without it
-                competitor_item = models.CompetitorItem(
-                    competitor_name=competitor['name'],
-                    item_name="General",  # Placeholder
-                    category=competitor['category'],
-                    price=0.0,  # Placeholder
-                    description=competitor['address']
-                )
-            db.add(competitor_item)
-            
-            saved_competitors.append({
+            processed_competitor = {
                 "name": competitor['name'],
                 "address": competitor['address'],
                 "category": competitor['category'],
                 "distance_km": competitor.get('distance_km', None)
-            })
+            }
+            
+            # Check if we should save this competitor to database
+            should_save = False
+            if save_to_db:
+                # If frontend provided a list of selected competitors, only save those
+                selected_competitors = search_data.get("selected_competitors", [])
+                if selected_competitors and isinstance(selected_competitors, list):
+                    # Only save if this competitor's name is in the selected list
+                    if competitor['name'] in selected_competitors:
+                        should_save = True
+                        print(f"Saving selected competitor: {competitor['name']}")
+                    else:
+                        print(f"Skipping unselected competitor: {competitor['name']}")
+                else:
+                    # If no selection list provided but save_to_db is True, save all
+                    should_save = True
+            
+            # Only save to database if should_save is True
+            if should_save:
+                # Create a competitor report to store all data
+                competitor_report = models.CompetitorReport(
+                    user_id=current_user.id,
+                    summary=f"Nearby competitor: {competitor['name']}",
+                    competitor_data=competitor,
+                    created_at=datetime.utcnow()
+                )
+                db.add(competitor_report)
+                
+                # Extract the ID after flush so we can return it
+                db.flush()
+                processed_competitor["report_id"] = competitor_report.id
+                
+                # Also create CompetitorItem entries for any known pricing
+                try:
+                    competitor_item = models.CompetitorItem(
+                        user_id=current_user.id,  # Associate with current user
+                        competitor_name=competitor['name'],
+                        item_name="General",  # Placeholder
+                        category=competitor['category'],
+                        price=0.0,  # Placeholder
+                        description=competitor['address']
+                    )
+                except Exception as e:
+                    # If user_id field doesn't exist, create without it
+                    competitor_item = models.CompetitorItem(
+                        competitor_name=competitor['name'],
+                        item_name="General",  # Placeholder
+                        category=competitor['category'],
+                        price=0.0,  # Placeholder
+                        description=competitor['address']
+                    )
+                db.add(competitor_item)
+            
+            processed_competitors.append(processed_competitor)
         
-        db.commit()
+        # Only commit if we actually saved to the database
+        if save_to_db:
+            db.commit()
         
         return {
             "success": True,
-            "competitors": saved_competitors
+            "competitors": processed_competitors
         }
         
     except Exception as e:

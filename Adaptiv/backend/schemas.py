@@ -34,6 +34,12 @@ class BusinessProfileBase(BaseModel):
     company_size: str
     founded_year: Optional[int] = None
     description: Optional[str] = None
+    # Address fields
+    street_address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    postal_code: Optional[str] = None
+    country: Optional[str] = 'USA'
 
 class BusinessProfileCreate(BusinessProfileBase):
     pass
@@ -42,6 +48,14 @@ class BusinessProfileUpdate(BusinessProfileBase):
     business_name: Optional[str] = None
     industry: Optional[str] = None
     company_size: Optional[str] = None
+    founded_year: Optional[int] = None
+    description: Optional[str] = None
+    # Address fields
+    street_address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    postal_code: Optional[str] = None
+    country: Optional[str] = None
 
 class BusinessProfile(BusinessProfileBase):
     id: int

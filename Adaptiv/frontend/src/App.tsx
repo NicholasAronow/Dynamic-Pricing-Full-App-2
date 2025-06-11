@@ -16,6 +16,7 @@ import PriceRecommendations from './components/pricing/PriceRecommendations';
 import AgentPricingRecommendations from './components/pricing/AgentPricingRecommendations';
 import CompetitorAnalysis from './components/competitor/CompetitorAnalysis';
 import CompetitorDetail from './components/competitor/CompetitorDetail';
+import Competitors from './components/competitor/Competitors';
 import ProductDetail from './components/products/ProductDetail';
 import DynamicPricingAgents from './components/agents/DynamicPricingAgents';
 import Feature from './components/feature/Feature';
@@ -68,6 +69,7 @@ function App() {
             <Route path="price-recommendations" element={<PriceRecommendations />} />
             <Route path="agent-recommendations" element={<AgentPricingRecommendations />} />
             <Route path="competitor-analysis" element={<CompetitorAnalysis />} />
+            <Route path="competitors" element={<Competitors />} />
             <Route path="competitor/:competitorId" element={<CompetitorDetail />} />
             <Route path="product/:productId" element={<ProductDetail />} />
             <Route path="agents" element={<DynamicPricingAgents />} />

@@ -25,6 +25,13 @@ interface Competitor {
   };
 }
 
+// TypeScript interface for menu batch data
+interface MenuBatch {
+  batch_id: string;
+  sync_timestamp: string;
+  item_count: number;
+}
+
 // TypeScript interface for menu item data
 interface MenuItem {
   item_name: string;
@@ -35,6 +42,8 @@ interface MenuItem {
   availability?: string;
   source_confidence?: string;
   source_url?: string;
+  batch_id?: string;
+  sync_timestamp?: string;
 }
 
 // TypeScript interface for menu URL data
@@ -70,7 +79,10 @@ const Feature: React.FC = () => {
   // New state variables for competitor comparison tab
   const [selectedCompetitorId, setSelectedCompetitorId] = useState<number | null>(null);
   const [competitorMenuItems, setCompetitorMenuItems] = useState<MenuItem[]>([]);
-  const [competitorMenuLoading, setCompetitorMenuLoading] = useState(false);
+  const [competitorMenuLoading, setCompetitorMenuLoading] = useState<boolean>(false);
+  const [menuBatches, setMenuBatches] = useState<MenuBatch[]>([]);
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
+  const [batchesLoading, setBatchesLoading] = useState<boolean>(false);
   
   // Step-by-step menu discovery states
   const [menuDiscoveryVisible, setMenuDiscoveryVisible] = useState(false);
@@ -83,6 +95,121 @@ const Feature: React.FC = () => {
   const [consolidating, setConsolidating] = useState(false);
 
   // Load competitors when component mounts
+  // Function to fetch available menu batches for a competitor
+  const loadMenuBatches = async (reportId: number) => {
+    try {
+      setBatchesLoading(true);
+      setMenuBatches([]);
+      
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      
+      const response = await axios.get(`/api/gemini-competitors/get-menu-batches/${reportId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (response.data.success && response.data.batches && response.data.batches.length > 0) {
+        // Sort batches by timestamp (newest first)
+        const sortedBatches = [...response.data.batches].sort(
+          (a, b) => new Date(b.sync_timestamp).getTime() - new Date(a.sync_timestamp).getTime()
+        );
+        setMenuBatches(sortedBatches);
+        // Automatically select the most recent batch
+        setSelectedBatchId(sortedBatches[0].batch_id);
+        
+        // Load menu items with the most recent batch
+        if (reportId && sortedBatches[0].batch_id) {
+          loadCompetitorMenuWithBatch(reportId, sortedBatches[0].batch_id);
+        }
+      } else {
+        setMenuBatches([]);
+        setSelectedBatchId(null);
+      }
+    } catch (error) {
+      console.error("Error loading menu batches:", error);
+      message.error("Failed to load menu sync history");
+    } finally {
+      setBatchesLoading(false);
+    }
+  };
+  
+  // Function to load a competitor's menu items with specific batch selection
+  const loadCompetitorMenuWithBatch = async (reportId: number, batchId?: string | null) => {
+    try {
+      setCompetitorMenuLoading(true);
+      setCompetitorMenuItems([]);
+      
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      
+      // Set up query parameters for the API call
+      const params: any = {};
+      if (batchId) {
+        params.batch_id = batchId;
+      }
+      
+      const response = await axios.get(`/api/gemini-competitors/get-stored-menu/${reportId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        params: params
+      });
+      
+      if (response.data.success) {
+        setCompetitorMenuItems(response.data.menu_items);
+        
+        // Update selected batch from response if not explicitly provided
+        if (!batchId && response.data.batch) {
+          setSelectedBatchId(response.data.batch.batch_id);
+        }
+
+        if (response.data.batch && response.data.batch.sync_timestamp) {
+          const date = new Date(response.data.batch.sync_timestamp);
+          message.info(`Showing menu from ${date.toLocaleDateString()} ${date.toLocaleTimeString()}`);
+        }
+      } else {
+        message.warning("No menu data available for this competitor");
+      }
+    } catch (error) {
+      console.error("Error loading competitor menu:", error);
+      message.error("Failed to load menu data");
+    } finally {
+      setCompetitorMenuLoading(false);
+    }
+  };
+  
+  // Function to fetch competitors from the database
+  const fetchCompetitors = async () => {
+    try {
+      // Get token from localStorage
+      const token = localStorage.getItem('token');
+      if (!token) {
+        return; // Skip if not authenticated
+      }
+
+      setLoading(true);
+      const response = await axios.get('/api/gemini-competitors/competitors', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.data.success && response.data.competitors) {
+        setCompetitors(response.data.competitors);
+        if (response.data.competitors.length > 0) {
+          setSearchCompleted(true);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching competitors:', err);
+      // Don't show error message when just loading initially
+    } finally {
+      setLoading(false);
+    }
+  };
+  
   useEffect(() => {
     fetchCompetitors();
   }, []);
@@ -326,10 +453,8 @@ const Feature: React.FC = () => {
   
   // Traditional full menu fetch process (one API call)
   const handleFetchMenu = async (competitor: Competitor) => {
-    if (!competitor.report_id) {
-      message.error('Cannot fetch menu: Missing competitor ID');
-      return;
-    }
+    setSelectedCompetitor(competitor);
+    setMenuLoading(true);
     
     try {
       const token = localStorage.getItem('token');
@@ -337,9 +462,6 @@ const Feature: React.FC = () => {
         message.error('Authentication required');
         return;
       }
-      
-      setMenuLoading(true);
-      setSelectedCompetitor(competitor);
       
       const response = await axios.post(
         `/api/gemini-competitors/fetch-menu/${competitor.report_id}`,
@@ -352,9 +474,17 @@ const Feature: React.FC = () => {
       );
       
       if (response.data.success && response.data.menu_items) {
-        message.success(`Menu fetched successfully for ${competitor.name}`);
         setMenuItems(response.data.menu_items);
         setMenuVisible(true);
+        
+        // After fetching new menu data, refresh the batches list and competitor menu
+        if (competitor.report_id) {
+          loadMenuBatches(competitor.report_id);
+        }
+      } else if (response.data.error) {
+        message.warning(response.data.error);
+      } else {
+        message.warning('No menu found for this business');
       }
     } catch (err: any) {
       console.error('Error fetching menu:', err);
@@ -499,38 +629,6 @@ const Feature: React.FC = () => {
     } catch (err: any) {
       console.error('Error adding competitor manually:', err);
       message.error(err.response?.data?.detail || 'Failed to add competitor');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Function to fetch competitors from the database
-  const fetchCompetitors = async () => {
-    try {
-      // Get token from localStorage
-      const token = localStorage.getItem('token');
-      if (!token) {
-        return; // Skip if not authenticated
-      }
-
-      setLoading(true);
-      const response = await axios.get('/api/gemini-competitors/competitors', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (response.data.success && response.data.competitors) {
-        setCompetitors(response.data.competitors);
-        if (response.data.competitors.length > 0) {
-          setSearchCompleted(true);
-        }
-      }
-    } catch (err) {
-      console.error('Error fetching competitors:', err);
-      // Don't show error message when just loading initially
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -802,11 +900,16 @@ const Feature: React.FC = () => {
               <Text strong>Select a competitor to view their menu and price data:</Text>
               <div style={{ display: 'flex', marginTop: 12 }}>
                 <Select 
-                  style={{ width: '80%' }} 
+                  style={{ width: '60%', marginRight: '12px' }} 
                   placeholder="Select a competitor" 
                   onChange={(value) => {
-                    setSelectedCompetitorId(value as number);
-                    loadCompetitorMenu(value as number);
+                    const reportId = value as number;
+                    setSelectedCompetitorId(reportId);
+                    setSelectedBatchId(null);
+                    setMenuBatches([]);
+                    // We only need to load the batches - loadMenuBatches will automatically
+                    // load the most recent batch's menu items
+                    loadMenuBatches(reportId);
                   }}
                   loading={loading}
                   disabled={competitors.length === 0}
@@ -818,6 +921,32 @@ const Feature: React.FC = () => {
                     </Select.Option>
                   ))}
                 </Select>
+                {menuBatches.length > 0 && (
+                  <Select
+                    style={{ width: '35%' }}
+                    placeholder="Select menu sync"
+                    loading={batchesLoading}
+                    value={selectedBatchId || undefined}
+                    onChange={(batchId: string) => {
+                      setSelectedBatchId(batchId);
+                      if (selectedCompetitorId) {
+                        loadCompetitorMenuWithBatch(selectedCompetitorId, batchId);
+                      }
+                    }}
+                  >
+                    {[...menuBatches]
+                      .sort((a, b) => new Date(b.sync_timestamp).getTime() - new Date(a.sync_timestamp).getTime())
+                      .map((batch) => {
+                        const date = new Date(batch.sync_timestamp);
+                        const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+                        return (
+                          <Select.Option key={batch.batch_id} value={batch.batch_id}>
+                            {formattedDate} ({batch.item_count} items)
+                          </Select.Option>
+                        );
+                      })}
+                  </Select>
+                )}
               </div>
             </div>
             

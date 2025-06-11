@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Competitor API Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        button {
+            background-color: #1890ff;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 0;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow: auto;
+        }
+        .result {
+            margin-top: 15px;
+            padding: 10px;
+            border-left: 4px solid #1890ff;
+            background-color: #f0f5ff;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Competitor API Test</h1>
+    
+    <h2>1. Get Authentication Token</h2>
+    <div>
+        <label for="email">Email:</label>
+        <input id="email" type="email" value="test@adaptiv.com">
+        
+        <label for="password">Password:</label>
+        <input id="password" type="password" value="password">
+        
+        <button id="loginBtn">Get Token</button>
+    </div>
+    <div id="tokenResult" class="result" style="display:none;"></div>
+    
+    <h2>2. Test Competitor Search</h2>
+    <div>
+        <label for="businessType">Business Type:</label>
+        <input id="businessType" type="text" value="Coffee Shop">
+        
+        <label for="location">Location:</label>
+        <input id="location" type="text" value="123 Main St, New York, NY">
+        
+        <button id="searchBtn" disabled>Search Competitors</button>
+    </div>
+    <div id="searchResult" class="result" style="display:none;"></div>
+    
+    <h2>3. Test Competitor Menu Fetch</h2>
+    <div>
+        <label for="reportId">Competitor Report ID:</label>
+        <input id="reportId" type="text" placeholder="Enter report ID from search result">
+        
+        <button id="fetchBtn" disabled>Fetch Menu</button>
+    </div>
+    <div id="fetchResult" class="result" style="display:none;"></div>
+    
+    <h2>4. Direct Request Log</h2>
+    <div id="requestLog" class="result">Console log will appear here</div>
+
+    <script>
+        // Store token globally
+        let authToken = localStorage.getItem('token') || '';
+        if (authToken) {
+            document.getElementById('tokenResult').style.display = 'block';
+            document.getElementById('tokenResult').innerHTML = `<p>Token loaded from localStorage: ${authToken.substring(0, 15)}...</p>`;
+            document.getElementById('searchBtn').disabled = false;
+            document.getElementById('fetchBtn').disabled = false;
+        }
+
+        // Log helper
+        function log(message) {
+            const requestLog = document.getElementById('requestLog');
+            const timestamp = new Date().toLocaleTimeString();
+            requestLog.innerHTML += `<p>[${timestamp}] ${message}</p>`;
+        }
+        
+        // Login and get token
+        document.getElementById('loginBtn').addEventListener('click', async () => {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const tokenResult = document.getElementById('tokenResult');
+            
+            tokenResult.style.display = 'block';
+            tokenResult.innerHTML = 'Authenticating...';
+            
+            try {
+                log(`Attempting login with email: ${email}`);
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: email,
+                        password: password
+                    })
+                });
+                
+                const data = await response.json();
+                log(`Login response status: ${response.status}`);
+                
+                if (response.ok && data.access_token) {
+                    authToken = data.access_token;
+                    localStorage.setItem('token', authToken);
+                    tokenResult.innerHTML = `<p>Authentication successful! Token: ${authToken.substring(0, 15)}...</p>`;
+                    document.getElementById('searchBtn').disabled = false;
+                    document.getElementById('fetchBtn').disabled = false;
+                } else {
+                    tokenResult.innerHTML = `<p>Authentication failed: ${JSON.stringify(data)}</p>`;
+                    log(`Authentication error: ${JSON.stringify(data)}`);
+                }
+            } catch (error) {
+                tokenResult.innerHTML = `<p>Error: ${error.message}</p>`;
+                log(`Login error: ${error.message}`);
+            }
+        });
+        
+        // Search competitors
+        document.getElementById('searchBtn').addEventListener('click', async () => {
+            const businessType = document.getElementById('businessType').value;
+            const location = document.getElementById('location').value;
+            const searchResult = document.getElementById('searchResult');
+            
+            searchResult.style.display = 'block';
+            searchResult.innerHTML = 'Searching...';
+            
+            try {
+                log(`Searching competitors for ${businessType} in ${location}`);
+                const response = await fetch('/api/gemini-competitors/search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: JSON.stringify({
+                        business_type: businessType,
+                        location: location
+                    })
+                });
+                
+                const data = await response.json();
+                log(`Search response status: ${response.status}`);
+                
+                if (response.ok) {
+                    searchResult.innerHTML = `<p>Search result:</p><pre>${JSON.stringify(data, null, 2)}</pre>`;
+                    log(`Found ${data.competitors?.length || 0} competitors`);
+                    
+                    // If we have competitors, enable fetching menus and pre-fill first report ID
+                    if (data.competitors?.length > 0 && data.competitors[0].report_id) {
+                        document.getElementById('reportId').value = data.competitors[0].report_id;
+                    }
+                } else {
+                    searchResult.innerHTML = `<p>Search failed: ${JSON.stringify(data)}</p>`;
+                    log(`Search error: ${JSON.stringify(data)}`);
+                }
+            } catch (error) {
+                searchResult.innerHTML = `<p>Error: ${error.message}</p>`;
+                log(`Search error: ${error.message}`);
+            }
+        });
+        
+        // Fetch competitor menu
+        document.getElementById('fetchBtn').addEventListener('click', async () => {
+            const reportId = document.getElementById('reportId').value;
+            const fetchResult = document.getElementById('fetchResult');
+            
+            if (!reportId) {
+                alert('Please enter a report ID');
+                return;
+            }
+            
+            fetchResult.style.display = 'block';
+            fetchResult.innerHTML = 'Fetching menu...';
+            
+            try {
+                log(`Fetching menu for report ID: ${reportId}`);
+                const response = await fetch(`/api/gemini-competitors/fetch-menu/${reportId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+                
+                const data = await response.json();
+                log(`Menu fetch response status: ${response.status}`);
+                
+                fetchResult.innerHTML = `<p>Menu fetch result:</p><pre>${JSON.stringify(data, null, 2)}</pre>`;
+                
+                if (response.ok) {
+                    log(`Menu fetch successful`);
+                } else {
+                    log(`Menu fetch error: ${JSON.stringify(data)}`);
+                }
+            } catch (error) {
+                fetchResult.innerHTML = `<p>Error: ${error.message}</p>`;
+                log(`Menu fetch error: ${error.message}`);
+            }
+        });
+
+        // Automatically try to log in with token from localStorage if available
+        window.addEventListener('DOMContentLoaded', () => {
+            log('Page loaded, checking for existing auth token');
+            if (authToken) {
+                log('Token found in localStorage');
+            }
+        });
+    </script>
+</body>
+</html>

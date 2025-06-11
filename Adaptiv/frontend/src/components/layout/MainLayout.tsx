@@ -56,6 +56,9 @@ const MainLayout: React.FC = () => {
           <Menu.Item key="/competitor-analysis" icon={<TeamOutlined />}>
             <Link to="/competitor-analysis">Competitor Analysis</Link>
           </Menu.Item>
+          <Menu.Item key="/competitors" icon={<AppstoreOutlined />}>
+            <Link to="/competitors">Competitors</Link>
+          </Menu.Item>
           <Menu.Item key="/agents" icon={<RobotOutlined />}>
             <Link to="/agents">Agent Dashboard</Link>
           </Menu.Item>
