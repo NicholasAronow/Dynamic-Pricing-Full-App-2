@@ -3,6 +3,8 @@ import { Typography, Card, Button, Table, Space, Tag, message, Spin, Empty, Tool
 import { PlusOutlined, DeleteOutlined, EditOutlined, LinkOutlined, QuestionOutlined, SearchOutlined, CloseCircleOutlined, InfoCircleOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import itemService from '../../services/itemService';
+import moment from 'moment';
 
 const { Title, Paragraph } = Typography;
 
@@ -16,7 +18,14 @@ interface Competitor {
   menu_url?: string;
   last_sync?: string;
   menu_items_count?: number;
+  menu_items_in_common?: number; // Added for counting common menu items
   selected?: boolean; // For selection in the setup modal
+  is_selected?: boolean; // Required by the backend API (duplicate of selected for backend compatibility)
+  created_at?: string; // When the competitor was added to the system
+  batch?: {
+    batch_id: string;
+    sync_timestamp: string;
+  };
 }
 
 // TypeScript interface for business profile data
@@ -193,6 +202,107 @@ const Competitors: React.FC = () => {
     }
   };
 
+  // Add a helper function to get our menu items
+  const fetchOurMenuItems = async () => {
+    try {
+      // Use the existing itemService which already has the correct endpoint and auth logic
+      const items = await itemService.getItems();
+      return items;
+    } catch (err) {
+      console.error('Error fetching our menu items:', err);
+      return [];
+    }
+  };
+
+  // Add a function to fetch competitor menu items
+  const fetchCompetitorMenuItems = async (reportId: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token || !reportId) return [];
+      
+      // Fix endpoint to use the correct API path that exists in the backend
+      // Use the same endpoint as CompetitorDetail.tsx - get-stored-menu/{report_id}
+      const response = await axios.get(`/api/gemini-competitors/get-stored-menu/${reportId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (response.data.success && response.data.menu_items) {
+        return response.data.menu_items;
+      }
+      return [];
+    } catch (err) {
+      console.error(`Error fetching menu items for competitor ${reportId}:`, err);
+      return [];
+    }
+  };
+  
+  // Helper function to normalize text for fuzzy matching
+  const normalizeText = (text: string): string => {
+    return text.toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '') // Remove special characters
+      .replace(/\s+/g, ' ')      // Normalize whitespace
+      .trim();                  // Trim leading/trailing spaces
+  };
+  
+  // Calculate common menu items using the same matching logic as CompetitorDetail
+  const findCommonMenuItems = (ourItems: any[], competitorItems: any[]) => {
+    // Common words to exclude from matching logic
+    const commonWords = ['a', 'an', 'the', 'with', 'and', 'or', 'of', 'in', 'on', 'at', 'to'];
+    
+    // Helper to extract relevant keywords
+    const getKeywords = (text: string): string[] => {
+      if (!text) return [];
+      return normalizeText(text)
+        .split(' ')
+        .filter(word => word.length > 2 && !commonWords.includes(word));
+    };
+    
+    // Find matches based on name similarity
+    let commonItems = 0;
+    
+    // Process each competitor item
+    competitorItems.forEach(compItem => {
+      // Skip items without names or with zero price
+      if (!compItem.item_name || compItem.price === 0) return;
+      
+      const compItemKeywords = getKeywords(compItem.item_name);
+      let bestMatchScore = 0;
+      
+      // Find best match among our items
+      ourItems.forEach(ourItem => {
+        if (!ourItem.name) return;
+        
+        const ourItemKeywords = getKeywords(ourItem.name);
+        
+        // Simple keyword matching for efficiency in list view
+        let matchScore = 0;
+        compItemKeywords.forEach(kw => {
+          if (ourItemKeywords.some(ourKw => ourKw.includes(kw) || kw.includes(ourKw))) {
+            matchScore += 1;
+          }
+        });
+        
+        // Normalize score
+        matchScore = matchScore / Math.max(compItemKeywords.length, ourItemKeywords.length, 1);
+        
+        // Update best match if better
+        if (matchScore > bestMatchScore) {
+          bestMatchScore = matchScore;
+        }
+      });
+      
+      // Consider it a match if score exceeds threshold
+      if (bestMatchScore > 0.5) {
+        commonItems++;
+      }
+    });
+    
+    return commonItems;
+  };
+
+  // Load competitors and calculate common menu items
   const loadCompetitors = async () => {
     try {
       setLoading(true);
@@ -203,6 +313,7 @@ const Competitors: React.FC = () => {
         return;
       }
       
+      // First, fetch competitors
       const response = await axios.get('/api/gemini-competitors/competitors', {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -210,7 +321,48 @@ const Competitors: React.FC = () => {
       });
       
       if (response.data.success && response.data.competitors) {
-        setCompetitors(response.data.competitors);
+        const competitors = response.data.competitors;
+        setCompetitors(competitors);
+        
+        // Try to fetch our own menu items
+        try {
+          const ourItems = await fetchOurMenuItems();
+          
+          // If we have our items, then try to calculate common items
+          if (ourItems && ourItems.length > 0) {
+            // Process each competitor sequentially to avoid overwhelming the server
+            for (const competitor of competitors) {
+              if (!competitor.report_id) continue;
+              
+              try {
+                // Fetch this competitor's menu items
+                const competitorItems = await fetchCompetitorMenuItems(competitor.report_id);
+                
+                // If we have menu items, calculate common items
+                if (competitorItems && competitorItems.length > 0) {
+                  const commonCount = findCommonMenuItems(ourItems, competitorItems);
+                  
+                  // Update the competitor with common items count
+                  setCompetitors(prevCompetitors => 
+                    prevCompetitors.map(comp => 
+                      comp.report_id === competitor.report_id ? 
+                      { ...comp, menu_items_in_common: commonCount } : 
+                      comp
+                    )
+                  );
+                }
+              } catch (innerErr) {
+                console.error(`Error processing competitor ${competitor.name}:`, innerErr);
+                // Continue with next competitor even if one fails
+              }
+            }
+          } else {
+            console.warn('No menu items found for our business');
+          }
+        } catch (menuErr) {
+          console.error('Could not fetch menu items:', menuErr);
+          // Still show competitors even if we can't calculate common items
+        }
       } else {
         setCompetitors([]);
       }
@@ -229,7 +381,14 @@ const Competitors: React.FC = () => {
       dataIndex: 'name',
       key: 'name',
       render: (text: string, record: Competitor) => (
-        <a onClick={() => navigate(`/competitor/${record.report_id}`)}>{text}</a>
+        <Button 
+          type="link" 
+          onClick={() => navigate(`/competitor/${record.report_id}`)}
+          style={{ padding: 0, height: 'auto', fontSize: '14px', fontWeight: 'bold' }}
+          icon={<InfoCircleOutlined />}
+        >
+          {text}
+        </Button>
       ),
     },
     {
@@ -253,53 +412,59 @@ const Competitors: React.FC = () => {
         distance ? `${distance.toFixed(1)} km` : '-'
       ),
     },
-    {
-      title: 'Menu URL',
-      dataIndex: 'menu_url',
-      key: 'menu_url',
-      render: (url: string) => (
-        url ? (
-          <Tooltip title={url}>
-            <a href={url} target="_blank" rel="noopener noreferrer">
-              View Menu
-            </a>
-          </Tooltip>
-        ) : (
-          <span>-</span>
-        )
-      ),
-    },
+    // Menu URL column removed as requested
     {
       title: 'Last Sync',
       dataIndex: 'last_sync',
       key: 'last_sync',
-      render: (date: string) => date ? new Date(date).toLocaleDateString() : '-',
+      render: (text: string, record: Competitor) => {
+        // Check for sync date in multiple possible locations
+        let syncDate = null;
+        let isCreationDate = false;
+        
+        if (record.last_sync) {
+          syncDate = record.last_sync;
+        } else if (record.batch && record.batch.sync_timestamp) {
+          syncDate = record.batch.sync_timestamp;
+        } else if (record.created_at) {
+          // Fallback to competitor creation date, but mark it as such
+          syncDate = record.created_at;
+          isCreationDate = true;
+        }
+        
+        return syncDate ? (
+          <Tooltip title={isCreationDate 
+            ? `Competitor added on ${moment(syncDate).format('MMMM D, YYYY h:mm A')} (menu sync date unavailable)`
+            : `Menu synced on ${moment(syncDate).format('MMMM D, YYYY h:mm A')}`}>
+            {isCreationDate 
+              ? <span>{moment(syncDate).format('MMM D, YYYY')} <small>(added date)</small></span>
+              : moment(syncDate).format('MMM D, YYYY')}
+          </Tooltip>
+        ) : (
+          <span>Never</span>
+        );
+      },
     },
     {
-      title: 'Menu Items',
-      dataIndex: 'menu_items_count',
-      key: 'menu_items_count',
-      render: (count: number) => count || '-',
+      title: 'Menu Items in Common',
+      dataIndex: 'menu_items_in_common',
+      key: 'menu_items_in_common',
+      render: (count: number, record: Competitor) => {
+        // If we have the count already, display it
+        if (typeof count === 'number') {
+          return count;
+        }
+        // Otherwise show a loading or dash indicator
+        return record.menu_items_count ? 
+          <Tag color="blue">Calculating...</Tag> : 
+          '-';
+      },
     },
     {
       title: 'Actions',
       key: 'actions',
       render: (text: string, record: Competitor) => (
         <Space>
-          <Button 
-            type="primary"
-            size="small"
-            onClick={() => navigate(`/competitor/${record.report_id}`)}
-          >
-            View Details
-          </Button>
-          <Button 
-            type="default"
-            size="small"
-            onClick={() => handleViewMenu(record)}
-          >
-            View Menu
-          </Button>
           <Button
             type="default"
             size="small"
@@ -307,6 +472,15 @@ const Competitors: React.FC = () => {
             onClick={() => handleEditCompetitor(record)}
           >
             Edit
+          </Button>
+          <Button 
+            type="default" 
+            danger
+            size="small"
+            icon={<DeleteOutlined />}
+            onClick={() => handleDeleteCompetitor(record)}
+          >
+            Delete
           </Button>
         </Space>
       ),
@@ -920,16 +1094,14 @@ const Competitors: React.FC = () => {
   // Handle adding a new manual competitor
   const handleAddCompetitor = async (values: any) => {
     try {
+      setProcessing(true);
       const token = localStorage.getItem('token');
-      
       if (!token) {
         message.error('Authentication required');
         return;
       }
-
-      setProcessing(true);
       
-      // Create a temporary ID for this competitor
+      // Generate temporary ID (will be replaced by backend)
       const tempId = `manual-${Date.now()}`;
       
       // Create a competitor object with the form values
@@ -940,11 +1112,13 @@ const Competitors: React.FC = () => {
         address: values.address,
         menu_url: values.menu_url || '',
         distance_km: undefined,
-        selected: true
+        selected: true,
+        is_selected: true // CRITICAL: This is the flag the backend uses
       };
       
-      // Save the competitor to the backend
-      const response = await axios.post('/api/gemini-competitors/save-competitor', 
+      // Save the competitor to the backend using the manually-add endpoint
+      // This endpoint is used elsewhere in the code for adding manual competitors
+      const response = await axios.post('/api/gemini-competitors/manually-add', 
         competitor,
         {
           headers: {
@@ -958,7 +1132,48 @@ const Competitors: React.FC = () => {
         setAddModalVisible(false);
         addForm.resetFields();
         
-        // Refresh competitor list
+        // If we have a valid response with a report_id and the competitor has a menu URL, 
+        // trigger the menu fetch process
+        if (response.data.competitor && response.data.competitor.report_id && values.menu_url) {
+          const newReportId = response.data.competitor.report_id;
+          const competitorName = values.name;
+          
+          message.loading(`Fetching menu for ${competitorName}...`, 3);
+          console.log(`Fetching menu data for ${competitorName} (ID: ${newReportId})`);
+          
+          try {
+            // Call the fetch-menu endpoint to trigger menu extraction
+            const menuResponse = await axios.post(
+              `/api/gemini-competitors/fetch-menu/${newReportId}`,
+              { force_refresh: true },  // Force a fresh menu extraction
+              {
+                headers: { 'Authorization': `Bearer ${token}` },
+                timeout: 30000 // 30 second timeout
+              }
+            );
+            
+            console.log(`Menu fetch response for ${competitorName}:`, menuResponse.data);
+            message.success(`Successfully fetched menu for ${competitorName}!`, 3);
+            
+            // Add a slight delay to ensure the backend has processed the menu data
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Update distance if available in the response
+            if (menuResponse.data && menuResponse.data.competitor && 
+                menuResponse.data.competitor.distance_km !== undefined) {
+              console.log(`Got distance for ${competitorName}: ${menuResponse.data.competitor.distance_km} km`);
+            }
+            
+            // Now refresh competitor list to get updated data including distance and menu items
+            await loadCompetitors();
+            return; // Skip the second loadCompetitors call below
+          } catch (menuError: any) {
+            console.error(`Error fetching menu for ${competitorName}:`, menuError);
+            message.error(`Could not fetch menu: ${menuError.response?.data?.detail || menuError.message}`, 3);
+          }
+        }
+        
+        // Refresh competitor list (only reached if menu wasn't fetched)
         loadCompetitors();
       } else {
         message.error('Failed to add competitor');
@@ -969,6 +1184,44 @@ const Competitors: React.FC = () => {
     } finally {
       setProcessing(false);
     }
+  };
+
+  // Function to handle delete competitor action
+  const handleDeleteCompetitor = async (competitor: Competitor) => {
+    if (!competitor.report_id) return;
+    
+    Modal.confirm({
+      title: `Delete ${competitor.name}?`,
+      content: 'This will permanently remove this competitor and all associated menu data.',
+      okText: 'Yes, Delete',
+      okType: 'danger',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        try {
+          const token = localStorage.getItem('token');
+          if (!token) {
+            message.error('Authentication required');
+            return;
+          }
+          
+          const response = await axios.delete(`/api/gemini-competitors/competitors/${competitor.report_id}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          
+          if (response.data.success) {
+            message.success(`${competitor.name} deleted successfully`);
+            loadCompetitors(); // Refresh the list
+          } else {
+            message.error('Failed to delete competitor');
+          }
+        } catch (err: any) {
+          console.error('Error deleting competitor:', err);
+          message.error(err.response?.data?.detail || 'Failed to delete competitor');
+        }
+      },
+    });
   };
 
   return (
