@@ -229,6 +229,7 @@ interface CommonItem {
   status: 'higher' | 'lower' | 'same';
   productId: string;
   ourItemName: string;
+  similarity_score?: number;
 }
 
 // Interface for market position visualization
@@ -362,64 +363,192 @@ const CompetitorDetail: React.FC = () => {
           return commonWords / Math.max(words1.length, words2.length);
         };
         
+                // Helper functions for robust menu item matching
+        const normalizeItemName = (name: string): string => {
+          return name
+            .toLowerCase()
+            .replace(/\s+/g, ' ')                // Normalize whitespace
+            .replace(/[^a-z0-9\s]/g, '')         // Remove special characters
+            .trim();                            // Remove leading/trailing whitespace
+        };
+        
+        const getKeywords = (name: string): string[] => {
+          const normalized = normalizeItemName(name);
+          // Split by spaces and filter out common words and short words
+          const commonWords = ['with', 'and', 'or', 'the', 'a', 'an', 'in', 'on', 'at', 'of', 'to', 'for'];
+          return normalized
+            .split(' ')
+            .filter(word => word.length > 2 && !commonWords.includes(word));
+        };
+        
+        const calculateStringSimilarity = (str1: string, str2: string): number => {
+          // Levenshtein distance implementation
+          const track = Array(str2.length + 1).fill(null).map(() => 
+            Array(str1.length + 1).fill(null));
+          
+          for (let i = 0; i <= str1.length; i += 1) {
+            track[0][i] = i;
+          }
+          
+          for (let j = 0; j <= str2.length; j += 1) {
+            track[j][0] = j;
+          }
+          
+          for (let j = 1; j <= str2.length; j += 1) {
+            for (let i = 1; i <= str1.length; i += 1) {
+              const indicator = str1[i - 1] === str2[j - 1] ? 0 : 1;
+              track[j][i] = Math.min(
+                track[j][i - 1] + 1,                  // deletion
+                track[j - 1][i] + 1,                  // insertion
+                track[j - 1][i - 1] + indicator,      // substitution
+              );
+            }
+          }
+          
+          const distance = track[str2.length][str1.length];
+          const maxLength = Math.max(str1.length, str2.length);
+          if (maxLength === 0) return 1; // Both strings are empty, consider them identical
+          
+          // Return similarity score between 0 and 1, where 1 is perfect match
+          return 1 - distance / maxLength;
+        };
+        
+        const keywordMatch = (keywords1: string[], keywords2: string[]): number => {
+          // Count how many keywords from keywords1 appear in keywords2
+          const matches = keywords1.filter(kw1 => keywords2.some(kw2 => kw2.includes(kw1) || kw1.includes(kw2)));
+          const maxKeywords = Math.max(keywords1.length, keywords2.length);
+          if (maxKeywords === 0) return 0;
+          
+          return matches.length / maxKeywords;
+        };
+
         // Find common items by category and name similarity
         competitorItems.forEach((compItem: CompetitorMenuItem, index: number) => {
-          // Find our items in the same category
-          const ourCategoryItems = ourItems.filter(item => item.category === compItem.category);
+          // Prepare competitor item data for matching
+          const normalizedCompName = normalizeItemName(compItem.item_name);
+          const compKeywords = getKeywords(compItem.item_name);
           
-          if (ourCategoryItems.length > 0) {
-            // Find the most similar item by name
-            let bestMatch = ourCategoryItems[0];
-            let highestSimilarity = findStringSimilarity(compItem.item_name, bestMatch.name);
+          // First try matching by category if available
+          const categoryItems = compItem.category ? 
+            ourItems.filter(item => item.category?.toLowerCase() === compItem.category?.toLowerCase()) : 
+            ourItems;
+          
+          // If no category match, fall back to all items
+          const itemsToSearch = categoryItems.length > 0 ? categoryItems : ourItems;
+          
+          let bestMatch: any = null;
+          let bestScore = 0;
+          
+          // Find the best matching item using multiple matching techniques
+          for (const ourItem of itemsToSearch) {
+            // Skip items with missing names
+            if (!ourItem.name || !compItem.item_name) continue;
             
-            // Look for a better match among our items in the same category
-            ourCategoryItems.forEach(ourItem => {
-              const similarity = findStringSimilarity(compItem.item_name, ourItem.name);
-              if (similarity > highestSimilarity) {
-                highestSimilarity = similarity;
-                bestMatch = ourItem;
-              }
-            });
+            const normalizedOurName = normalizeItemName(ourItem.name);
+            const ourKeywords = getKeywords(ourItem.name);
             
-            const ourItem = bestMatch;
-            console.log(`Matched '${compItem.item_name}' with '${ourItem.name}' (similarity: ${highestSimilarity.toFixed(2)})`);
+            // Calculate string similarity
+            const nameSimilarity = calculateStringSimilarity(normalizedOurName, normalizedCompName);
             
-            // Calculate price difference
-            const priceDiff = ((ourItem.current_price - compItem.price) / compItem.price) * 100;
-            const status = priceDiff < 0 ? 'lower' : priceDiff > 0 ? 'higher' : 'same';
-            const formattedDiff = `${priceDiff > 0 ? '+' : ''}${priceDiff.toFixed(1)}%`;
+            // Calculate keyword match percentage
+            const keywordSimilarity = keywordMatch(ourKeywords, compKeywords);
             
-            processedCommonItems.push({
-              key: String(index),
-              itemName: compItem.item_name,
-              ourPrice: ourItem.current_price,
-              theirPrice: compItem.price,
-              category: compItem.category,
-              difference: formattedDiff,
-              diffValue: priceDiff,
-              status: status,
-              productId: String(ourItem.id), // Store the actual product ID for navigation
-              ourItemName: ourItem.name // Store our item name for reference
-            });
+            // Combine scores with different weights
+            const combinedScore = (nameSimilarity * 0.6) + (keywordSimilarity * 0.4);
+            
+            // Update best match if score is high enough and better than previous
+            if (combinedScore > 0.5 && combinedScore > bestScore) {
+              bestMatch = ourItem;
+              bestScore = combinedScore;
+            }
+          }
+          
+          // If a match was found, add it to common items
+          if (bestMatch) {
+            // Handle zero price edge case
+            if (compItem.price === 0) {
+              // Don't calculate price difference for items without price data
+              processedCommonItems.push({
+                key: `${index}`,
+                itemName: compItem.item_name,
+                ourPrice: bestMatch.current_price,
+                theirPrice: 0, // Will be displayed as N/A in the UI
+                category: compItem.category || 'Uncategorized',
+                difference: 'N/A',
+                diffValue: 0, // Will be excluded from market position calculations
+                status: 'same', // Neutral status for zero-price items
+                productId: String(bestMatch.id),
+                ourItemName: bestMatch.name,
+                similarity_score: Math.round(bestScore * 100)
+              });
+            } else {
+              // Calculate price difference for normal items
+              const priceDiff = ((compItem.price - bestMatch.current_price) / compItem.price) * 100;
+              const formattedDiff = priceDiff > 0 
+                ? `+${priceDiff.toFixed(1)}%` 
+                : `${priceDiff.toFixed(1)}%`;
+              const status = priceDiff > 0 ? 'higher' : priceDiff < 0 ? 'lower' : 'same';
+            
+              // Add to common items list
+              processedCommonItems.push({
+                key: `${index}`,
+                itemName: compItem.item_name,
+                ourPrice: bestMatch.current_price,
+                theirPrice: compItem.price,
+                category: compItem.category || 'Uncategorized',
+                difference: formattedDiff,
+                diffValue: priceDiff,
+                status: status,
+                productId: String(bestMatch.id), // Store the actual product ID for navigation
+                ourItemName: bestMatch.name, // Store our item name for reference
+                similarity_score: Math.round(bestScore * 100)
+              });
+            }
           }
         });
         
         // Sort by category
         processedCommonItems.sort((a, b) => a.category.localeCompare(b.category));
         
-        setCommonItems(processedCommonItems);
+        // Filter out zero-price items for market position calculation and display
+        const validPriceItems = processedCommonItems.filter(item => item.theirPrice !== 0);
+        
+        // Only display items with price data
+        setCommonItems(validPriceItems);
         
         // Create market position data
         const generateMarketData = (): MarketPosition => {
-          // Get all price points for visualization
-          const allPrices = [...ourItems.map((item: any) => item.current_price), ...competitorItems.map((item: CompetitorMenuItem) => item.price)];
-          const marketLow = Math.min(...allPrices);
-          const marketHigh = Math.max(...allPrices);
+          // Only use common items with valid prices for visualization (same as table items)
+          if (validPriceItems.length === 0) {
+            // Default values if no valid common items
+            return {
+              marketLow: 1,
+              marketHigh: 10,
+              ourPrice: 5,
+              competitorPrice: 5,
+              marketAverage: 5,
+              ourPricePosition: 50,
+              competitorPricePosition: 50,
+              originalMarketLow: 0,
+              originalMarketHigh: 0,
+              originalOurPrice: 0,
+              originalCompetitorPrice: 0,
+              originalMarketAverage: 0
+            };
+          }
+
+          // Get price points only for items in the table (validPriceItems)
+          const ourMatchedPrices = validPriceItems.map(item => item.ourPrice);
+          const competitorMatchedPrices = validPriceItems.map(item => item.theirPrice);
+          const allMatchedPrices = [...ourMatchedPrices, ...competitorMatchedPrices];
           
-          // Calculate average prices
-          const ourAvgPrice = ourItems.reduce((acc: number, item: any) => acc + item.current_price, 0) / ourItems.length;
-          const competitorAvgPrice = competitorItems.reduce((acc: number, item: CompetitorMenuItem) => acc + item.price, 0) / competitorItems.length;
-          const marketAvgPrice = allPrices.reduce((a: number, b: number) => a + b, 0) / allPrices.length;
+          const marketLow = Math.min(...allMatchedPrices);
+          const marketHigh = Math.max(...allMatchedPrices);
+          
+          // Calculate average prices using ONLY matched items with valid prices
+          const ourAvgPrice = ourMatchedPrices.reduce((acc, price) => acc + price, 0) / ourMatchedPrices.length;
+          const competitorAvgPrice = competitorMatchedPrices.reduce((acc, price) => acc + price, 0) / competitorMatchedPrices.length;
+          const marketAvgPrice = allMatchedPrices.reduce((a, b) => a + b, 0) / allMatchedPrices.length;
           
           // Normalize prices to 1-10 scale
           const normalize = (price: number) => {
@@ -448,21 +577,30 @@ const CompetitorDetail: React.FC = () => {
         
         setMarketPositionData(generateMarketData());
         
-        // Calculate overall competitor data
+        // Calculate overall competitor data using only the items displayed in the table
         const categoriesSet = new Set<string>();
-        competitorItems.forEach((item: CompetitorMenuItem) => item.category && categoriesSet.add(item.category));
+        validPriceItems.forEach(item => item.category && categoriesSet.add(item.category));
         
-        // Calculate average price difference based on the same data used for market position
-        const ourAvgPrice = ourItems.reduce((acc: number, item: any) => acc + item.current_price, 0) / ourItems.length;
-        const competitorAvgPrice = competitorItems.reduce((acc: number, item: CompetitorMenuItem) => acc + item.price, 0) / competitorItems.length;
+        // Use the same valid price items for summary calculations
+        let avgPriceDiff = 0;
+        let status: 'higher' | 'lower' | 'same' = 'same';
+        let formattedDiff = '0.0%';
         
-        // Use the same calculation method for both price difference and market position
-        const avgPriceDiff = ((competitorAvgPrice - ourAvgPrice) / competitorAvgPrice) * 100;
-        const formattedDiff = `${avgPriceDiff > 0 ? '+' : ''}${avgPriceDiff.toFixed(1)}%`;
-        const status = avgPriceDiff > 0 ? 'higher' : avgPriceDiff < 0 ? 'lower' : 'same';
+        if (validPriceItems.length > 0) {
+          // Get average prices from the matched valid items
+          const ourAvgPrice = validPriceItems.reduce((acc, item) => acc + item.ourPrice, 0) / validPriceItems.length;
+          const competitorAvgPrice = validPriceItems.reduce((acc, item) => acc + item.theirPrice, 0) / validPriceItems.length;
+          
+          // Calculate price difference
+          avgPriceDiff = ((competitorAvgPrice - ourAvgPrice) / competitorAvgPrice) * 100;
+          formattedDiff = `${avgPriceDiff > 0 ? '+' : ''}${avgPriceDiff.toFixed(1)}%`;
+          status = avgPriceDiff > 0 ? 'higher' : avgPriceDiff < 0 ? 'lower' : 'same';
+        }
         
-        // Calculate average similarity score
-        const avgSimilarityScore = competitorItems.reduce((acc: number, item: CompetitorMenuItem) => acc + (item.similarity_score || 75), 0) / competitorItems.length;
+        // Calculate average similarity score for displayed items only
+        const avgSimilarityScore = validPriceItems.length > 0 ?
+          validPriceItems.reduce((acc, item) => acc + (item.similarity_score || 75), 0) / validPriceItems.length :
+          75; // Default value if no valid items
         
         setCompetitorData({
           id: '0', // Using a placeholder ID since we're now using names
@@ -796,27 +934,23 @@ const CompetitorDetail: React.FC = () => {
                   title: 'Their Price',
                   dataIndex: 'theirPrice',
                   key: 'theirPrice',
-                  render: (price) => `$${price.toFixed(2)}`,
+                  render: (price) => price === 0 ? 'N/A' : `$${price.toFixed(2)}`,
                   sorter: (a, b) => a.theirPrice - b.theirPrice,
                 },
                 {
                   title: 'Difference',
                   dataIndex: 'difference',
-                  key: 'difference',
                   sorter: (a, b) => a.diffValue - b.diffValue,
-                  render: (text, record) => (
-                    <span style={{ 
-                      color: record.status === 'higher' ? '#cf1322' : record.status === 'lower' ? '#3f8600' : 'inherit'
-                    }}>
-                      {record.status === 'higher' 
-                        ? <ArrowUpOutlined style={{ marginRight: 4 }} /> 
-                        : record.status === 'lower' 
-                          ? <ArrowDownOutlined style={{ marginRight: 4 }} /> 
-                          : null
-                      }
-                      {text}
-                    </span>
-                  )
+                  render: (diff, record) => {
+                    if (diff === 'N/A') return <Tag color='gray'>N/A</Tag>;
+                    
+                    const status = record.status;
+                    return (
+                      <Tag color={status === 'higher' ? 'green' : status === 'lower' ? 'red' : 'gray'}>
+                        {diff}
+                      </Tag>
+                    );
+                  },
                 },
               ]}
             />
