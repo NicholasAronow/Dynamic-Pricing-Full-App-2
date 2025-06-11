@@ -238,18 +238,19 @@ const Competitors: React.FC = () => {
     }
   };
   
-  // Helper function to normalize text for fuzzy matching
+  // Helper function to normalize text for matching
   const normalizeText = (text: string): string => {
-    return text.toLowerCase()
-      .replace(/[^a-z0-9\s]/g, '') // Remove special characters
-      .replace(/\s+/g, ' ')      // Normalize whitespace
-      .trim();                  // Trim leading/trailing spaces
+    return text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
   };
-  
-  // Calculate common menu items using the same matching logic as CompetitorDetail
+
+  // Function to find common menu items between our menu and competitor menu
   const findCommonMenuItems = (ourItems: any[], competitorItems: any[]) => {
     // Common words to exclude from matching logic
-    const commonWords = ['a', 'an', 'the', 'with', 'and', 'or', 'of', 'in', 'on', 'at', 'to'];
+    const commonWords = ['a', 'an', 'the', 'with', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 'for'];
     
     // Helper to extract relevant keywords
     const getKeywords = (text: string): string[] => {
@@ -259,7 +260,50 @@ const Competitors: React.FC = () => {
         .filter(word => word.length > 2 && !commonWords.includes(word));
     };
     
-    // Find matches based on name similarity
+    // Calculate Levenshtein distance for string similarity
+    const calculateStringSimilarity = (str1: string, str2: string): number => {
+      // Levenshtein distance implementation
+      const track = Array(str2.length + 1).fill(null).map(() => 
+        Array(str1.length + 1).fill(null));
+      
+      for (let i = 0; i <= str1.length; i += 1) {
+        track[0][i] = i;
+      }
+      
+      for (let j = 0; j <= str2.length; j += 1) {
+        track[j][0] = j;
+      }
+      
+      for (let j = 1; j <= str2.length; j += 1) {
+        for (let i = 1; i <= str1.length; i += 1) {
+          const indicator = str1[i - 1] === str2[j - 1] ? 0 : 1;
+          track[j][i] = Math.min(
+            track[j][i - 1] + 1,                  // deletion
+            track[j - 1][i] + 1,                  // insertion
+            track[j - 1][i - 1] + indicator,      // substitution
+          );
+        }
+      }
+      
+      const distance = track[str2.length][str1.length];
+      const maxLength = Math.max(str1.length, str2.length);
+      if (maxLength === 0) return 1; // Both strings are empty, consider them identical
+      
+      // Return similarity score between 0 and 1, where 1 is perfect match
+      return 1 - distance / maxLength;
+    };
+    
+    // Keyword matching function
+    const keywordMatch = (keywords1: string[], keywords2: string[]): number => {
+      // Count how many keywords from keywords1 appear in keywords2
+      const matches = keywords1.filter(kw1 => keywords2.some(kw2 => kw2.includes(kw1) || kw1.includes(kw2)));
+      const maxKeywords = Math.max(keywords1.length, keywords2.length);
+      if (maxKeywords === 0) return 0;
+      
+      return matches.length / maxKeywords;
+    };
+    
+    // Find matches based on enhanced similarity algorithm
     let commonItems = 0;
     
     // Process each competitor item
@@ -267,6 +311,7 @@ const Competitors: React.FC = () => {
       // Skip items without names or with zero price
       if (!compItem.item_name || compItem.price === 0) return;
       
+      const normalizedCompName = normalizeText(compItem.item_name);
       const compItemKeywords = getKeywords(compItem.item_name);
       let bestMatchScore = 0;
       
@@ -274,26 +319,25 @@ const Competitors: React.FC = () => {
       ourItems.forEach(ourItem => {
         if (!ourItem.name) return;
         
+        const normalizedOurName = normalizeText(ourItem.name);
         const ourItemKeywords = getKeywords(ourItem.name);
         
-        // Simple keyword matching for efficiency in list view
-        let matchScore = 0;
-        compItemKeywords.forEach(kw => {
-          if (ourItemKeywords.some(ourKw => ourKw.includes(kw) || kw.includes(ourKw))) {
-            matchScore += 1;
-          }
-        });
+        // Calculate string similarity using Levenshtein
+        const nameSimilarity = calculateStringSimilarity(normalizedOurName, normalizedCompName);
         
-        // Normalize score
-        matchScore = matchScore / Math.max(compItemKeywords.length, ourItemKeywords.length, 1);
+        // Calculate keyword match percentage
+        const keywordSimilarity = keywordMatch(ourItemKeywords, compItemKeywords);
+        
+        // Combine scores with different weights (same as detail view)
+        const combinedScore = (nameSimilarity * 0.6) + (keywordSimilarity * 0.4);
         
         // Update best match if better
-        if (matchScore > bestMatchScore) {
-          bestMatchScore = matchScore;
+        if (combinedScore > bestMatchScore) {
+          bestMatchScore = combinedScore;
         }
       });
       
-      // Consider it a match if score exceeds threshold
+      // Consider it a match if score exceeds threshold (same as detail view)
       if (bestMatchScore > 0.5) {
         commonItems++;
       }
@@ -392,14 +436,6 @@ const Competitors: React.FC = () => {
       ),
     },
     {
-      title: 'Category',
-      dataIndex: 'category',
-      key: 'category',
-      render: (category: string) => (
-        <Tag color="blue">{category}</Tag>
-      ),
-    },
-    {
       title: 'Address',
       dataIndex: 'address',
       key: 'address',
@@ -414,7 +450,22 @@ const Competitors: React.FC = () => {
     },
     // Menu URL column removed as requested
     {
-      title: 'Last Sync',
+      title: 'Menu Items in Common',
+      dataIndex: 'menu_items_in_common',
+      key: 'menu_items_in_common',
+      render: (count: number, record: Competitor) => {
+        // If we have the count already, display it
+        if (typeof count === 'number') {
+          return count;
+        }
+        // Otherwise show a loading or dash indicator
+        return record.menu_items_count ? 
+          <Tag color="blue">Calculating...</Tag> : 
+          '-';
+      },
+    },
+    {
+      title: 'Last Updated',
       dataIndex: 'last_sync',
       key: 'last_sync',
       render: (text: string, record: Competitor) => {
@@ -446,42 +497,23 @@ const Competitors: React.FC = () => {
       },
     },
     {
-      title: 'Menu Items in Common',
-      dataIndex: 'menu_items_in_common',
-      key: 'menu_items_in_common',
-      render: (count: number, record: Competitor) => {
-        // If we have the count already, display it
-        if (typeof count === 'number') {
-          return count;
-        }
-        // Otherwise show a loading or dash indicator
-        return record.menu_items_count ? 
-          <Tag color="blue">Calculating...</Tag> : 
-          '-';
-      },
-    },
-    {
-      title: 'Actions',
+      title: '',
       key: 'actions',
       render: (text: string, record: Competitor) => (
         <Space>
           <Button
-            type="default"
-            size="small"
+            type="text"
             icon={<EditOutlined />}
             onClick={() => handleEditCompetitor(record)}
-          >
-            Edit
-          </Button>
-          <Button 
-            type="default" 
-            danger
             size="small"
+          />
+          <Button 
+            type="text" 
+            danger
             icon={<DeleteOutlined />}
             onClick={() => handleDeleteCompetitor(record)}
-          >
-            Delete
-          </Button>
+            size="small"
+          />
         </Space>
       ),
     },
@@ -1225,7 +1257,38 @@ const Competitors: React.FC = () => {
   };
 
   return (
-    <div className="competitors-page" style={{ padding: '24px' }}>
+    <div className="competitors-page">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div>
+          <Title level={2}>Competitor Analysis</Title>
+          <Title level={5} type="secondary" style={{ marginTop: 0 }}>
+            Monitor competitor pricing and features
+          </Title>
+        </div>
+      
+      <Space>
+          {/* Debug Reset Button - Always visible */}
+          <Button 
+            type="primary" 
+            danger 
+            size="large"
+            onClick={resetCompetitorTracking}
+            icon={<ReloadOutlined />}
+          >
+            RESET TRACKING (Debug)
+          </Button>
+          
+          {trackingEnabled && (
+            <Button 
+              type="primary" 
+              icon={<PlusOutlined />}
+              onClick={() => setAddModalVisible(true)}
+            >
+              Add Competitor
+            </Button>
+          )}
+        </Space>
+      </div>
       {/* Menu Modal */}
       <Modal
         title={
@@ -1298,38 +1361,6 @@ const Competitors: React.FC = () => {
           <Empty description="No menu items found" />
         )}
       </Modal>
-      
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <div>
-          <Title level={2}>Competitors</Title>
-          <Paragraph>
-            Manage your competitors and keep track of their menus and pricing.
-          </Paragraph>
-        </div>
-        <Space>
-          {/* Debug Reset Button - Always visible */}
-          <Button 
-            type="primary" 
-            danger 
-            size="large"
-            onClick={resetCompetitorTracking}
-            icon={<ReloadOutlined />}
-          >
-            RESET TRACKING (Debug)
-          </Button>
-          
-          {trackingEnabled && (
-            <Button 
-              type="primary" 
-              icon={<PlusOutlined />}
-              onClick={() => setAddModalVisible(true)}
-            >
-              Add Competitor
-            </Button>
-          )}
-        </Space>
-      </div>
-
       {!trackingEnabled ? (
         <Card>
           <Alert
