@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Typography, Card, Button, Table, Space, Tag, message, Spin, Empty, Tooltip, Alert, Modal, Form, Input, Checkbox, List, InputNumber } from 'antd';
-import { PlusOutlined, DeleteOutlined, EditOutlined, LinkOutlined, QuestionOutlined, SearchOutlined, CloseCircleOutlined, InfoCircleOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, EditOutlined, LinkOutlined, QuestionOutlined, SearchOutlined, CloseCircleOutlined, EyeOutlined, FileSearchOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import itemService from '../../services/itemService';
@@ -428,8 +428,8 @@ const Competitors: React.FC = () => {
         <Button 
           type="link" 
           onClick={() => navigate(`/competitor/${record.report_id}`)}
-          style={{ padding: 0, height: 'auto', fontSize: '14px', fontWeight: 'bold' }}
-          icon={<InfoCircleOutlined />}
+          style={{ padding: 0, height: 'auto', fontSize: '14px', fontWeight: 'bold', color: '#333' }}
+          icon={<EyeOutlined />}
         >
           {text}
         </Button>
@@ -1267,7 +1267,7 @@ const Competitors: React.FC = () => {
         </div>
       
       <Space>
-          {/* Debug Reset Button - Always visible */}
+          {/* Debug Reset Button - Always visible 
           <Button 
             type="primary" 
             danger 
@@ -1277,6 +1277,7 @@ const Competitors: React.FC = () => {
           >
             RESET TRACKING (Debug)
           </Button>
+          */}
           
           {trackingEnabled && (
             <Button 
@@ -1384,7 +1385,7 @@ const Competitors: React.FC = () => {
             <Button 
               type="primary" 
               size="large"
-              icon={<InfoCircleOutlined />}
+              icon={<FileSearchOutlined />}
               onClick={() => {
                 setSetupModalVisible(true);
                 fetchBusinessProfile();
@@ -1398,7 +1399,7 @@ const Competitors: React.FC = () => {
         <Card>
           <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Space>
-              <InfoCircleOutlined />
+              <FileSearchOutlined />
               <span>Track your competitors' menus and pricing to optimize your own pricing strategy.</span>
             </Space>
             
