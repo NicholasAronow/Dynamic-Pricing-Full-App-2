@@ -29,9 +29,11 @@ square_router = APIRouter()
 
 # Constants
 SQUARE_ENV = os.getenv("SQUARE_ENV", "sandbox")  # 'sandbox' or 'production'
-SQUARE_APP_ID = os.getenv("SQUARE_APP_ID", "")
-SQUARE_APP_SECRET = os.getenv("SQUARE_APP_SECRET", "")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "https://adaptiv-eight.vercel.app").rstrip('/')
+# SQUARE_APP_ID = os.getenv("SQUARE_APP_ID", "")
+SQUARE_APP_ID = "sandbox-sq0idb-ubFdzbXqkIVDfrtnFV1ZYw"
+# SQUARE_APP_SECRET = os.getenv("SQUARE_APP_SECRET", "")
+SQUARE_APP_SECRET = "sandbox-sq0csb-g64uI1qJGtOYdWI4B1boH_sLTgVZ7CbVt_BvEq1bq0c"
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip('/')
 
 # Square hosts based on environment
 SQUARE_OAUTH_HOST = "https://connect.squareupsandbox.com" if SQUARE_ENV == "sandbox" else "https://connect.squareup.com"
@@ -82,20 +84,40 @@ async def process_square_callback(
     
     # Exchange code for access token
     try:
-        logger.info(f"Square OAuth: Exchanging code for token")
+        logger.info(f"Square OAuth: Exchanging code for token - code: {code[:5]}...")
+        logger.info(f"Square OAuth: Using client_id: {SQUARE_APP_ID}")
+        logger.info(f"Square OAuth: Using redirect_uri: {FRONTEND_URL}/integrations/square/callback")
+        
+        request_data = {
+            "client_id": SQUARE_APP_ID,
+            "client_secret": SQUARE_APP_SECRET,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": f"{FRONTEND_URL}/integrations/square/callback"
+        }
+        
+        logger.info(f"Square OAuth: Request data: {json.dumps({k: v if k != 'client_secret' else '***' for k, v in request_data.items()})}")
+        
         token_response = requests.post(
             f"{SQUARE_API_BASE}/oauth2/token",
             headers={"Content-Type": "application/json"},
-            json={
-                "client_id": SQUARE_APP_ID,
-                "client_secret": SQUARE_APP_SECRET,
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": f"{FRONTEND_URL}/integrations/square/callback"
-            }
+            json=request_data
         )
         
-        data = token_response.json()
+        logger.info(f"Square OAuth: Token response status: {token_response.status_code}")
+        logger.info(f"Square OAuth: Token response headers: {token_response.headers}")
+        
+        try:
+            data = token_response.json()
+            logger.info(f"Square OAuth: Token response body: {json.dumps({k: '***' if k in ['access_token', 'refresh_token'] else v for k, v in data.items()})}")
+        except json.JSONDecodeError:
+            logger.error(f"Square OAuth: Failed to parse JSON response: {token_response.text[:100]}")
+            data = {}
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Invalid response from Square API"
+            )
+        
         logger.info(f"Square OAuth: Token response received")
         
         if "error" in data:
@@ -123,10 +145,27 @@ async def process_square_callback(
         # Verify we actually have the token data needed
         if not access_token:
             logger.error("Square OAuth: No access token received from Square")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No access token received from Square"
-            )
+            
+            # Check if user already has an integration (might be a duplicate connection attempt)
+            existing_integration = db.query(models.POSIntegration).filter(
+                models.POSIntegration.user_id == current_user.id,
+                models.POSIntegration.provider == "square"
+            ).first()
+            
+            if existing_integration and existing_integration.access_token:
+                logger.info(f"Square OAuth: User already has an active Square integration. Updating pos_connected status.")
+                # Since they already have an integration, let's just update the pos_connected status
+                current_user.pos_connected = True
+                db.commit()
+                db.refresh(current_user)
+                
+                return {"success": True, "message": "Your Square account is already connected", "already_connected": True}
+            else:
+                # No existing integration and no new token - this is a real error
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No access token received from Square. This may be because the authorization code was already used."
+                )
         
         # Check if integration already exists
         existing_integration = db.query(models.POSIntegration).filter(
@@ -151,12 +190,17 @@ async def process_square_callback(
             # Verify tokens were saved before committing
             logger.info(f"Square OAuth: Verifying tokens were updated - access_token present: {bool(existing_integration.access_token)}")
             
+            # Update user's pos_connected field to True
+            current_user.pos_connected = True
+            
             # Commit changes
             db.commit()
             
             # Double-check after commit
             db.refresh(existing_integration)
+            db.refresh(current_user)
             logger.info(f"Square OAuth: After commit - access_token present: {bool(existing_integration.access_token)}")
+            logger.info(f"Square OAuth: User pos_connected set to {current_user.pos_connected}")
             
             # Initial sync of data
             await sync_initial_data(current_user.id, db)
@@ -191,6 +235,12 @@ async def process_square_callback(
         # Double-check after commit
         db.refresh(new_integration)
         logger.info(f"Square OAuth: After commit - access_token present: {bool(new_integration.access_token)}")
+        
+        # Update user's pos_connected field to True
+        current_user.pos_connected = True
+        db.commit()
+        db.refresh(current_user)
+        logger.info(f"Square OAuth: User pos_connected set to {current_user.pos_connected}")
         
         # Mark related action item as completed if exists
         await _update_pos_action_item(current_user.id, db)

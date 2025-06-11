@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Result, Spin } from 'antd';
 import { integrationService } from '../../services/integrationService';
+import { useAuth } from '../../context/AuthContext';
 
 /**
  * Component to handle the OAuth callback from Square
@@ -10,6 +11,7 @@ import { integrationService } from '../../services/integrationService';
 const SquareCallback: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { fetchUserData } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,15 +40,61 @@ const SquareCallback: React.FC = () => {
 
         console.log('SquareCallback: Processing code', code);
         
-        // Process the callback by sending the code to backend
-        await integrationService.processSquareCallback(code, state || '');
-        
-        // Navigate to the dashboard on success with a success parameter
-        // The dashboard can then show a success message
-        navigate('/square-test?success=true');
-      } catch (err) {
+        try {
+          // Process the callback by sending the code to backend
+          const response = await integrationService.processSquareCallback(code, state || '');
+          
+          // Refresh user data to get updated pos_connected status regardless of the outcome
+          await fetchUserData();
+          
+          // Check if the response indicates the account was already connected
+          const alreadyConnected = response.already_connected;
+          
+          // Navigate to the dashboard with appropriate success parameter
+          navigate(`/dashboard?integration=${alreadyConnected ? 'already-connected' : 'success'}`);
+        } catch (apiError: any) {
+          console.error('Backend error during Square callback:', apiError);
+          
+          // Try to refresh user data anyway - the integration might have worked at the API level
+          // even if our application had an error processing it
+          try {
+            await fetchUserData();
+          } catch (refreshError) {
+            console.error('Failed to refresh user data after Square integration attempt:', refreshError);
+          }
+          
+          // If the error message suggests the user is already connected, navigate to dashboard
+          const errorDetail = apiError?.response?.data?.detail || '';
+          if (errorDetail.includes('already')) {
+            navigate('/dashboard?integration=already-connected');
+            return;
+          }
+          
+          // For other errors, show the error message
+          throw apiError;
+        }
+      } catch (err: any) {
         console.error('Error processing Square callback:', err);
-        setError('Failed to process Square authorization. Please try again.');
+        
+        // Extract the most useful error message
+        let errorMessage = 'Failed to process Square authorization. Please try again.';
+        
+        if (err?.response?.data?.detail) {
+          errorMessage = err.response.data.detail;
+        } else if (typeof err.message === 'string') {
+          errorMessage = err.message;
+        }
+        
+        // Special handling for common error cases
+        if (errorMessage.includes('already used')) {
+          errorMessage = 'This authorization code has already been used. Please try connecting again.';
+        } else if (errorMessage.includes('already connected') || errorMessage.includes('already has')) {
+          // If it indicates the account is already connected, redirect to dashboard
+          navigate('/dashboard?integration=already-connected');
+          return;
+        }
+        
+        setError(errorMessage);
         setLoading(false);
       }
     };

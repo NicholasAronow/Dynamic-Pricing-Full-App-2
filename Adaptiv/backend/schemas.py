@@ -24,6 +24,7 @@ class User(UserBase):
     id: int
     is_active: bool
     created_at: datetime
+    pos_connected: bool = False
     
     model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
 

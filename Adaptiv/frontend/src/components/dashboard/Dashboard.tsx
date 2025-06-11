@@ -301,6 +301,8 @@ const Dashboard: React.FC = () => {
   const [showCOGSPrompt, setShowCOGSPrompt] = useState(false);
   // Flag to track if we've ever had an order (used to determine if we should show "Connect POS" prompt)
   const [hasEverHadOrders, setHasEverHadOrders] = useState(false);
+  // Use pos_connected field from the user object
+  const isPosConnected = user?.pos_connected ?? false;
   
   // Helper function to convert timeframe to dates
   const getDateRangeFromTimeFrame = (timeFrame: string) => {
@@ -1127,11 +1129,50 @@ const Dashboard: React.FC = () => {
   const bottomProducts = getBottomProducts();
   
   return (
-    <div>
+    <div style={{ position: 'relative' }}>
       <Title level={2}>Dashboard</Title>
       <Title level={5} type="secondary" style={{ marginTop: 0, marginBottom: 24 }}>
         Welcome back, {formattedName}! Here's your dynamic pricing overview
       </Title>
+      
+      {/* Single conditional blur overlay for the entire dashboard */}
+      {!isPosConnected && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          backdropFilter: 'blur(5px)',
+          backgroundColor: 'rgba(255, 255, 255, 0.85)',
+          zIndex: 10,
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          textAlign: 'center',
+          padding: '40px',
+          borderRadius: '8px'
+        }}>
+          <Title level={3}>Connect Your POS System</Title>
+          <Paragraph style={{ fontSize: '16px', maxWidth: '600px', margin: '20px 0' }}>
+            To access your dynamic pricing dashboard, please connect your Square account.
+            This will allow us to import your sales data and menu items for personalized insights.
+          </Paragraph>
+          <Button 
+            type="primary" 
+            icon={<ShoppingOutlined />}
+            onClick={handleSquareIntegration}
+            size="large"
+            style={{ marginTop: '20px' }}
+          >
+            Connect Square Account
+          </Button>
+          <Paragraph style={{ marginTop: '20px', fontSize: '14px', opacity: 0.7 }}>
+            <Text type="secondary">After connecting, you'll have access to all dashboard features</Text>
+          </Paragraph>
+        </div>
+      )}
       
       {/* Chart Row with Sales Chart and Action Items */}
       <Row gutter={24} style={{ marginBottom: 24 }}>
@@ -1164,7 +1205,7 @@ const Dashboard: React.FC = () => {
           <div style={{ height: 300, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
             <Spin size="large" />
           </div>
-        ) : !hasEverHadOrders ? (
+        ) : !isPosConnected ? (
           <div style={{ width: '100%', height: 300, position: 'relative' }}>
             {/* Blurred sample data in background */}
             <div style={{ width: '100%', height: '100%', filter: 'blur(5px)', opacity: 0.6 }}>
@@ -1319,10 +1360,9 @@ const Dashboard: React.FC = () => {
               <div style={{ height: 400, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                 <Spin size="large" />
               </div>
-            ) : !hasProductsData ? (
+            ) : !isPosConnected ? (
               <div style={{ height: 400, position: 'relative' }}>
                 {/* Blurred sample product data in background */}
-                <div style={{ width: '100%', height: '100%', filter: 'blur(5px)', opacity: 0.4 }}>
                   <div style={{ opacity: 0.7 }}>
                     {/* Top Products Sample */}
                     <div>
@@ -1350,47 +1390,8 @@ const Dashboard: React.FC = () => {
                       </div>
                     </div>
                   </div>
-                </div>
 
-                {/* Overlay with message */}
-                <div style={{ 
-                  position: 'absolute', 
-                  top: 0, 
-                  left: 0, 
-                  width: '100%', 
-                  height: '100%', 
-                  display: 'flex', 
-                  flexDirection: 'column', 
-                  justifyContent: 'center', 
-                  alignItems: 'center',
-                  backgroundColor: 'rgba(255, 255, 255, 0.85)' 
-                }}>
-                  <div style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: '100%',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    background: 'rgba(255, 255, 255, 0.85)',
-                    padding: '20px',
-                    textAlign: 'center',
-                    borderRadius: '8px'
-                  }}>
-                    <Title level={4}>No Menu Data Available</Title>
-                    <Button 
-                      type="primary" 
-                      icon={<ShoppingOutlined />}
-                      onClick={handleSquareIntegration}
-                      size="large"
-                    >
-                      Connect Square Account
-                    </Button>
-                  </div>
-                </div>
+
               </div>
             ) : (
               <div>
@@ -1516,110 +1517,15 @@ const Dashboard: React.FC = () => {
         {/* Right side - Sales Overview and Competitor Analysis stacked */}
         <Col xs={24} md={12}>
           <Space direction="vertical" style={{ width: '100%' }} size={24}>
-            {/* Adaptiv Overview Card */}
-            <Card 
-              title="Adaptiv Overview" 
-              extra={<Button type="link">View All</Button>}
-              style={{ width: '100%' }}
-            >
-              {!hasProductsData ? (
-                <div style={{ position: 'relative' }}>
-                  {/* Blurred sample data in background */}
-                  <div style={{ filter: 'blur(4px)', opacity: 0.5 }}>
-                    <Statistic
-                      title="Revenue Increase from Adaptiv"
-                      value={12750}
-                      precision={0}
-                      formatter={(value) => {
-                        const numValue = typeof value === 'number' ? value : Number(value);
-                        return formatNumberWithCommas(Number(numValue.toFixed(0)));
-                      }}
-                      valueStyle={{ color: '#3f8600' }}
-                      prefix={<DollarOutlined />}
-                      suffix="/mo"
-                    />
-                    <div style={{ marginTop: 16 }}>
-                      <p><strong>Margin Improvement:</strong> <span style={{ color: '#3f8600' }}><ArrowUpOutlined /> 4.3%</span></p>
-                      <p><strong>Price Optimization Score:</strong> <span style={{ fontWeight: 'bold' }}>92/100</span></p>
-                      <p><strong>ROI:</strong> <span style={{ color: '#3f8600' }}>428%</span> (6-month trailing)</p>
-                    </div>
-                  </div>
-                  
-                  {/* Overlay with message */}
-                  <div style={{ 
-                    position: 'absolute', 
-                    top: 0, 
-                    left: 0, 
-                    width: '100%', 
-                    height: '100%', 
-                    display: 'flex', 
-                    flexDirection: 'column', 
-                    justifyContent: 'center', 
-                    alignItems: 'center',
-                    backgroundColor: 'rgba(255, 255, 255, 0.85)',
-                    padding: '20px 0',
-                    minHeight: '150px'
-                  }}>
-                   <div style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: '100%',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    background: 'rgba(255, 255, 255, 0.85)',
-                    padding: '20px',
-                    textAlign: 'center',
-                    borderRadius: '8px'
-                  }}>
-                    <Title level={4}>No Adaptiv Data Available</Title>
-                    <Button 
-                      type="primary" 
-                      icon={<ShoppingOutlined />}
-                      onClick={handleSquareIntegration}
-                      size="large"
-                    >
-                      Connect Square Account
-                    </Button>
-                  </div>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <Statistic
-                    title="Revenue Increase from Adaptiv"
-                    value={12750}
-                    precision={0}
-                    formatter={(value) => {
-                      const numValue = typeof value === 'number' ? value : Number(value);
-                      return formatNumberWithCommas(Number(numValue.toFixed(0)));
-                    }}
-                    valueStyle={{ color: '#3f8600' }}
-                    prefix={<DollarOutlined />}
-                    suffix="/mo"
-                  />
-                  <div style={{ marginTop: 16 }}>
-                    <p><strong>Margin Improvement:</strong> <span style={{ color: '#3f8600' }}><ArrowUpOutlined /> 4.3%</span></p>
-                    <p><strong>Price Optimization Score:</strong> <span style={{ fontWeight: 'bold' }}>92/100</span></p>
-                    <p><strong>ROI:</strong> <span style={{ color: '#3f8600' }}>428%</span> (6-month trailing)</p>
-                  </div>
-                </>
-              )}
-                </Card>
-            
             {/* Competitor Analysis Card */}
             <Card 
               title="Competitor Analysis" 
               extra={<Button type="link" onClick={() => navigate('/competitor-analysis')}>View All</Button>}
               style={{ width: '100%' }}
             >
-              {!hasProductsData ? (
+              {!isPosConnected ? (
                 <div style={{ position: 'relative' }}>
                   {/* Blurred sample data in background */}
-                  <div style={{ filter: 'blur(4px)', opacity: 0.5 }}>
                     <Statistic
                       title="Market Position"
                       value="Top 15%"
@@ -1652,49 +1558,6 @@ const Dashboard: React.FC = () => {
                           </div>
                         ))}
                       </div>
-                    </div>
-                  </div>
-                  
-                  {/* Overlay with message */}
-                  <div style={{ 
-                    position: 'absolute', 
-                    top: 0, 
-                    left: 0, 
-                    width: '100%', 
-                    height: '100%', 
-                    display: 'flex', 
-                    flexDirection: 'column', 
-                    justifyContent: 'center', 
-                    alignItems: 'center',
-                    backgroundColor: 'rgba(255, 255, 255, 0.85)',
-                    padding: '30px 0',
-                    minHeight: '220px'
-                  }}>
-                    <div style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      width: '100%',
-                      height: '100%',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'center',
-                      alignItems: 'center',
-                      background: 'rgba(255, 255, 255, 0.85)',
-                      padding: '20px',
-                      textAlign: 'center',
-                      borderRadius: '8px'
-                    }}>
-                      <Title level={4}>No Competitor Data Available</Title>
-                      <Button 
-                        type="primary" 
-                        icon={<ShoppingOutlined />}
-                        onClick={handleSquareIntegration}
-                        size="large"
-                      >
-                        Connect Square Account
-                      </Button>
-                    </div>
                   </div>
                 </div>
               ) : (

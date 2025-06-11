@@ -14,6 +14,7 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     competitor_tracking_enabled = Column(Boolean, default=False)
+    pos_connected = Column(Boolean, default=False)
     
     # Relationship to BusinessProfile
     business = relationship("BusinessProfile", back_populates="owner", uselist=False)

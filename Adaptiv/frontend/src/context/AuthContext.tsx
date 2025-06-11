@@ -9,6 +9,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  fetchUserData: () => Promise<any>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -18,6 +19,7 @@ const AuthContext = createContext<AuthContextType>({
   login: async () => {},
   register: async () => {},
   logout: () => {},
+  fetchUserData: async () => null,
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -307,6 +309,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       login,
       register,
       logout,
+      fetchUserData,
     }}>
       {children}
     </AuthContext.Provider>
