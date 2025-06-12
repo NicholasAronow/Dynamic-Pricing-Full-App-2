@@ -791,16 +791,11 @@ const Competitors: React.FC = () => {
       if (newSearchCompetitors.length > 0) {
         try {
           const savePromises = newSearchCompetitors.map(competitor => {
-            return axios.post('/api/gemini-competitors/manually-add',
+            return api.post('gemini-competitors/manually-add',
               {
                 ...competitor,
                 selected: true, // Ensure they're saved as selected
                 is_selected: true // CRITICAL: This is the flag the backend uses
-              },
-              {
-                headers: {
-                  'Authorization': `Bearer ${token}`
-                }
               }
             ).catch(err => {
               console.error(`Error adding competitor ${competitor.name}:`, err);
@@ -822,16 +817,11 @@ const Competitors: React.FC = () => {
         try {
           // For manually added competitors, we need to use the manual-add endpoint
           const manualPromises = manualCompetitors.map(competitor => {
-            return axios.post('/api/gemini-competitors/manually-add',
+            return api.post('gemini-competitors/manually-add',
               {
                 ...competitor,
                 selected: true, // Ensure they're saved as selected
                 is_selected: true // CRITICAL: This is the flag the backend uses
-              },
-              {
-                headers: {
-                  'Authorization': `Bearer ${token}`
-                }
               }
             ).catch(err => {
               console.error(`Error saving manually added competitor ${competitor.name}:`, err);
