@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Typography, Card, Button, Table, Space, Tag, message, Spin, Empty, Tooltip, Alert, Modal, Form, Input, Checkbox, List, InputNumber, Tabs, Select } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined, LinkOutlined, QuestionOutlined, SearchOutlined, CloseCircleOutlined, EyeOutlined, FileSearchOutlined, ReloadOutlined, SyncOutlined, BarChartOutlined } from '@ant-design/icons';
 import axios from 'axios';
+import { api } from '../../services/api';
 import { useNavigate } from 'react-router-dom';
 import itemService from '../../services/itemService';
 import moment from 'moment';
@@ -540,11 +541,8 @@ const Competitors: React.FC = () => {
         return;
       }
       
-      const response = await axios.get('/api/competitor-settings/business-profile', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      // Use the configured api service instead of direct axios calls
+      const response = await api.get('competitor-settings/business-profile');
       
       setBusinessProfile(response.data);
       
