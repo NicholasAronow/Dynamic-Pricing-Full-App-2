@@ -30,10 +30,8 @@ square_router = APIRouter()
 
 # Constants
 SQUARE_ENV = os.getenv("SQUARE_ENV", "sandbox")  # 'sandbox' or 'production'
-#SQUARE_APP_ID = os.getenv("SQUARE_APP_ID", "")
-SQUARE_APP_ID = "sandbox-sq0idb-ubFdzbXqkIVDfrtnFV1ZYw"
-#SQUARE_APP_SECRET = os.getenv("SQUARE_APP_SECRET", "")
-SQUARE_APP_SECRET = "sandbox-sq0csb-g64uI1qJGtOYdWI4B1boH_sLTgVZ7CbVt_BvEq1bq0c"
+SQUARE_APP_ID = os.getenv("SQUARE_APP_ID", "")
+SQUARE_APP_SECRET = os.getenv("SQUARE_APP_SECRET", "")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip('/')
 
 # Square hosts based on environment
