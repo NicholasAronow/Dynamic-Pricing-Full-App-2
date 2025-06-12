@@ -2,11 +2,15 @@
 Admin routes for database maintenance and management tasks.
 """
 import os
+import sys
 import importlib.util
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+
+# Ensure we can import from parent directory
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from database import get_db
 
 admin_router = APIRouter()
