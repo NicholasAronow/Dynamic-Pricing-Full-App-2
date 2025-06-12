@@ -101,12 +101,12 @@ export const competitorService = {
       
       return uniqueCompetitorNames.length > 0 
         ? uniqueCompetitorNames 
-        : ["Tasty Bites", "Flavor Heaven", "Gourmet Delight", "Urban Eats"];
+        : [];
     } catch (error) {
       console.error('Error fetching competitor items:', error);
       // If the API call fails, return some static data as fallback
       console.log('Using fallback competitor data');
-      return ["Tasty Bites", "Flavor Heaven", "Gourmet Delight", "Urban Eats"];
+      return [];
     }
   },
 
