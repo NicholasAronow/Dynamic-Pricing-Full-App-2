@@ -13,7 +13,7 @@ import {
   Col
 } from 'antd';
 import { BankOutlined } from '@ant-design/icons';
-import axios from 'axios';
+import { api } from '../../services/api';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -53,7 +53,7 @@ const BusinessProfile: React.FC = () => {
   const fetchProfile = async () => {
     try {
       setLoading(true);
-      const response = await axios.get('/api/profile/business');
+      const response = await api.get('profile/business');
       setProfile(response.data);
       form.setFieldsValue(response.data);
       setMode('edit');
@@ -73,13 +73,13 @@ const BusinessProfile: React.FC = () => {
       setError(null);
       
       if (mode === 'create') {
-        await axios.post('/api/profile/business', values);
+        await api.post('profile/business', values);
         notification.success({
           message: 'Success',
           description: 'Business profile created successfully!',
         });
       } else {
-        await axios.put('/api/profile/business', values);
+        await api.put('profile/business', values);
         notification.success({
           message: 'Success',
           description: 'Business profile updated successfully!',
