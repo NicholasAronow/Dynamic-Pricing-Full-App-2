@@ -1,5 +1,15 @@
 import api from './api';
 
+export interface GeminiCompetitor {
+  name: string;
+  address: string;
+  category: string;
+  distance_km?: number;
+  menu_url?: string;
+  report_id: number;
+  created_at: string;
+}
+
 export interface CompetitorItem {
   id: number;
   competitor_name: string;
@@ -26,6 +36,20 @@ export interface CompetitorItemCreate {
 }
 
 export const competitorService = {
+  // Get full competitor data from the Gemini API endpoint
+  getGeminiCompetitors: async (): Promise<GeminiCompetitor[]> => {
+    try {
+      // This is the correct endpoint path used in the Competitors component
+      const response = await api.get('/gemini-competitors/competitors');
+      if (response.data && response.data.success && Array.isArray(response.data.competitors)) {
+        return response.data.competitors;
+      }
+      return [];
+    } catch (error) {
+      console.error('Error fetching Gemini competitors:', error);
+      return [];
+    }
+  },
   getCompetitorItems: async (competitorName?: string): Promise<CompetitorItem[]> => {
     // We're already using the baseURL from api.ts, so no need to include '/api'
     const url = competitorName 
@@ -56,6 +80,7 @@ export const competitorService = {
   },
 
   // Get unique competitor names by fetching all competitor items and extracting unique names
+  // This fetches from the competitor items API, not the Gemini competitors
   getCompetitors: async (): Promise<string[]> => {
     console.log('Fetching all competitor items to extract competitor names');
     try {

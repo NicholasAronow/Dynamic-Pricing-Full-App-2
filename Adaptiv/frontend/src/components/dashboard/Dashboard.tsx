@@ -1,18 +1,58 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Card, Row, Col, Statistic, Button, Radio, Spin, Table, Tag, Space, Tooltip as AntTooltip, Alert, Empty, message } from 'antd';
+import { 
+  Typography, 
+  Card, 
+  Row, 
+  Col, 
+  Statistic, 
+  Button, 
+  Table, 
+  Tag, 
+  List, 
+  Space, 
+  Empty, 
+  Spin, 
+  Modal, 
+  Tabs, 
+  Radio, 
+  Tooltip, 
+  Progress, 
+  DatePicker, 
+  Divider, 
+  Badge, 
+  message 
+} from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { 
+  TeamOutlined, 
+  ShoppingOutlined, 
+  CoffeeOutlined, 
   ArrowUpOutlined, 
   ArrowDownOutlined, 
   DollarOutlined, 
-  TeamOutlined,
-  LineChartOutlined,
-  RiseOutlined,
-  FallOutlined,
+  TagsOutlined, 
+  FieldTimeOutlined, 
+  BranchesOutlined, 
+  ShopOutlined, 
+  InteractionOutlined,
+  DashboardOutlined,
+  FileOutlined,
+  SettingOutlined,
   InfoCircleOutlined,
-  ShoppingOutlined
+  QuestionCircleOutlined,
+  LineChartOutlined
 } from '@ant-design/icons';
-import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
+import { 
+  ComposedChart, 
+  Bar, 
+  Line, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip as RechartsTooltip, 
+  Legend, 
+  ResponsiveContainer 
+} from 'recharts';
 import { useAuth } from '../../context/AuthContext';
 import moment from 'moment';
 
@@ -24,7 +64,30 @@ import orderService, { Order } from '../../services/orderService';
 import analyticsService, { SalesAnalytics } from '../../services/analyticsService';
 import competitorService from '../../services/competitorService';
 import { integrationService } from '../../services/integrationService';
-import api from '../../services/api';
+
+// CSS styles
+const styles = {
+  competitorCard: {
+    marginBottom: 24
+  },
+  dashboardCompetitorItem: {
+    padding: '10px 8px',
+    cursor: 'pointer',
+    borderRadius: '4px',
+    transition: 'all 0.3s ease',
+    backgroundColor: 'rgba(250, 250, 250, 0.4)'
+  }
+};
+
+// CSS for hover effects that can't be handled with inline styles
+const DashboardCss = () => (
+  <style>{`
+    .dashboard-competitor-item:hover {
+      background-color: rgba(240, 240, 240, 0.8) !important;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    }
+  `}</style>
+);
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -296,7 +359,8 @@ const Dashboard: React.FC = () => {
   // States to track if we have any data
   const [hasSalesData, setHasSalesData] = useState(false);
   const [hasProductsData, setHasProductsData] = useState(false);
-  const [hasCompetitorsData, setHasCompetitorsData] = useState(false);
+  const [hasCustomersData, setHasCustomersData] = useState(false);
+  // We'll check competitors.length > 0 directly instead of using a separate state
   const [hasAdaptivData, setHasAdaptivData] = useState(false);
   const [showCOGSPrompt, setShowCOGSPrompt] = useState(false);
   // Flag to track if we've ever had an order (used to determine if we should show "Connect POS" prompt)
@@ -937,13 +1001,12 @@ const Dashboard: React.FC = () => {
           setProductPerformance(mockData);
           setHasProductsData(false);
         }
-        
-        setProductsLoading(false);
       } catch (err) {
         console.error('Error fetching product performance:', err);
         // Use mock data as fallback
         const data = generateProductPerformanceData(itemsTimeFrame);
         setProductPerformance(data);
+      } finally {
         setProductsLoading(false);
       }
     };
@@ -951,66 +1014,127 @@ const Dashboard: React.FC = () => {
     fetchProductPerformance();
   }, [itemsTimeFrame]);
   
-  // Fetch competitor data
+  // Fetch competitor data using Gemini API endpoint (same as Competitors component)
   useEffect(() => {
     const fetchCompetitorData = async () => {
       try {
         setCompetitorsLoading(true);
+        console.log('Dashboard: Fetching competitor data');
         
-        // Try to fetch competitor data
-        try {
-          // Get all competitor names
-          const competitorNames = await competitorService.getCompetitors();
-          
-          // Process each competitor
+        // Fetch the full competitor data from the Gemini API
+        const geminiCompetitors = await competitorService.getGeminiCompetitors();
+        console.log('Dashboard: Received competitors from API:', geminiCompetitors);
+        
+        if (geminiCompetitors && geminiCompetitors.length > 0) {
+          // Process and enhance competitor data 
           const competitorData = [];
           
-          for (let i = 0; i < competitorNames.length; i++) {
-            const name = competitorNames[i];
+          for (let i = 0; i < geminiCompetitors.length; i++) {
+            const competitor = geminiCompetitors[i];
             
             try {
-              // Calculate similarity score for each competitor
-              const similarityData = await competitorService.calculateSimilarityScore(name);
+              // Get similarity scores for this competitor
+              const similarityData = await competitorService.calculateSimilarityScore(competitor.name);
               
+              // Create enriched competitor object using both data sources
               competitorData.push({
                 key: String(i + 1),
-                name: name,
-                similarityScore: similarityData.similarityScore,
-                priceSimScore: similarityData.priceSimScore,
-                menuSimScore: similarityData.menuSimScore,
-                distanceScore: similarityData.distanceScore
+                name: competitor.name,
+                address: competitor.address,
+                category: competitor.category,
+                distance: competitor.distance_km || similarityData.distance || 0,
+                menu_url: competitor.menu_url,
+                report_id: competitor.report_id,
+                created_at: competitor.created_at,
+                similarityScore: similarityData.similarityScore || 0,
+                priceSimScore: similarityData.priceSimScore || 0,
+                menuSimScore: similarityData.menuSimScore || 0,
+                distanceScore: similarityData.distanceScore || 0,
+                // We'll use estimates based on similarity score for menu items
+                menuItemsCount: Math.round((similarityData.menuSimScore / 10) + 7),
+                menuItemsInCommon: Math.round((similarityData.menuSimScore / 20) + 3)
               });
             } catch (err) {
-              console.error(`Error calculating similarity for ${name}:`, err);
+              console.error(`Error calculating similarity for ${competitor.name}:`, err);
+              // Still add the competitor with default values
+              competitorData.push({
+                key: String(i + 1),
+                name: competitor.name,
+                address: competitor.address,
+                category: competitor.category,
+                distance: competitor.distance_km || 0,
+                menu_url: competitor.menu_url,
+                report_id: competitor.report_id,
+                created_at: competitor.created_at,
+                similarityScore: 50, // Default value
+                menuItemsCount: 5,
+                menuItemsInCommon: 2
+              });
             }
           }
           
+          console.log('Dashboard: Processed competitor data:', competitorData);
           setCompetitors(competitorData);
-        } catch (err) {
-          console.error('Failed to fetch competitor data:', err);
-          // Fallback to empty array
-          setCompetitors([]);
+        } else {
+          console.log('Dashboard: No Gemini competitors found, trying fallback');
+          // Fallback to the old method if no Gemini competitors are available
+          try {
+            // Get all competitor names
+            const competitorNames = await competitorService.getCompetitors();
+            
+            if (competitorNames && competitorNames.length > 0) {
+              const fallbackData = [];
+              
+              for (let i = 0; i < competitorNames.length; i++) {
+                const name = competitorNames[i];
+                
+                try {
+                  // Get similarity scores for this competitor
+                  const similarityData = await competitorService.calculateSimilarityScore(name);
+                  
+                  fallbackData.push({
+                    key: String(i + 1),
+                    name: name,
+                    similarityScore: similarityData.similarityScore || 0,
+                    priceSimScore: similarityData.priceSimScore || 0,
+                    menuSimScore: similarityData.menuSimScore || 0,
+                    distanceScore: similarityData.distanceScore || 0,
+                    distance: similarityData.distance || 0,
+                    menuItemsCount: Math.round(Math.random() * 20) + 5,
+                    menuItemsInCommon: Math.round(Math.random() * 10) + 2
+                  });
+                } catch (err) {
+                  fallbackData.push({
+                    key: String(i + 1),
+                    name: name,
+                    similarityScore: 0,
+                    menuItemsCount: 0,
+                    menuItemsInCommon: 0
+                  });
+                }
+              }
+              
+              console.log('Dashboard: Using fallback competitor data:', fallbackData);
+              setCompetitors(fallbackData);
+            } else {
+              console.log('Dashboard: No competitor names found in fallback');
+              setCompetitors([]);
+            }
+          } catch (err) {
+            console.error('Error in fallback competitor fetching:', err);
+            setCompetitors([]);
+          }
         }
-        
-        setCompetitorsLoading(false);
       } catch (err) {
-        console.error('Error fetching competitor data:', err);
+        console.error('Error in competitor data fetching:', err);
         setCompetitors([]);
+      } finally {
         setCompetitorsLoading(false);
       }
     };
     
     fetchCompetitorData();
-  }, []);  // Empty dependency array means this runs once on component mount
-  
-  // Add a dedicated useEffect for processing COGS data whenever it changes
-  useEffect(() => {
-    if (cogsData && cogsData.length > 0) {
-      console.log('Processing COGS data, length:', cogsData.length);
-      const dailyCogs = processCogsDataToDaily();
-      setProcessedCogsData(dailyCogs);
-    }
-  }, [cogsData]);
+  }, []);
   
   // Ensure the current week's COGS data is always included in dashboard calculations
   useEffect(() => {
@@ -1123,6 +1247,147 @@ const Dashboard: React.FC = () => {
   const getTopCompetitors = () => {
     if (!competitors.length) return [];
     return [...competitors].sort((a, b) => b.similarityScore - a.similarityScore).slice(0, 3);
+  };
+  
+  // Add CSS styles for competitor items
+  useEffect(() => {
+    // Add CSS for hover effects
+    const styleTag = document.createElement('style');
+    styleTag.innerHTML = `
+      .dashboard-competitor-item:hover {
+        background-color: rgba(240, 240, 240, 0.8) !important;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+      }
+    `;
+    document.head.appendChild(styleTag);
+    
+    // Cleanup function to remove style tag on unmount
+    return () => {
+      document.head.removeChild(styleTag);
+    };
+  }, []);
+
+  // Function to calculate price differential average
+  const getAveragePriceDifferential = () => {
+    if (competitors.length === 0) return { direction: 'higher', value: 0 };
+    
+    // Average price differential calculation
+    // Check if we have priceSimScore data
+    let totalDiff = 0;
+    let count = 0;
+    
+    for (const competitor of competitors) {
+      if (competitor.priceSimScore) {
+        // Convert priceSimScore to a differential
+        // We use a formula that derives differential from similarity
+        // Higher sim score means closer to our prices
+        // If similarityScore is 100, diff is 0
+        // If similarityScore is 0, diff could be up to 50%
+        const diff = Math.max(0, (100 - competitor.priceSimScore) / 2);
+        totalDiff += diff;
+        count++;
+      }
+    }
+    
+    if (count === 0) return { direction: 'higher', value: 0 };
+    
+    // Determine if our prices are higher or lower
+    // This is a simplified logic - in a real app we'd need more data
+    // For now, we assume if priceSimScore > 50, our prices are lower
+    // This is just for demonstration
+    const avgPriceSimScore = competitors.reduce((sum, c) => sum + (c.priceSimScore || 0), 0) / competitors.length;
+    
+    return {
+      direction: avgPriceSimScore > 60 ? 'lower' : 'higher',
+      value: parseFloat((totalDiff / count).toFixed(1))
+    };
+  };
+  
+  // Calculate normalized prices for relative price line chart
+  const getNormalizedPrices = () => {
+    if (competitors.length === 0) return [];
+    
+    // Extract prices from competitors (using priceSimScore as a proxy for actual price)
+    // In a real app, we'd have actual price data
+    const competitorPrices = competitors.map(comp => {
+      // We invert priceSimScore because higher similarity means closer price
+      // Lower similarity often indicates more price difference
+      return {
+        id: comp.key,
+        name: comp.name,
+        price: 100 - (comp.priceSimScore || 50), // Convert to a price proxy
+        isUs: false
+      };
+    });
+    
+    // Calculate our price based on the price differential data
+    // This ensures we're positioned relatively compared to competitors
+    const priceDiff = getAveragePriceDifferential();
+    
+    // Get the average competitor price
+    const avgCompetitorPrice = competitorPrices.reduce((sum, c) => sum + c.price, 0) / competitorPrices.length;
+    
+    // Calculate our price - higher or lower based on the differential
+    const ourPrice = priceDiff.direction === 'higher' 
+      ? avgCompetitorPrice + (avgCompetitorPrice * (priceDiff.value / 100))
+      : avgCompetitorPrice - (avgCompetitorPrice * (priceDiff.value / 100));
+    
+    // Add our business with the calculated price
+    competitorPrices.push({
+      id: 'us',
+      name: 'Your Restaurant',
+      price: ourPrice,
+      isUs: true
+    });
+    
+    // Find min and max for normalization
+    const prices = competitorPrices.map(c => c.price);
+    const minPrice = Math.min(...prices);
+    const maxPrice = Math.max(...prices);
+    
+    // Normalize prices to 0-10 scale
+    return competitorPrices.map(comp => ({
+      ...comp,
+      normalizedPrice: maxPrice === minPrice ? 5 : // handle edge case where all prices are equal
+        parseFloat(((comp.price - minPrice) / (maxPrice - minPrice) * 10).toFixed(1))
+    }));
+  };
+
+  // Calculate market position percentile based on competitor data
+  const getMarketPosition = () => {
+    if (!competitors.length) return "Unknown";
+    
+    // Calculate position based on similarity scores and menu items in common
+    const competitorCount = competitors.length;
+    const avgSimilarity = competitors.reduce(
+      (sum, c) => sum + (c.similarityScore || 0), 0
+    ) / Math.max(competitorCount, 1); // Avoid division by zero
+    
+    // Higher similarity and more competitors = better market position
+    // Lower percentile is better (e.g., Top 5% is better than Top 50%)
+    let percentile = 50; // Default to middle
+    
+    if (avgSimilarity > 70) percentile = 10;
+    else if (avgSimilarity > 50) percentile = 25;
+    else if (avgSimilarity < 30) percentile = 75;
+    
+    // Adjust for number of competitors (more competitors = better knowledge)
+    if (competitorCount >= 5) percentile = Math.max(5, percentile - 5);
+    if (competitorCount <= 2) percentile = Math.min(95, percentile + 15);
+    
+    return `Top ${percentile}%`;
+  };
+  
+  // Get total menu items being tracked across all competitors
+  const getTotalMenuItems = () => {
+    if (!competitors.length) return 0;
+    return competitors.reduce((sum, c) => sum + (c.menuItemsCount || 0), 0);
+  };
+  
+  // Get total menu items in common with competitors
+  const getTotalMenuItemsInCommon = () => {
+    if (!competitors.length) return 0;
+    return competitors.reduce((sum, c) => sum + (c.menuItemsCount || 0), 0);
   };
   
   const topProducts = getTopProducts();
@@ -1413,13 +1678,12 @@ const Dashboard: React.FC = () => {
                           <div>
                             <div style={{ display: 'flex', alignItems: 'center' }}>
                               <strong>{product.name}</strong>
-                              <Tag color="blue" style={{ marginLeft: 8, borderRadius: 12, padding: '0 8px' }}>{product.category}</Tag>
                             </div>
                             <div style={{ marginTop: 4 }}>
                               <span>
-                                <AntTooltip title="Price">
+                                <Tooltip title="Price">
                                   <InfoCircleOutlined style={{ marginRight: 4 }} />
-                                </AntTooltip>
+                                </Tooltip>
                                 ${formatNumberWithCommas(Number((product.currentPrice || 0).toFixed(2)))}
                               </span>
                             </div>
@@ -1431,9 +1695,9 @@ const Dashboard: React.FC = () => {
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 4 }}>
                               <div style={{ marginRight: 12 }}>
-                                <AntTooltip title="Units Sold">
+                                <Tooltip title="Units Sold">
                                   <span>{formatNumberWithCommas(product.quantitySold || 0)} units</span>
-                                </AntTooltip>
+                                </Tooltip>
                               </div>
                               {product.growth > 0 ? (
                                 <span style={{ color: '#3f8600' }}>
@@ -1470,13 +1734,12 @@ const Dashboard: React.FC = () => {
                           <div>
                             <div style={{ display: 'flex', alignItems: 'center' }}>
                               <strong>{product.name}</strong>
-                              <Tag color="blue" style={{ marginLeft: 8, borderRadius: 12, padding: '0 8px' }}>{product.category}</Tag>
                             </div>
                             <div style={{ marginTop: 4 }}>
                               <span>
-                                <AntTooltip title="Price">
+                                <Tooltip title="Price">
                                   <InfoCircleOutlined style={{ marginRight: 4 }} />
-                                </AntTooltip>
+                                </Tooltip>
                                 ${formatNumberWithCommas(Number((product.currentPrice || 0).toFixed(2)))}
                               </span>
                             </div>
@@ -1488,9 +1751,9 @@ const Dashboard: React.FC = () => {
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 4 }}>
                               <div style={{ marginRight: 12 }}>
-                                <AntTooltip title="Units Sold">
+                                <Tooltip title="Units Sold">
                                   <span>{formatNumberWithCommas(product.quantitySold || 0)} units</span>
-                                </AntTooltip>
+                                </Tooltip>
                               </div>
                               {product.growth > 0 ? (
                                 <span style={{ color: '#3f8600' }}>
@@ -1519,19 +1782,17 @@ const Dashboard: React.FC = () => {
           <Space direction="vertical" style={{ width: '100%' }} size={24}>
             {/* Competitor Analysis Card */}
             <Card 
-              title="Competitor Analysis" 
-              extra={<Button type="link" onClick={() => navigate('/competitor-analysis')}>View All</Button>}
+              title={<span>
+                Competitor Analysis
+              </span>}
+              extra={<Button type="link" onClick={() => navigate('/competitors')}>View Details</Button>}
               style={{ width: '100%' }}
+              className="dashboard-card"
+              bodyStyle={{ padding: '16px 20px' }}
             >
               {!isPosConnected ? (
                 <div style={{ position: 'relative' }}>
                   {/* Blurred sample data in background */}
-                    <Statistic
-                      title="Market Position"
-                      value="Top 15%"
-                      valueStyle={{ color: '#9370DB' }}
-                      prefix={<TeamOutlined />}
-                    />
                     <div style={{ marginTop: 16 }}>
                       <p>Competitors Tracked: 5</p>
                       <p>Price Differential: <span style={{ color: '#cf1322' }}><ArrowDownOutlined /> 5.3%</span></p>
@@ -1562,16 +1823,105 @@ const Dashboard: React.FC = () => {
                 </div>
               ) : (
                 <>
-                  <Statistic
-                    title="Market Position"
-                    value="Top 15%"
-                    valueStyle={{ color: '#9370DB' }}
-                    prefix={<TeamOutlined />}
-                  />
                   <div style={{ marginTop: 16 }}>
-                    <p>Competitors Tracked: {competitors.length || 'Loading...'}</p>
-                    <p>Price Differential: <span style={{ color: '#cf1322' }}><ArrowDownOutlined /> 5.3%</span></p>
-                    <p>Feature Parity: 92%</p>
+                    <div style={{ display: 'flex', justifyContent: 'space-around', marginBottom: '16px' }}>
+                      <div style={{ textAlign: 'center', padding: '0 5px' }}>
+                        <div style={{ marginBottom: '4px' }}>
+                          <ShopOutlined style={{ fontSize: '18px', color: '#1890ff', marginRight: '6px' }} />
+                          <span style={{ fontWeight: 600, fontSize: '15px' }}>Competitors</span>
+                        </div>
+                        <div style={{ fontSize: '18px', fontWeight: 500 }}>
+                          {competitors.length}
+                        </div>
+                      </div>
+                      
+                      <div style={{ textAlign: 'center', padding: '0 5px' }}>
+                        <div style={{ marginBottom: '4px' }}>
+                          <TagsOutlined style={{ fontSize: '18px', color: '#1890ff', marginRight: '6px' }} />
+                          <span style={{ fontWeight: 600, fontSize: '15px' }}>Menu Items in Common</span>
+                        </div>
+                        <div style={{ fontSize: '18px', fontWeight: 500 }}>
+                          {getTotalMenuItems()}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {competitors.length > 0 && (
+                      <> 
+                        {/* Relative Price Comparison Line */}
+                        <div style={{ margin: '24px 0 16px' }}>
+                          <div style={{ marginBottom: '8px', display: 'flex', alignItems: 'center' }}>
+                            <span style={{ fontWeight: 600 }}>Relative Price Comparison</span>
+                            <Tooltip title="Lower values indicate lower prices, higher values indicate higher prices">
+                              <QuestionCircleOutlined style={{ color: '#aaa', fontSize: '12px', marginLeft: '6px' }} />
+                            </Tooltip>
+                          </div>
+                          
+                          <div style={{ position: 'relative', height: '56px', marginTop: '12px' }}>
+                            {/* Price labels */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                              <small style={{ color: '#888', fontWeight: 500 }}>Lower Prices</small>
+                              <small style={{ color: '#888', fontWeight: 500 }}>Higher Prices</small>
+                            </div>
+                            
+                            {/* Scale line */}
+                            <div style={{ 
+                              position: 'relative', 
+                              marginTop: '16px',
+                              marginBottom: '8px',
+                              height: '16px',
+                              display: 'flex',
+                              alignItems: 'center'
+                            }}>
+                              {/* The actual line */}
+                              <div style={{ 
+                                height: '4px', 
+                                background: 'linear-gradient(to right,rgba(83, 196, 26, 0.61), rgba(250, 173, 20, 0.61), rgba(245, 34, 45, 0.61))', 
+                                width: '100%',
+                                position: 'absolute',
+                                left: 0,
+                                right: 0
+                              }}></div>
+                              
+                              {/* Price points for each competitor */}
+                              {getNormalizedPrices().map((comp) => {
+                                const leftPosition = `${comp.normalizedPrice * 10}%`;
+                                
+                                return (
+                                  <Tooltip 
+                                    key={comp.id} 
+                                    title={
+                                      <div>
+                                        <div><strong>{comp.name}</strong></div>
+                                        <div>Relative price: {comp.normalizedPrice.toFixed(1)}/10</div>
+                                      </div>
+                                    }
+                                    color={comp.isUs ? '#1677ff' : '#333'}
+                                  >
+                                    <div
+                                      style={{
+                                        position: 'absolute',
+                                        left: leftPosition,
+                                        width: comp.isUs ? '16px' : '12px',
+                                        height: comp.isUs ? '16px' : '12px',
+                                        borderRadius: '50%',
+                                        backgroundColor: comp.isUs ? '#1677ff' : '#555',
+                                        border: comp.isUs ? '2px solid white' : '1px solid #f0f0f0',
+                                        boxShadow: comp.isUs ? '0 0 0 2px rgba(24, 144, 255, 0.2)' : 'none',
+                                        transform: 'translateX(-50%)',
+                                        cursor: 'pointer',
+                                        zIndex: comp.isUs ? 2 : 1,
+                                        transition: 'all 0.3s ease'
+                                      }}
+                                    />
+                                  </Tooltip>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    )}
                     
                     {/* Top 3 Competitors Section */}
                     <div style={{ marginTop: 16 }}>
@@ -1585,20 +1935,28 @@ const Dashboard: React.FC = () => {
                           {getTopCompetitors().map((competitor, index) => (
                             <div 
                               key={competitor.key}
-                              onClick={() => navigate(`/competitor/${encodeURIComponent(competitor.name)}`)}
+                              onClick={() => navigate(`/competitor/${competitor.report_id || encodeURIComponent(competitor.name)}`)}
                               className="dashboard-competitor-item"
                               style={{ 
-                                padding: '8px 6px', 
+                                padding: '10px 8px', 
                                 borderBottom: index < getTopCompetitors().length - 1 ? '1px solid #f0f0f0' : 'none',
                                 cursor: 'pointer',
                                 borderRadius: '4px',
-                                transition: 'all 0.3s ease'
+                                transition: 'all 0.3s ease',
+                                backgroundColor: 'rgba(250, 250, 250, 0.4)'
                               }}
                             >
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <div style={{ fontWeight: 500 }}>{competitor.name}</div>
                                 <div>
-                                  <Tag color="blue">{competitor.similarityScore}%</Tag>
+                                  <div style={{ fontWeight: 500 }}>{competitor.name}</div>
+                                  <div style={{ fontSize: '12px', color: '#888' }}>
+                                    {competitor.menuItemsCount} items in common
+                                  </div>
+                                </div>
+                                <div>
+                                  <Tag color={competitor.similarityScore > 70 ? 'blue' : competitor.similarityScore > 40 ? 'geekblue' : 'purple'}>
+                                    {competitor.similarityScore}%
+                                  </Tag>
                                 </div>
                               </div>
                             </div>

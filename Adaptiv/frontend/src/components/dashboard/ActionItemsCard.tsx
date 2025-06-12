@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, List, Tag, Typography, Spin, Empty, Button, Tooltip, Modal, Form, InputNumber, message, Alert } from 'antd';
+import { Card, List, Tag, Typography, Spin, Empty, Button, Tooltip, Modal, Form, InputNumber, message, Alert, Badge } from 'antd';
 import { 
   CheckCircleOutlined, 
   ClockCircleOutlined, 
@@ -409,7 +409,21 @@ const ActionItemsCard: React.FC = () => {
     <>
       <PulseAnimation />
       <Card 
-        title="To-Do Items"
+        title={
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <span>To-Do Items</span>
+            {actionItems.length > 0 && (
+              <Badge 
+                count={actionItems.length} 
+                style={{ 
+                  backgroundColor: '#f5222d',
+                  marginLeft: '8px',
+                  boxShadow: '0 0 0 1px #fff'
+                }} 
+              />
+            )}
+          </div>
+        }
         extra={extraButton} 
         className="dashboard-card" 
         bordered={false} 
