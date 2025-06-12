@@ -14,7 +14,7 @@ import BusinessProfile from './components/profile/BusinessProfile';
 import MainLayout from './components/layout/MainLayout';
 import PriceRecommendations from './components/pricing/PriceRecommendations';
 import AgentPricingRecommendations from './components/pricing/AgentPricingRecommendations';
-import CompetitorAnalysis from './components/competitor/CompetitorAnalysis';
+// CompetitorAnalysis has been replaced by Competitors component
 import CompetitorDetail from './components/competitor/CompetitorDetail';
 import Competitors from './components/competitor/Competitors';
 import ProductDetail from './components/products/ProductDetail';
@@ -68,7 +68,7 @@ function App() {
             <Route path="profile" element={<BusinessProfile />} />
             <Route path="price-recommendations" element={<PriceRecommendations />} />
             <Route path="agent-recommendations" element={<AgentPricingRecommendations />} />
-            <Route path="competitor-analysis" element={<CompetitorAnalysis />} />
+            {/* CompetitorAnalysis route removed - now using Competitors component */}
             <Route path="competitors" element={<Competitors />} />
             <Route path="competitor/:competitorId" element={<CompetitorDetail />} />
             <Route path="product/:productId" element={<ProductDetail />} />

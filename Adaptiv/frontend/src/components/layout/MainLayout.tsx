@@ -53,10 +53,7 @@ const MainLayout: React.FC = () => {
           <Menu.Item key="/price-recommendations" icon={<AreaChartOutlined />}>
             <Link to="/price-recommendations">Price Recommendations</Link>
           </Menu.Item>
-          <Menu.Item key="/competitor-analysis" icon={<TeamOutlined />}>
-            <Link to="/competitor-analysis">Competitor Analysis</Link>
-          </Menu.Item>
-          <Menu.Item key="/competitors" icon={<AppstoreOutlined />}>
+          <Menu.Item key="/competitors" icon={<TeamOutlined />}>
             <Link to="/competitors">Competitors</Link>
           </Menu.Item>
           <Menu.Item key="/agents" icon={<RobotOutlined />}>
@@ -64,9 +61,6 @@ const MainLayout: React.FC = () => {
           </Menu.Item>
           <Menu.Item key="/profile" icon={<UserOutlined />}>
             <Link to="/profile">Business Profile</Link>
-          </Menu.Item>
-          <Menu.Item key="/feature" icon={<AppstoreOutlined />}>
-            <Link to="/feature">Feature</Link>
           </Menu.Item>
         </Menu>
         </div>
