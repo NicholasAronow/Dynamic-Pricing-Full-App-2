@@ -30,6 +30,7 @@ from pricing_recommendations import pricing_recommendations_router
 from dynamic_pricing_agents.api_routes import router as dynamic_pricing_router
 from gemini_competitor_search import gemini_competitor_router
 from competitor_settings import competitor_settings_router
+from admin_routes import admin_router
 
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
@@ -70,6 +71,7 @@ app.include_router(pricing_recommendations_router, prefix="/api/pricing", tags=[
 app.include_router(dynamic_pricing_router, prefix="/api/agents/dynamic-pricing", tags=["Dynamic Pricing Agents"])
 app.include_router(gemini_competitor_router, prefix="/api/gemini-competitors", tags=["Gemini Competitor Search"])
 app.include_router(competitor_settings_router, prefix="/api/competitor-settings", tags=["Competitor Settings"])
+app.include_router(admin_router, prefix="/api/admin", tags=["Admin"])
 
 @app.get("/")
 async def root():
