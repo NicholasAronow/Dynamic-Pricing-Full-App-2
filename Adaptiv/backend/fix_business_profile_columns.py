@@ -75,7 +75,10 @@ def add_missing_columns():
                         # SQLite syntax
                         sql = text(f"ALTER TABLE business_profiles ADD COLUMN {column_name} {column_type}")
                     
-                    engine.execute(sql)
+                    # Use the correct API based on SQLAlchemy version
+                    with engine.connect() as conn:
+                        conn.execute(sql)
+                        conn.commit()
                     logger.info(f"Successfully added column {column_name}")
                 except SQLAlchemyError as e:
                     logger.error(f"Failed to add column {column_name}: {str(e)}")
