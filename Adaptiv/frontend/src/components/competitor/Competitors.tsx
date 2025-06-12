@@ -173,11 +173,7 @@ const Competitors: React.FC = () => {
           if (competitor.report_id) {
             console.log(`Deleting competitor: ${competitor.name} (${competitor.report_id})`);
             try {
-              await axios.delete(`/api/gemini-competitors/competitors/${competitor.report_id}`, {
-                headers: {
-                  'Authorization': `Bearer ${token}`
-                }
-              });
+              await api.delete(`gemini-competitors/competitors/${competitor.report_id}`);
             } catch (deleteErr) {
               console.error(`Error deleting competitor ${competitor.name}:`, deleteErr);
             }
@@ -186,14 +182,8 @@ const Competitors: React.FC = () => {
       }
       
       // Update the user's competitor tracking status to false
-      const response = await axios.put('/api/competitor-settings/tracking-status',
-        { enabled: false },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        }
-      );
+      // Use the configured api service instead of direct axios
+      const response = await api.put('competitor-settings/tracking-status', { enabled: false });
       
       if (response.data.success) {
         message.success('Competitor tracking reset successfully');
@@ -230,11 +220,8 @@ const Competitors: React.FC = () => {
       
       // Fix endpoint to use the correct API path that exists in the backend
       // Use the same endpoint as CompetitorDetail.tsx - get-stored-menu/{report_id}
-      const response = await axios.get(`/api/gemini-competitors/get-stored-menu/${reportId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      // Use the configured api service instead of direct axios
+      const response = await api.get(`gemini-competitors/get-stored-menu/${reportId}`);
       
       if (response.data.success && response.data.menu_items) {
         return response.data.menu_items;
@@ -750,14 +737,8 @@ const Competitors: React.FC = () => {
       message.loading('Saving your selected competitors...', 2);
       
       // Update the user's competitor tracking status
-      const statusResponse = await axios.put('/api/competitor-settings/tracking-status',
-        { enabled: true },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        }
-      );
+      // Use the configured api service instead of direct axios
+      const statusResponse = await api.put('competitor-settings/tracking-status', { enabled: true });
       
       // Group the selected competitors by type (search results vs manually added)
       const manualCompetitors = selectedCompetitors.filter(comp => comp.report_id?.toString().startsWith('manual-'));
@@ -1131,11 +1112,8 @@ const Competitors: React.FC = () => {
       const token = localStorage.getItem('token');
       if (!token) return;
       
-      const response = await axios.get(`/api/gemini-competitors/get-menu-batches/${reportId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      // Use the configured api service instead of direct axios
+      const response = await api.get(`gemini-competitors/get-menu-batches/${reportId}`);
       
       if (response.data.success && response.data.batches && response.data.batches.length > 0) {
         // Sort batches by timestamp (newest first)
@@ -1177,12 +1155,8 @@ const Competitors: React.FC = () => {
         params.batch_id = batchId;
       }
       
-      const response = await axios.get(`/api/gemini-competitors/get-stored-menu/${reportId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        params: params
-      });
+      // Use the configured api service instead of direct axios
+      const response = await api.get(`gemini-competitors/get-stored-menu/${reportId}`, { params: params });
       
       if (response.data.success) {
         setCompetitorMenuItems(response.data.menu_items);
@@ -1320,7 +1294,7 @@ const Competitors: React.FC = () => {
             return;
           }
           
-          const response = await axios.delete(`/api/gemini-competitors/competitors/${competitor.report_id}`, {
+          const response = await api.delete(`gemini-competitors/competitors/${competitor.report_id}`, {
             headers: {
               'Authorization': `Bearer ${token}`
             }
