@@ -45,8 +45,19 @@ def add_missing_columns():
             logger.error("The business_profiles table does not exist in the database!")
             return False
 
-        # Get existing columns
-        existing_columns = [column["name"] for column in inspector.get_columns("business_profiles")]
+        # Get existing columns - safely handle different inspector API versions
+        try:
+            existing_columns = [column["name"] for column in inspector.get_columns("business_profiles")]
+        except Exception as e:
+            logger.warning(f"Error using inspector.get_columns: {str(e)}")
+            # Alternative method for getting columns
+            with engine.connect() as conn:
+                if is_postgresql():
+                    result = conn.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name = 'business_profiles'"))
+                    existing_columns = [row[0] for row in result]
+                else:
+                    result = conn.execute(text("PRAGMA table_info(business_profiles)"))
+                    existing_columns = [row[1] for row in result]
         logger.info(f"Existing columns in business_profiles: {existing_columns}")
 
         # Define the columns we need to add if they're missing
