@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI
+from scheduler import scheduler
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List
@@ -77,6 +78,16 @@ async def root():
 @app.get("/api/health")
 async def health_check():
     return {"status": "healthy"}
+
+# Initialize events to run when the application starts/stops
+@app.on_event("startup")
+def start_scheduler():
+    scheduler.start()
+
+@app.on_event("shutdown")
+def shutdown_scheduler():
+    if scheduler.running:
+        scheduler.shutdown()
 
 if __name__ == "__main__":
     import uvicorn
