@@ -122,11 +122,8 @@ const Competitors: React.FC = () => {
         return;
       }
       
-      const response = await axios.get('/api/competitor-settings/tracking-status', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      // Use the configured api service instead of direct axios
+      const response = await api.get('competitor-settings/tracking-status');
       
       if (response.data.success) {
         setTrackingEnabled(response.data.competitor_tracking_enabled);
@@ -158,7 +155,7 @@ const Competitors: React.FC = () => {
       }
 
       // First, get all current competitors
-      const getResponse = await axios.get('/api/gemini-competitors/competitors', {
+      const getResponse = await api.get('gemini-competitors/competitors', {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -369,7 +366,7 @@ const Competitors: React.FC = () => {
       }
       
       // First, fetch competitors
-      const response = await axios.get('/api/gemini-competitors/competitors', {
+      const response = await api.get('gemini-competitors/competitors', {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -606,18 +603,12 @@ const Competitors: React.FC = () => {
       }
       
       // Search for competitors but don't save them to database yet
-      const response = await axios.post('/api/gemini-competitors/search', 
-        { 
-          business_type: values.businessType, 
-          location: values.location,
-          save_to_db: false // Include as part of request body instead of URL parameter
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        }
-      );
+      // Use the configured api service instead of direct axios
+      const response = await api.post('gemini-competitors/search', { 
+        business_type: values.businessType, 
+        location: values.location,
+        save_to_db: false // Include as part of request body instead of URL parameter
+      });
       
       if (response.data.success && response.data.competitors) {
         // Add selected property to each competitor and convert to proper interface
@@ -795,7 +786,7 @@ const Competitors: React.FC = () => {
           
           // Use the bulk-select endpoint to efficiently mark which competitors should be selected/tracked
           if (selectedIds.length > 0 || unselectedIds.length > 0) {
-            await axios.post('/api/gemini-competitors/bulk-select',
+            await api.post('gemini-competitors/bulk-select',
               {
                 selected_ids: selectedIds,
                 unselected_ids: unselectedIds
@@ -890,7 +881,7 @@ const Competitors: React.FC = () => {
           
           // First force a refresh to get the latest competitor data with proper report_ids
           console.log('Refreshing competitor data to ensure we have the latest report_ids...');
-          const refreshResponse = await axios.get('/api/gemini-competitors/competitors', {
+          const refreshResponse = await api.get('gemini-competitors/competitors', {
             headers: { 'Authorization': `Bearer ${token}` }
           });
           
@@ -1243,7 +1234,7 @@ const Competitors: React.FC = () => {
       
       // Save the competitor to the backend using the manually-add endpoint
       // This endpoint is used elsewhere in the code for adding manual competitors
-      const response = await axios.post('/api/gemini-competitors/manually-add', 
+      const response = await api.post('gemini-competitors/manually-add', 
         competitor,
         {
           headers: {
