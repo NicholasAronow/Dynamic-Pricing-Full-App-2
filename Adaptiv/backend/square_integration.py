@@ -15,6 +15,7 @@ import requests
 from urllib.parse import urlencode
 import json
 import logging
+import uuid
 
 import models, schemas
 from database import get_db
@@ -267,6 +268,321 @@ async def _update_pos_action_item(user_id: int, db: Session):
         pos_action_item.status = "completed"
         pos_action_item.completed_at = datetime.now()
         db.commit()
+
+@square_router.post("/update-price")
+async def update_square_price(
+    data: Dict[str, Any],
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update the price of an item in Square"""
+    try:
+        # Extract parameters from request body
+        item_id = data.get("item_id")
+        new_price = data.get("new_price")
+        
+        if not item_id or new_price is None:
+            return {"error": "Missing item_id or new_price", "success": False}
+            
+        # Convert price to cents for Square API
+        price_amount = int(float(new_price) * 100)
+        
+        # Get the Square integration
+        integration = await _get_integration(current_user.id, db)
+        
+        # Fetch item details from database to get Square catalog ID (stored in pos_id)
+        item = db.query(models.Item).filter(models.Item.id == item_id).first()
+        
+        if not item:
+            return {"error": "Item not found", "success": False}
+            
+        if not item.pos_id:  
+            logger.error(f"Cannot update item {item.id} ({item.name}) in Square because it has no pos_id (Square catalog ID)")
+            return {"error": "Cannot update price in Square because this item is not linked to your Square catalog", 
+                    "details": "This item needs to be synced with Square first. Try running a full Square sync.",
+                    "success": False}
+        
+        # We need to find both the variation and its parent item
+        logger.info(f"Searching for catalog object with variation ID: {item.pos_id}")
+        
+        # First, search for the item variation to get its parent item ID
+        search_response = requests.post(
+            f"{SQUARE_API_BASE}/v2/catalog/search",
+            headers={
+                "Authorization": f"Bearer {integration.access_token}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "object_types": ["ITEM"],
+                "include_related_objects": True
+            }
+        )
+        
+        # Debug logging
+        logger.info(f"Square catalog search response status: {search_response.status_code}")
+        
+        if search_response.status_code != 200:
+            logger.error(f"Failed to search catalog: {search_response.text}")
+            return {
+                "error": "Failed to fetch Square catalog data",
+                "details": search_response.json().get('errors', []),
+                "success": False
+            }
+            
+        search_data = search_response.json()
+        catalog_objects = search_data.get("objects", [])
+        
+        # Find the parent item for our variation ID
+        target_item = None
+        target_variation = None
+        variation_version = 1
+        
+        for catalog_item in catalog_objects:
+            if catalog_item.get("type") != "ITEM":
+                continue
+                
+            item_data = catalog_item.get("item_data", {})
+            variations = item_data.get("variations", [])
+            
+            # Look through all variations to find our target
+            for variation in variations:
+                variation_id = variation.get("id")
+                if variation_id == item.pos_id:
+                    target_item = catalog_item
+                    target_variation = variation
+                    variation_version = variation.get("version", 1)
+                    logger.info(f"Found variation {variation_id} in item {target_item.get('id')}")
+                    break
+                    
+            if target_item:
+                break
+                
+        if not target_item or not target_variation:
+            logger.error(f"Variation ID {item.pos_id} not found in any catalog item")
+            
+            # Clear the invalid ID
+            item.pos_id = None
+            db.commit()
+            db.refresh(item)
+            
+            return {
+                "error": "This item variation no longer exists in Square. The database has been updated.",
+                "details": "The item variation may have been deleted from Square or the ID is invalid.",
+                "success": False
+            }
+            
+        # Get the current version - this is crucial for Square API
+        current_version = variation_version
+        logger.info(f"Found variation with version: {current_version}")
+        
+        # Also save the parent item ID for future reference
+        parent_item_id = target_item.get("id")
+        parent_item_version = target_item.get("version", 1)
+        logger.info(f"Parent item ID: {parent_item_id}, version: {parent_item_version}")
+        
+        # For debugging, also log the variation details
+        variation_data = target_variation.get("item_variation_data", {})
+        logger.info(f"Variation details: {json.dumps(variation_data, indent=2)}")
+        
+        # Store these important IDs and versions for the update
+        
+        # Create the correct price update payload based on the item structure we found
+        # We need to update the variation within its parent item
+        
+        # Copy the existing variation data to preserve all fields
+        updated_variation = target_variation.copy()
+        
+        # Update just the price in the variation data
+        if "item_variation_data" not in updated_variation:
+            updated_variation["item_variation_data"] = {}
+            
+        if "price_money" not in updated_variation["item_variation_data"]:
+            updated_variation["item_variation_data"]["price_money"] = {}
+            
+        # Set the new price
+        updated_variation["item_variation_data"]["price_money"] = {
+            "amount": price_amount,
+            "currency": "USD"
+        }
+        
+        # Use version from our lookup
+        updated_variation["version"] = current_version
+        
+        # Create a complete object update using the parent item structure
+        price_data = {
+            "idempotency_key": str(uuid.uuid4()),
+            "object": {
+                "id": parent_item_id,
+                "type": "ITEM",
+                "version": parent_item_version,
+                "item_data": target_item.get("item_data", {})
+            }
+        }
+        
+        # Replace the target variation with our updated one in the variations array
+        variations = price_data["object"]["item_data"].get("variations", [])
+        if not variations:
+            # If no variations array existed, create a new one with just our variation
+            price_data["object"]["item_data"]["variations"] = [updated_variation]
+        else:
+            # Replace the specific variation in the array
+            for i, variation in enumerate(variations):
+                if variation.get("id") == item.pos_id:
+                    variations[i] = updated_variation
+                    break
+            else:
+                # If we didn't find the variation, append it
+                variations.append(updated_variation)
+            price_data["object"]["item_data"]["variations"] = variations
+        
+        # Debug logging
+        logger.info(f"Updating Square item with pos_id: {item.pos_id}")
+        logger.info(f"Price data payload: {price_data}")
+        logger.info(f"Using Square POST API endpoint with correct version {current_version}")
+        
+        # Call Square Catalog API to update price
+        # Use POST to /v2/catalog/object instead of PUT to /{id}
+        update_response = requests.post(
+            f"{SQUARE_API_BASE}/v2/catalog/object",
+            headers={
+                "Authorization": f"Bearer {integration.access_token}",
+                "Content-Type": "application/json"
+            },
+            json=price_data
+        )
+        
+        # Log the response
+        logger.info(f"Square API response status: {update_response.status_code}")
+        logger.info(f"Square API response body: {update_response.text}")
+        
+        # Check response
+        if update_response.status_code not in [200, 201]:
+            error_details = None
+            user_message = "Failed to update price in Square"
+            
+            try:
+                error_details = update_response.json().get('errors', [])
+                
+                # Handle common error cases with better messaging
+                if update_response.status_code == 404:
+                    user_message = "The item could not be found in your Square catalog"
+                    logger.error(f"Square API returned 404 for item with pos_id: {item.pos_id}")
+                    
+                    # Mark the pos_id as potentially invalid
+                    item.pos_id = None
+                    db.commit()
+                    db.refresh(item)
+                elif update_response.status_code == 409:
+                    user_message = "Price update conflict - the item may have been modified elsewhere"
+                    logger.error(f"Version conflict when updating item {item.pos_id}")
+                
+                # Extract specific error codes for better handling
+                if error_details and isinstance(error_details, list) and len(error_details) > 0:
+                    error_code = error_details[0].get('code', '')
+                    error_detail = error_details[0].get('detail', '')
+                    
+                    if error_code == 'NOT_FOUND':
+                        user_message = f"Item not found in Square catalog. The connection may be broken."
+                    elif error_code == 'UNAUTHORIZED':
+                        user_message = "Square authorization failed. Please reconnect your Square account."
+                    elif error_code == 'INVALID_REQUEST_ERROR':
+                        user_message = f"Invalid request: {error_detail}"
+                    elif error_detail:
+                        user_message = f"Square error: {error_detail}"
+            except:
+                error_details = update_response.text
+                
+            logger.error(f"Square API error: Failed to update price - {error_details}")
+            return {
+                "error": user_message,
+                "square_error": error_details,
+                "success": False
+            }
+            
+        # Update price in our database
+        item.current_price = str(new_price)  # Store as string for consistency
+        item.updated_at = datetime.now()
+        db.commit()
+        
+        # Record price change in price history table if PriceHistory model exists
+        try:
+            from models import PriceHistory
+            price_history = PriceHistory(
+                item_id=item_id,
+                previous_price=item.current_price,  # Use the original price as previous_price
+                new_price=str(new_price),  # Use new_price instead of price
+                user_id=current_user.id,
+                change_reason="Updated via Square price update"  # Use change_reason instead of change_type/notes
+            )
+            db.add(price_history)
+            db.commit()
+        except (ImportError, AttributeError) as e:
+            logger.warning(f"Error creating price history record: {str(e)}")
+            logger.warning("Make sure your PriceHistory model fields match the constructor arguments")
+        
+        return {"message": "Price updated successfully", "success": True}
+        
+    except Exception as e:
+        logger.exception(f"Error updating price: {str(e)}")
+        return {"error": f"Failed to update price: {str(e)}", "success": False}
+
+
+async def _handle_missing_catalog_item(item, integration, price_amount, user_id, db):
+    """Handle case where catalog item is not found - try to find it by name"""
+    logger.info(f"Attempting to find item '{item.name}' in Square catalog by name")
+    
+    try:
+        # Search catalog by name
+        search_response = requests.post(
+            f"{SQUARE_API_BASE}/v2/catalog/search",
+            headers={
+                "Authorization": f"Bearer {integration.access_token}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "object_types": ["ITEM"],
+                "query": {
+                    "text_query": {
+                        "keywords": [item.name]
+                    }
+                }
+            }
+        )
+        
+        if search_response.status_code == 200:
+            search_data = search_response.json()
+            objects = search_data.get("objects", [])
+            
+            # Find exact name match
+            for obj in objects:
+                if obj.get("type") == "ITEM":
+                    item_data = obj.get("item_data", {})
+                    if item_data.get("name", "").lower() == item.name.lower():
+                        # Found the item! Get the variation ID
+                        variations = item_data.get("variations", [])
+                        if variations:
+                            variation = variations[0]  # Take first variation
+                            new_pos_id = variation.get("id")
+                            logger.info(f"Found item variation in catalog with ID: {new_pos_id}")
+                            
+                            # Update our database with the correct variation ID
+                            item.pos_id = new_pos_id
+                            db.commit()
+                            db.refresh(item)
+                            
+                            return {"message": "Item was found by name. Square ID has been updated. Try the price update again.", "success": True}
+        
+        # If we get here, item truly doesn't exist
+        return {
+            "error": "This item could not be found in your Square catalog",
+            "details": "The item may not exist in Square. Verify the item exists in your Square dashboard.",
+            "success": False
+        }
+        
+    except Exception as e:
+        logger.exception(f"Error searching for catalog item: {str(e)}")
+        return {"error": "Failed to search for item in Square catalog", "success": False}
+
 
 @square_router.get("/orders")
 async def get_square_orders(
@@ -569,7 +885,9 @@ async def sync_initial_data(user_id: int, db: Session):
                 existing_item.current_price = price
                 existing_item.description = description or existing_item.description
                 existing_item.updated_at = datetime.now()
-                existing_item.pos_id = square_item_id  # Ensure Square ID is set
+                # IMPORTANT: Store the variation ID in pos_id, not the main item ID
+                # This is because price updates are done at the variation level
+                existing_item.pos_id = square_variation_id if square_variation_id else square_item_id
                 items_updated += 1
                 
                 # Add to mapping
@@ -584,7 +902,7 @@ async def sync_initial_data(user_id: int, db: Session):
                     category="From Square",  # Default category
                     current_price=price,
                     user_id=user_id,
-                    pos_id=square_item_id  # Store Square ID
+                    pos_id=square_variation_id if square_variation_id else square_item_id  # Store variation ID for price updates
                 )
                 db.add(new_item)
                 db.flush()  # Get ID of new item

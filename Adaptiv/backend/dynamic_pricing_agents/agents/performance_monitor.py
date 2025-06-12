@@ -199,7 +199,7 @@ class PerformanceMonitorAgent(BaseAgent):
                     "item_name": item.name,
                     "old_price": float(change.previous_price),
                     "new_price": float(change.new_price),
-                    "change_percent": (change.new_price - change.previous_price) / change.previous_price * 100,
+                    "change_percent": (change.new_price - change.previous_price) / change.previous_price * 100 if change.previous_price > 0 else 0,
                     "changed_at": change.changed_at.isoformat(),
                     "days_active": (datetime.now() - change.changed_at).days,
                     "reason": change.change_reason if hasattr(change, 'change_reason') else None
@@ -251,7 +251,9 @@ class PerformanceMonitorAgent(BaseAgent):
         baseline_summary = baseline["summary"]
         
         # Revenue metrics
-        current_daily_avg = current_summary["total_revenue"] / 7
+        # Ensure we don't divide by zero when calculating daily averages
+        days_in_period = 7  # Default period of 7 days
+        current_daily_avg = current_summary["total_revenue"] / days_in_period
         baseline_daily_avg = baseline_summary["avg_daily_revenue"]
         revenue_change = (current_daily_avg - baseline_daily_avg) / baseline_daily_avg * 100 if baseline_daily_avg > 0 else 0
         

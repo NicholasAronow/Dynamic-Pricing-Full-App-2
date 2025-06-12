@@ -261,7 +261,11 @@ class DataCollectionAgent(BaseAgent):
             
             if historical_price and historical_price != history_entry.price:
                 price_change = history_entry.price - historical_price
-                percent_change = (price_change / historical_price) * 100
+                # Protect against division by zero
+                if historical_price > 0:
+                    percent_change = (price_change / historical_price) * 100
+                else:
+                    percent_change = 0 if price_change == 0 else 100
                 
                 history_entry.price_change_from_last = price_change
                 history_entry.percent_change_from_last = percent_change
@@ -303,7 +307,7 @@ class DataCollectionAgent(BaseAgent):
                 {
                     'price_changes': price_changes,
                     'change_count': len(price_changes),
-                    'avg_change_percent': sum(pc['change_percent'] for pc in price_changes) / len(price_changes)
+                    'avg_change_percent': sum(pc['change_percent'] for pc in price_changes) / len(price_changes) if price_changes else 0
                 },
                 metadata={'capture_date': datetime.now().isoformat()}
             )
@@ -625,9 +629,9 @@ class DataCollectionAgent(BaseAgent):
             older_avg = sum(scores[2:]) / len(scores[2:]) if len(scores) > 2 else scores[1]
             
             if recent_avg > older_avg * 1.1:
-                return {"trend": "improving", "change": (recent_avg - older_avg) / older_avg}
+                return {"trend": "improving", "change": (recent_avg - older_avg) / older_avg if older_avg != 0 else 0}
             elif recent_avg < older_avg * 0.9:
-                return {"trend": "declining", "change": (recent_avg - older_avg) / older_avg}
+                return {"trend": "declining", "change": (recent_avg - older_avg) / older_avg if older_avg != 0 else 0}
         
         return {"trend": "stable", "change": 0}
     
@@ -685,7 +689,10 @@ class DataCollectionAgent(BaseAgent):
         # Calculate averages and determine trends
         for competitor, data in competitor_trends.items():
             if data["price_changes"] > 0:
-                data["avg_change_percent"] /= data["price_changes"]
+                if data["price_changes"] > 0:
+                    data["avg_change_percent"] /= data["price_changes"]
+                else:
+                    data["avg_change_percent"] = 0
                 if data["avg_change_percent"] > 5:
                     data["trend"] = "increasing"
                 elif data["avg_change_percent"] < -5:
@@ -705,12 +712,17 @@ class DataCollectionAgent(BaseAgent):
         avg_price_changes = []
         for data in historical_prices.values():
             if 'prices' in data and len(data['prices']) > 1:
-                change = (data['prices'][-1] - data['prices'][0]) / data['prices'][0] * 100
+                # Protect against division by zero
+                if data['prices'][0] > 0:
+                    change = (data['prices'][-1] - data['prices'][0]) / data['prices'][0] * 100
+                else:
+                    # If initial price is zero, use absolute change or a default
+                    change = 0 if data['prices'][-1] == 0 else 100  # 100% increase if going from 0 to any value
                 avg_price_changes.append(change)
         
         return {
             "total_tracked_items": total_items,
             "items_with_price_changes": items_with_changes,
             "average_price_change": sum(avg_price_changes) / len(avg_price_changes) if avg_price_changes else 0,
-            "price_volatility": "high" if items_with_changes / total_items > 0.3 else "low"
+            "price_volatility": "high" if total_items > 0 and items_with_changes / total_items > 0.3 else "low"
         }

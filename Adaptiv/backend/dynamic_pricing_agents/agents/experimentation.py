@@ -343,7 +343,7 @@ class ExperimentationAgent(BaseAgent):
         insights = {
             "current_strategy": "diversified_testing" if len(active) > 1 else "focused_testing",
     
-            "success_rate": f"{sum(1 for r in completed if r.get('recommendation') == 'implement_treatment') / len(completed) * 100:.1f}%" if completed else "No completed experiments",
+            "success_rate": f"{sum(1 for r in completed if r.get('recommendation') == 'implement_treatment') / len(completed) * 100:.1f}%" if completed and len(completed) > 0 else "No completed experiments",
             "key_findings": [],
             "recommended_focus_areas": []
         }
@@ -486,7 +486,7 @@ class ExperimentationAgent(BaseAgent):
                 highest_success_rate = 0
                 for exp_type, stats in experiment_types.items():
                     if stats['count'] >= 3:  # Need minimum sample size
-                        success_rate = stats['success_count'] / stats['count']
+                        success_rate = stats['success_count'] / stats['count'] if stats['count'] > 0 else 0
                         if success_rate > highest_success_rate:
                             highest_success_rate = success_rate
                             most_successful_type = exp_type
@@ -768,8 +768,11 @@ class ExperimentationAgent(BaseAgent):
         # Calculate averages
         for exp_type in experiment_types:
             if experiment_types[exp_type]['count'] > 0:
-                experiment_types[exp_type]['avg_revenue_lift'] /= experiment_types[exp_type]['count']
-                experiment_types[exp_type]['success_rate'] = experiment_types[exp_type]['success_count'] / experiment_types[exp_type]['count']
+                if experiment_types[exp_type]['count'] > 0:
+                    experiment_types[exp_type]['avg_revenue_lift'] /= experiment_types[exp_type]['count']
+                else:
+                    experiment_types[exp_type]['avg_revenue_lift'] = 0
+                experiment_types[exp_type]['success_rate'] = experiment_types[exp_type]['success_count'] / experiment_types[exp_type]['count'] if experiment_types[exp_type]['count'] > 0 else 0
         
         return {
             "total_experiments": total_experiments,
@@ -830,7 +833,7 @@ class ExperimentationAgent(BaseAgent):
         pooled_value = (control_value + treatment_value) / 2
         
         if pooled_value > 0:
-            effect_size = diff / pooled_value
+            effect_size = diff / pooled_value if pooled_value != 0 else 0
             # Simulate p-value based on effect size and sample size
             total_size = control_size + treatment_size
             p_value = max(0.001, 1 - (effect_size * np.sqrt(total_size) / 10))

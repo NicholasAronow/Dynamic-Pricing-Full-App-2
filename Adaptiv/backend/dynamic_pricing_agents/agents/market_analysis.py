@@ -138,7 +138,11 @@ class MarketAnalysisAgent(BaseAgent):
                 ]
                 if matching_comp_items:
                     comp_item = matching_comp_items[0]
-                    price_diff = (comp_item["price"] - our_item["current_price"]) / our_item["current_price"] * 100
+                    # Protect against division by zero
+                    if our_item["current_price"] > 0:
+                        price_diff = (comp_item["price"] - our_item["current_price"]) / our_item["current_price"] * 100
+                    else:
+                        price_diff = 0  # Default when current price is zero
                     price_comparisons.append({
                         "item": our_item["name"],
                         "our_price": our_item["current_price"],
@@ -218,7 +222,11 @@ class MarketAnalysisAgent(BaseAgent):
                 ]
                 if matching_comp_items:
                     comp_item = matching_comp_items[0]
-                    price_diff = (comp_item["price"] - our_item["current_price"]) / our_item["current_price"] * 100
+                    # Protect against division by zero
+                    if our_item["current_price"] > 0:
+                        price_diff = (comp_item["price"] - our_item["current_price"]) / our_item["current_price"] * 100
+                    else:
+                        price_diff = 0  # Default when current price is zero
                     price_comparisons.append({
                         "item": our_item["name"],
                         "our_price": our_item["current_price"],

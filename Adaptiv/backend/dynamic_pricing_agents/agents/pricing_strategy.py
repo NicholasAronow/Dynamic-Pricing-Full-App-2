@@ -497,10 +497,16 @@ class PricingStrategyAgent(BaseAgent):
         
         category_strategies = {}
         for category, items in categories.items():
-            avg_price_change = np.mean([
-                (s["recommended_price"] - s["current_price"]) / s["current_price"] 
-                for s in items
-            ])
+            # Filter out items with zero current price to avoid division by zero
+            valid_items = [s for s in items if s["current_price"] > 0]
+            
+            if not valid_items:
+                avg_price_change = 0
+            else:
+                avg_price_change = np.mean([
+                    (s["recommended_price"] - s["current_price"]) / s["current_price"] if s["current_price"] > 0 else 0 
+                    for s in valid_items
+                ])
             
             category_strategies[category] = {
                 "recommended_adjustment": avg_price_change,
@@ -662,7 +668,11 @@ class PricingStrategyAgent(BaseAgent):
         margins = {}
         for item in items:
             if item["cost"] and item["id"] in revenue:
-                margin = (item["current_price"] - item["cost"]) / item["current_price"]
+                # Protect against division by zero
+                if item["current_price"] > 0:
+                    margin = (item["current_price"] - item["cost"]) / item["current_price"]
+                else:
+                    margin = 0  # Default margin when price is zero
                 margins[item["id"]] = margin
         return margins
     
@@ -680,10 +690,11 @@ class PricingStrategyAgent(BaseAgent):
             )
             
             if before_sales > 0:
+                # Avoid division by zero when calculating impact
                 impact = (after_sales - before_sales) / before_sales
                 impacts.append({
                     "item_id": change["item_id"],
-                    "price_change_percent": (change["new_price"] - change["old_price"]) / change["old_price"],
+                    "price_change_percent": (change["new_price"] - change["old_price"]) / change["old_price"] if change["old_price"] > 0 else 0,
                     "sales_impact_percent": impact * 100
                 })
         
@@ -765,7 +776,7 @@ class PricingStrategyAgent(BaseAgent):
                             })
             
             item_data["competitors"] = competitors
-            item_data["avg_competitor_price"] = sum(competitor_prices) / len(competitor_prices) if competitor_prices else None
+            item_data["avg_competitor_price"] = sum(competitor_prices) / len(competitor_prices) if competitor_prices and len(competitor_prices) > 0 else None
             item_data["min_competitor_price"] = min(competitor_prices) if competitor_prices else None
             item_data["max_competitor_price"] = max(competitor_prices) if competitor_prices else None
             item_data["market_position"] = goals.get("market_position", "competitive")
@@ -953,7 +964,11 @@ class PricingStrategyAgent(BaseAgent):
         # 1. Ensure minimum margin
         min_margin = goals.get("constraints", {}).get("minimum_margin", 0.2)
         if cost and cost > 0:
-            min_price = cost / (1 - min_margin)
+            # Avoid division by zero if min_margin is 1
+            if min_margin < 1:
+                min_price = cost / (1 - min_margin)
+            else:
+                min_price = cost * 10  # Default to 10x cost if margin would cause division by zero
             if optimal_price < min_price:
                 optimal_price = min_price
                 self.logger.info(f"Adjusted price to meet minimum margin requirement: ${optimal_price:.2f}")
@@ -1007,7 +1022,12 @@ class PricingStrategyAgent(BaseAgent):
             rounded_price = cost * 1.1  # Ensure at least 10% margin
             
         # Log final decision
-        self.logger.info(f"Final price for {item_data['name']}: ${rounded_price:.2f} (from ${current_price:.2f}, change: {((rounded_price-current_price)/current_price)*100:.1f}%)")
+        # Avoid division by zero when calculating percentage change
+        if current_price > 0:
+            change_pct = ((rounded_price-current_price)/current_price)*100
+            self.logger.info(f"Final price for {item_data['name']}: ${rounded_price:.2f} (from ${current_price:.2f}, change: {change_pct:.1f}%)")
+        else:
+            self.logger.info(f"Final price for {item_data['name']}: ${rounded_price:.2f} (from ${current_price:.2f}, unable to calculate percentage change)")
         
         # Return the final recommended price
         return round(rounded_price, 2)
@@ -1042,7 +1062,7 @@ class PricingStrategyAgent(BaseAgent):
         # Format competitor data
         competitor_info = "No competitor data available"
         if competitor_prices and len(competitor_prices) > 0:
-            avg_competitor = sum(competitor_prices) / len(competitor_prices)
+            avg_competitor = sum(competitor_prices) / len(competitor_prices) if competitor_prices and len(competitor_prices) > 0 else 0
             min_competitor = min(competitor_prices)
             max_competitor = max(competitor_prices)
             competitor_info = f"Average: ${avg_competitor:.2f}, Range: ${min_competitor:.2f} - ${max_competitor:.2f}"
@@ -1701,7 +1721,10 @@ class PricingStrategyAgent(BaseAgent):
         if not revenue:
             return 0
         total = sum(revenue.values())
-        shares = [r/total for r in revenue.values()]
+        if total == 0:
+            return 0
+        # Ensure each division is protected, even though we have a check for total==0 above
+        shares = [r/total if total > 0 else 0 for r in revenue.values()]
         return sum(s**2 for s in shares)
     
     def _analyze_item_associations(self, orders: List[Dict]) -> Dict[Tuple[int, int], int]:

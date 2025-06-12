@@ -146,7 +146,7 @@ def get_pricing_recommendations(
                 recommended_price=rec.recommended_price,
                 price_change_amount=rec.price_change_amount,
                 price_change_percent=rec.price_change_percent,
-                confidence_score=rec.confidence_score,
+                confidence_score=1,#rec.confidence_score,
                 rationale=rec.rationale,
                 implementation_status=rec.implementation_status,
                 user_action=rec.user_action,
@@ -299,10 +299,11 @@ def update_recommendation_action(
         recommended_price=recommendation.recommended_price,
         price_change_amount=recommendation.price_change_amount,
         price_change_percent=recommendation.price_change_percent,
-        confidence_score=recommendation.confidence_score,
+        confidence_score=1,#recommendation.confidence_score,
         rationale=recommendation.rationale,
         implementation_status=recommendation.implementation_status,
         user_action=recommendation.user_action,
         recommendation_date=recommendation.recommendation_date,
-        reevaluation_date=recommendation.reevaluation_date
+        reevaluation_date=recommendation.reevaluation_date,
+        batch_id=recommendation.batch_id  # Added the missing batch_id field
     )

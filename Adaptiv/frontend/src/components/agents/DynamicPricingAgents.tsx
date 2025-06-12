@@ -45,69 +45,7 @@ interface AnalysisResults {
 
 const { TextArea } = Input;
 
-interface FeedbackModalProps {
-  visible: boolean;
-  recommendation: AgentPricingRecommendation | null;
-  action: 'accept' | 'reject';
-  onSubmit: (action: 'accept' | 'reject', feedback: string) => void;
-  onCancel: () => void;
-}
-
-const FeedbackModal: React.FC<FeedbackModalProps> = ({ 
-  visible, 
-  recommendation, 
-  action, 
-  onSubmit, 
-  onCancel 
-}) => {
-  const [feedback, setFeedback] = useState('');
-
-  useEffect(() => {
-    if (visible) {
-      setFeedback(''); // Reset feedback when modal opens
-    }
-  }, [visible]);
-
-  return (
-    <Modal
-      title={action === 'accept' ? 'Accept Price Recommendation' : 'Reject Price Recommendation'}
-      open={visible}
-      onCancel={onCancel}
-      footer={[
-        <Button key="back" onClick={onCancel}>
-          Cancel
-        </Button>,
-        <Button 
-          key="submit" 
-          type="primary" 
-          onClick={() => onSubmit(action, feedback)}
-        >
-          {action === 'accept' ? 'Accept' : 'Reject'}
-        </Button>,
-      ]}
-    >
-      {recommendation && (
-        <>
-          <p>
-            <strong>Item:</strong> {recommendation.item_name}<br />
-            <strong>Current Price:</strong> ${Number(recommendation.current_price).toFixed(2)}<br />
-            <strong>Recommended Price:</strong> ${Number(recommendation.recommended_price).toFixed(2)}<br />
-            <strong>Change:</strong> ${Number(recommendation.price_change_amount).toFixed(2)} ({(Number(recommendation.price_change_percent) * 100).toFixed(1)}%)
-          </p>
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ color: '#888', marginBottom: 8 }}>Please provide any feedback or reasoning (optional):</div>
-            <TextArea
-              rows={4}
-              value={feedback}
-              onChange={(e) => setFeedback(e.target.value)}
-              placeholder="Add your feedback here..."
-            />
-          </div>
-        </>
-      )}
-    </Modal>
-  );
-};
+// Modal removed as per requirements
 
 const DynamicPricingAgents: React.FC = () => {
   const [loading, setLoading] = useState(false);
@@ -122,15 +60,7 @@ const DynamicPricingAgents: React.FC = () => {
   const [availableBatches, setAvailableBatches] = useState<BatchInfo[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
   const [loadingBatches, setLoadingBatches] = useState<boolean>(false);
-  const [feedbackModal, setFeedbackModal] = useState<{
-    visible: boolean;
-    recommendation: AgentPricingRecommendation | null;
-    action: 'accept' | 'reject';
-  }>({
-    visible: false,
-    recommendation: null,
-    action: 'accept'
-  });
+  // Feedback modal state removed as per requirements
   const [agentStatuses, setAgentStatuses] = useState<AgentStatus[]>([
     { name: 'Data Collection', status: 'idle', icon: <SearchOutlined /> },
     { name: 'Market Analysis', status: 'idle', icon: <LineChartOutlined /> },
@@ -402,34 +332,47 @@ const DynamicPricingAgents: React.FC = () => {
     fetchAgentRecommendations(batchId);
   };
 
-  const handleActionClick = (recommendation: AgentPricingRecommendation, action: 'accept' | 'reject') => {
-    setFeedbackModal({
-      visible: true,
-      recommendation,
-      action
-    });
-  };
-
-  const handleActionConfirm = async (action: 'accept' | 'reject', feedback: string) => {
-    if (!feedbackModal.recommendation) return;
-
+  const handleActionClick = async (recommendation: AgentPricingRecommendation, action: 'accept' | 'reject') => {
     try {
       const result = await pricingService.updateRecommendationAction(
-        feedbackModal.recommendation.id, 
+        recommendation.id, 
         action, 
-        feedback
+        '' // No feedback since we're bypassing the modal
       );
       
       if (result) {
         message.success(`Successfully ${action}ed the price recommendation`);
         
+        // If approved, also update the price in Square
+        if (action === 'accept') {
+          try {
+            // Call an API to update the price in Square
+            await axios.post(
+              `${API_BASE_URL}/api/integrations/square/update-price`,
+              {
+                item_id: recommendation.item_id,
+                new_price: recommendation.recommended_price
+              },
+              {
+                headers: {
+                  Authorization: `Bearer ${localStorage.getItem('token')}`
+                }
+              }
+            );
+            message.success(`Price updated to $${Number(recommendation.recommended_price).toFixed(2)} in Square`);
+          } catch (squareError) {
+            console.error('Error updating price in Square:', squareError);
+            message.error('Failed to update price in Square');
+          }
+        }
+        
         // Update the local state without making another API call
         const updatedRecommendations = recommendations.map((rec: AgentPricingRecommendation) => {
-          if (rec.id === feedbackModal.recommendation!.id) {
+          if (rec.id === recommendation.id) {
             return {
               ...rec,
               user_action: action,
-              user_feedback: feedback
+              user_feedback: ''
             };
           }
           return rec;
@@ -449,15 +392,10 @@ const DynamicPricingAgents: React.FC = () => {
     } catch (error) {
       console.error(`Error ${action}ing recommendation:`, error);
       message.error(`Error ${action}ing recommendation. Please try again.`);
-    } finally {
-      // Close modal
-      setFeedbackModal({
-        visible: false,
-        recommendation: null,
-        action: 'accept'
-      });
     }
   };
+
+  // Action confirmation handler removed as per requirements - functionality moved to handleActionClick
   
   const runFullAnalysis = async () => {
     try {
@@ -1275,13 +1213,7 @@ const DynamicPricingAgents: React.FC = () => {
         )}
       </div>
 
-      <FeedbackModal 
-        visible={feedbackModal.visible}
-        recommendation={feedbackModal.recommendation}
-        action={feedbackModal.action}
-        onSubmit={handleActionConfirm}
-        onCancel={() => setFeedbackModal({ ...feedbackModal, visible: false })}
-      />
+      {/* Feedback modal removed as per requirements */}
     </div>
   );
 }

@@ -73,9 +73,12 @@ export const pricingService = {
   // Accept or reject a pricing recommendation
   updateRecommendationAction: async (recommendationId: number, action: 'accept' | 'reject', feedback?: string): Promise<AgentPricingRecommendation | null> => {
     try {
+      // Map frontend action terms to backend expected terms
+      const mappedAction = action === 'accept' ? 'accept' : 'reject';
+      
       const response = await api.put(`pricing/recommendations/${recommendationId}/action`, {
-        action,
-        feedback
+        action: mappedAction,
+        feedback: feedback || ''
       });
       return response.data;
     } catch (error) {
