@@ -1681,9 +1681,6 @@ const Dashboard: React.FC = () => {
                             </div>
                             <div style={{ marginTop: 4 }}>
                               <span>
-                                <Tooltip title="Price">
-                                  <InfoCircleOutlined style={{ marginRight: 4 }} />
-                                </Tooltip>
                                 ${formatNumberWithCommas(Number((product.currentPrice || 0).toFixed(2)))}
                               </span>
                             </div>
@@ -1737,9 +1734,6 @@ const Dashboard: React.FC = () => {
                             </div>
                             <div style={{ marginTop: 4 }}>
                               <span>
-                                <Tooltip title="Price">
-                                  <InfoCircleOutlined style={{ marginRight: 4 }} />
-                                </Tooltip>
                                 ${formatNumberWithCommas(Number((product.currentPrice || 0).toFixed(2)))}
                               </span>
                             </div>
