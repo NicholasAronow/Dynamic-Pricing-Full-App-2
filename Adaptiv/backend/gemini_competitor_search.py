@@ -604,12 +604,21 @@ async def add_competitor_manually(
         # Debug logging
         print(f"Received competitor data: {competitor_data}")
         
+        # Check data structure and types
+        if not isinstance(competitor_data, dict):
+            print(f"ERROR: competitor_data is not a dictionary, it's {type(competitor_data)}")
+            raise HTTPException(status_code=400, detail="Invalid competitor data format")
+            
         # Validate required fields
         name = competitor_data.get("name")
         address = competitor_data.get("address")
         category = competitor_data.get("category")
         distance_km = competitor_data.get("distance_km")
         
+        # Check for other potential fields that might be coming in with improper types
+        for key, value in competitor_data.items():
+            print(f"Field {key}: {type(value)} = {value}")
+            
         print(f"Extracted fields: name={name}, address={address}, category={category}, distance_km={distance_km}")
         
         if not name or not address or not category:
@@ -618,20 +627,29 @@ async def add_competitor_manually(
         # Extract menu_url from the data if it exists
         menu_url = competitor_data.get("menu_url")
         
-        # Create a competitor report to store all data
-        competitor_report = models.CompetitorReport(
-            user_id=current_user.id,
-            summary=f"Manually added competitor: {name}",
-            competitor_data={
-                "name": name,
-                "address": address,
-                "category": category,
-                "distance_km": distance_km if distance_km else None,
-                "menu_url": menu_url if menu_url else None
-            },
-            created_at=datetime.utcnow(),
-            is_selected=True  # Manually added competitors are automatically selected
-        )
+        # Create a competitor report with safe values
+        try:
+            competitor_data_dict = {
+                "name": name or "",
+                "address": address or "",
+                "category": category or "",
+                "distance_km": float(distance_km) if distance_km not in (None, "") else None,
+                "menu_url": menu_url or None
+            }
+            print(f"Creating CompetitorReport with data: {competitor_data_dict}")
+            
+            # Safely create the competitor report
+            competitor_report = models.CompetitorReport(
+                user_id=current_user.id,
+                summary=f"Manually added competitor: {name}",
+                competitor_data=competitor_data_dict,
+                created_at=datetime.utcnow(),
+                is_selected=True  # Manually added competitors are automatically selected
+            )
+        except Exception as e:
+            print(f"Error creating CompetitorReport: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"Invalid competitor data: {str(e)}")
+            
         db.add(competitor_report)
         
         # Also create CompetitorItem entry
