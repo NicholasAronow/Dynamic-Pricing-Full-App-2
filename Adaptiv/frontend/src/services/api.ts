@@ -11,31 +11,24 @@ const isVercel = typeof window !== 'undefined' &&
                   window.location.hostname.includes('adaptiv-eight'));
 
 if (isVercel) {
-  // Use relative URL for deployed versions to leverage Vercel's proxy
-  baseUrlFromEnv = '';
-  console.log('Detected Vercel environment, using relative URLs for API requests');
+  // Hard-code the Render backend URL for deployed versions
+  baseUrlFromEnv = 'https://adaptiv-backend.onrender.com';
+  console.log('Detected Vercel environment, using hardcoded backend URL:', baseUrlFromEnv);
 } else {
   // For local development, use the environment variable or localhost
   baseUrlFromEnv = process.env.REACT_APP_API_URL || 'http://localhost:8000';
   console.log('Using environment backend URL:', baseUrlFromEnv);
 }
 
-// Normalize base URL to handle both absolute and relative paths
+// Normalize base URL to always end with '/api/'
 let normalizedBase = baseUrlFromEnv;
-
-// Special handling for Vercel environment using relative URLs
-if (isVercel) {
-  normalizedBase = '/api/'; // Use relative path that will be handled by Vercel rewrites
-  console.log('Using relative API path for Vercel:', normalizedBase);
-} else {
-  // For non-Vercel environments, ensure trailing slash for easier concatenation
-  if (!normalizedBase.endsWith('/')) {
-    normalizedBase += '/';
-  }
-  // Ensure it ends with 'api/'
-  if (!normalizedBase.endsWith('api/')) {
-    normalizedBase += 'api/';
-  }
+// Ensure trailing slash for easier concatenation
+if (!normalizedBase.endsWith('/')) {
+  normalizedBase += '/';
+}
+// Ensure it ends with 'api/'
+if (!normalizedBase.endsWith('api/')) {
+  normalizedBase += 'api/';
 }
 
 const API_BASE_URL = normalizedBase;

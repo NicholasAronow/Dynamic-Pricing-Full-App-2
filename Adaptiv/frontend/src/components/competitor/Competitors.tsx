@@ -791,27 +791,16 @@ const Competitors: React.FC = () => {
       if (newSearchCompetitors.length > 0) {
         try {
           const savePromises = newSearchCompetitors.map(competitor => {
-            // Create a simplified payload with only the essential fields
-            const payload = {
-              name: competitor.name || '',
-              address: competitor.address || '',
-              category: competitor.category || 'Restaurant',
-              distance_km: typeof competitor.distance_km === 'number' ? competitor.distance_km : null,
-              menu_url: competitor.menu_url || null,
-              is_selected: true // CRITICAL: This is the flag the backend uses
-            };
-            console.log(`Sending simplified competitor data for ${competitor.name}:`, JSON.stringify(payload, null, 2));
-            
-            return api.post('gemini-competitors/manually-add', payload)
-              .then(response => {
-                console.log(`Success response for ${competitor.name}:`, response);
-                return response;
-              })
-              .catch(err => {
-                console.error(`Error adding competitor ${competitor.name}:`, err);
-                console.error(`Error response data:`, err.response?.data);
-                return null;
-              });
+            return api.post('gemini-competitors/manually-add',
+              {
+                ...competitor,
+                selected: true, // Ensure they're saved as selected
+                is_selected: true // CRITICAL: This is the flag the backend uses
+              }
+            ).catch(err => {
+              console.error(`Error adding competitor ${competitor.name}:`, err);
+              return null;
+            });
           });
           
           await Promise.all(savePromises);

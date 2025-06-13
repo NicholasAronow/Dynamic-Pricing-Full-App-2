@@ -601,25 +601,11 @@ async def add_competitor_manually(
     Manually add a competitor to the database
     """
     try:
-        # Debug logging
-        print(f"Received competitor data: {competitor_data}")
-        
-        # Check data structure and types
-        if not isinstance(competitor_data, dict):
-            print(f"ERROR: competitor_data is not a dictionary, it's {type(competitor_data)}")
-            raise HTTPException(status_code=400, detail="Invalid competitor data format")
-            
         # Validate required fields
         name = competitor_data.get("name")
         address = competitor_data.get("address")
         category = competitor_data.get("category")
         distance_km = competitor_data.get("distance_km")
-        
-        # Check for other potential fields that might be coming in with improper types
-        for key, value in competitor_data.items():
-            print(f"Field {key}: {type(value)} = {value}")
-            
-        print(f"Extracted fields: name={name}, address={address}, category={category}, distance_km={distance_km}")
         
         if not name or not address or not category:
             raise HTTPException(status_code=400, detail="Name, address, and category are required")
@@ -627,35 +613,23 @@ async def add_competitor_manually(
         # Extract menu_url from the data if it exists
         menu_url = competitor_data.get("menu_url")
         
-        # Create a competitor report with safe values
-        try:
-            competitor_data_dict = {
-                "name": name or "",
-                "address": address or "",
-                "category": category or "",
-                "distance_km": float(distance_km) if distance_km not in (None, "") else None,
-                "menu_url": menu_url or None
-            }
-            print(f"Creating CompetitorReport with data: {competitor_data_dict}")
-            
-            # Safely create the competitor report
-            competitor_report = models.CompetitorReport(
-                user_id=current_user.id,
-                summary=f"Manually added competitor: {name}",
-                competitor_data=competitor_data_dict,
-                created_at=datetime.utcnow(),
-                is_selected=True  # Manually added competitors are automatically selected
-            )
-        except Exception as e:
-            print(f"Error creating CompetitorReport: {str(e)}")
-            raise HTTPException(status_code=400, detail=f"Invalid competitor data: {str(e)}")
-            
+        # Create a competitor report to store all data
+        competitor_report = models.CompetitorReport(
+            user_id=current_user.id,
+            summary=f"Manually added competitor: {name}",
+            competitor_data={
+                "name": name,
+                "address": address,
+                "category": category,
+                "distance_km": distance_km if distance_km else None,
+                "menu_url": menu_url if menu_url else None
+            },
+            created_at=datetime.utcnow(),
+            is_selected=True  # Manually added competitors are automatically selected
+        )
         db.add(competitor_report)
         
         # Also create CompetitorItem entry
-        current_time = datetime.utcnow()
-        batch_id = f"manual-{current_time.strftime('%Y%m%d%H%M%S')}"
-        
         try:
             competitor_item = models.CompetitorItem(
                 user_id=current_user.id,
@@ -663,21 +637,16 @@ async def add_competitor_manually(
                 item_name="General",  # Placeholder
                 category=category,
                 price=0.0,  # Placeholder
-                description=address,
-                batch_id=batch_id,  # Required field
-                sync_timestamp=current_time
+                description=address
             )
         except Exception as e:
-            print(f"Error creating CompetitorItem with user_id: {str(e)}")
             # If user_id field doesn't exist, create without it
             competitor_item = models.CompetitorItem(
                 competitor_name=name,
                 item_name="General",  # Placeholder
                 category=category,
                 price=0.0,  # Placeholder
-                description=address,
-                batch_id=batch_id,  # Required field
-                sync_timestamp=current_time
+                description=address
             )
         
         db.add(competitor_item)
@@ -697,14 +666,7 @@ async def add_competitor_manually(
         }
     except Exception as e:
         db.rollback()
-        # Enhanced error logging with more context
-        import traceback
-        error_trace = traceback.format_exc()
-        print(f"Error adding competitor: {str(e)}")
-        print(f"Error trace: {error_trace}")
-        
-        # Return a more detailed error message
-        raise HTTPException(status_code=500, detail=f"Error adding competitor: {str(e)}. Check server logs for details.")
+        raise HTTPException(status_code=500, detail=f"Error adding competitor: {str(e)}")
 
 @gemini_competitor_router.delete("/competitors/{report_id}")
 async def delete_competitor(
