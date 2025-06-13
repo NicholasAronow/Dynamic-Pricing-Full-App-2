@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Card, Button, Table, Space, Tag, message, Spin, Empty, Tooltip, Alert, Modal, Form, Input, Checkbox, List, InputNumber, Tabs, Select } from 'antd';
+import { Typography, Card, Button, Table, Space, Tag, message, Spin, Empty, Tooltip, Alert, Modal, Form, Input, Checkbox, List, InputNumber, Tabs, Select, notification } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined, LinkOutlined, QuestionOutlined, SearchOutlined, CloseCircleOutlined, EyeOutlined, FileSearchOutlined, ReloadOutlined, SyncOutlined, BarChartOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { api } from '../../services/api';
@@ -995,28 +995,127 @@ const Competitors: React.FC = () => {
       }
       
       setMenuLoading(true);
-      message.info('Fetching the latest menu data...');
+      message.info('Starting menu data extraction...');
       
-      // Use the configured api service instead of direct axios
-      const extractResponse = await api.post(
+      // Step 1: Start the extraction process
+      const startResponse = await api.post(
         `gemini-competitors/fetch-menu/${competitor.report_id}`,
         {}
       );
       
-      if (extractResponse.data.success && extractResponse.data.menu_items) {
-        setMenuItems(extractResponse.data.menu_items);
-        if (extractResponse.data.batch && extractResponse.data.batch.sync_timestamp) {
-          const date = new Date(extractResponse.data.batch.sync_timestamp);
-          message.success(`Menu updated! Latest data from ${date.toLocaleDateString()} ${date.toLocaleTimeString()}`);
-        } else {
-          message.success('Menu data refreshed successfully');
-        }
-      } else {
-        message.warning('Menu extraction completed but no items were found');
+      if (!startResponse.data.success || !startResponse.data.process_id) {
+        throw new Error(startResponse.data.error || 'Failed to start menu extraction');
       }
+      
+      const processId = startResponse.data.process_id;
+      let isCompleted = false;
+      let hasError = false;
+      let statusResponse;
+      let pollCount = 0;
+      const maxPolls = 120; // Maximum polling attempts (10 minutes at 5-second intervals)
+      
+      // Use notification instead of message for long-running process
+      const key = `menu-extraction-${processId}`;
+      notification.info({
+        key,
+        message: 'Menu Extraction Started',
+        description: 'Finding menu sources for this competitor...',
+        duration: 0, // Don't auto-close
+      });
+      
+      // Step 2: Poll for status until completion
+      while (!isCompleted && !hasError && pollCount < maxPolls) {
+        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds between polls
+        
+        try {
+          statusResponse = await api.get(`gemini-competitors/fetch-menu/status/${processId}`);
+          const status = statusResponse.data.status;
+          
+          // Update UI based on current status
+          if (status === 'finding_urls') {
+            notification.info({
+              key,
+              message: 'Menu Extraction In Progress',
+              description: 'Finding menu sources for this competitor...',
+              duration: 0,
+            });
+          } else if (status === 'extracting_items') {
+            const urlsFound = statusResponse.data.progress_info?.urls_found || 0;
+            notification.info({
+              key,
+              message: 'Menu Extraction In Progress',
+              description: `Found ${urlsFound} sources. Extracting menu items...`,
+              duration: 0,
+            });
+          } else if (status === 'consolidating') {
+            const menuItemsFound = statusResponse.data.progress_info?.menu_items_found || 0;
+            notification.info({
+              key,
+              message: 'Menu Extraction In Progress',
+              description: `Found ${menuItemsFound} menu items. Consolidating data...`,
+              duration: 0,
+            });
+          } else if (status === 'completed') {
+            notification.success({
+              key,
+              message: 'Menu Extraction Complete',
+              description: 'Menu data has been successfully extracted.',
+              duration: 3,
+            });
+            isCompleted = true;
+          } else if (status === 'failed') {
+            notification.error({
+              key,
+              message: 'Menu Extraction Failed',
+              description: statusResponse.data.error || 'An unknown error occurred',
+              duration: 5,
+            });
+            hasError = true;
+          }
+        } catch (pollErr) {
+          console.error('Error polling menu extraction status:', pollErr);
+          hasError = true;
+        }
+        
+        pollCount++;
+      }
+      
+      // Handle timeout case
+      if (pollCount >= maxPolls && !isCompleted) {
+        notification.warning({
+          key,
+          message: 'Menu Extraction Taking Too Long',
+          description: 'The process is still running but taking longer than expected.',
+          duration: 5,
+        });
+        hasError = true;
+      }
+      
+      // Step 3: Get final results if successful
+      if (isCompleted) {
+        try {
+          const resultResponse = await api.get(`gemini-competitors/fetch-menu/result/${processId}`);
+          
+          if (resultResponse.data.success && resultResponse.data.menu_items) {
+            setMenuItems(resultResponse.data.menu_items);
+            if (resultResponse.data.batch && resultResponse.data.batch.sync_timestamp) {
+              const date = new Date(resultResponse.data.batch.sync_timestamp);
+              message.success(`Menu updated! Latest data from ${date.toLocaleDateString()} ${date.toLocaleTimeString()}`);
+            } else {
+              message.success('Menu data refreshed successfully');
+            }
+          } else {
+            message.warning('Menu extraction completed but no items were found');
+          }
+        } catch (resultErr) {
+          console.error('Error getting final menu results:', resultErr);
+          message.error('Failed to retrieve menu results');
+        }
+      }
+      
     } catch (err: any) {
       console.error('Error refreshing menu data:', err);
-      message.error(err.response?.data?.detail || 'Failed to refresh menu data');
+      message.error(err.response?.data?.detail || err.message || 'Failed to refresh menu data');
     } finally {
       setMenuLoading(false);
     }
