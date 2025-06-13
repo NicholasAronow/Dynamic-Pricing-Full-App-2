@@ -497,37 +497,28 @@ async def get_stored_competitor_menu(
         raise HTTPException(status_code=500, detail=f"Error retrieving stored menu: {str(e)}")
 
 
-from fastapi import BackgroundTasks
-from datetime import datetime, timedelta
-
-# Create a cache to store the status of menu fetch operations
-menu_fetch_status = {}
-
-async def process_menu_in_background(report_id: int, db_session, current_user):
-    """Background task to process the menu fetch operation"""
+@gemini_competitor_router.post("/fetch-menu/{report_id}")
+async def fetch_competitor_menu(
+    report_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Full process endpoint that combines all three steps:
+    1. Find URLs
+    2. Extract menu from each URL
+    3. Consolidate data and save to database
+    """
     try:
-        # Update status to in-progress
-        menu_fetch_status[report_id] = {
-            "status": "processing",
-            "timestamp": datetime.now().isoformat(),
-            "error": None,
-            "result": None
-        }
-        
         # Get competitor details first
-        competitor_report = db_session.query(models.CompetitorReport).filter(
+        # Check if the competitor has a specified menu URL
+        competitor_report = db.query(models.CompetitorReport).filter(
             models.CompetitorReport.id == report_id,
             models.CompetitorReport.user_id == current_user.id
         ).first()
         
         if not competitor_report:
-            menu_fetch_status[report_id] = {
-                "status": "failed",
-                "timestamp": datetime.now().isoformat(),
-                "error": "Competitor report not found",
-                "result": None
-            }
-            return
+            raise HTTPException(status_code=404, detail="Competitor report not found")
         
         competitor_data = competitor_report.competitor_data
         print(f"DEBUG: competitor_data = {competitor_data}")
@@ -547,21 +538,15 @@ async def process_menu_in_background(report_id: int, db_session, current_user):
             }
         else:
             # STEP 1: Find menu URLs if no direct URL is provided
-            urls_response = await find_competitor_menu_urls(report_id, db_session, current_user)
+            urls_response = await find_competitor_menu_urls(report_id, db, current_user)
             
             if not urls_response.get("success") or not urls_response.get("urls"):
-                menu_fetch_status[report_id] = {
-                    "status": "failed",
-                    "timestamp": datetime.now().isoformat(),
+                return {
+                    "success": False,
                     "error": "Could not find any online menu sources for this competitor",
-                    "result": {
-                        "success": False,
-                        "error": "Could not find any online menu sources for this competitor",
-                        "competitor": urls_response.get("competitor"),
-                        "menu_items": []
-                    }
+                    "competitor": urls_response.get("competitor"),
+                    "menu_items": []
                 }
-                return
                 
             # Get competitor details from the response
             competitor = urls_response.get("competitor")
@@ -586,140 +571,25 @@ async def process_menu_in_background(report_id: int, db_session, current_user):
                 all_menu_items.extend(url_items_response.get("menu_items"))
             
         if not all_menu_items:
-            menu_fetch_status[report_id] = {
-                "status": "failed",
-                "timestamp": datetime.now().isoformat(),
+            return {
+                "success": False,
                 "error": "No menu items could be extracted from the found URLs",
-                "result": {
-                    "success": False,
-                    "error": "No menu items could be extracted from the found URLs",
-                    "competitor": competitor,
-                    "menu_items": []
-                }
+                "competitor": competitor,
+                "menu_items": []
             }
-            return
             
         # STEP 3: Consolidate menu data and save to database
         consolidated_response = await consolidate_menu(
             report_id=report_id,
             menu_items=all_menu_items,
-            db=db_session,
+            db=db,
             current_user=current_user
         )
         
-        # Update status with success
-        menu_fetch_status[report_id] = {
-            "status": "completed",
-            "timestamp": datetime.now().isoformat(),
-            "error": None,
-            "result": consolidated_response
-        }
+        return consolidated_response
         
     except Exception as e:
-        error_msg = f"Error in menu fetch process: {str(e)}"
-        menu_fetch_status[report_id] = {
-            "status": "failed",
-            "timestamp": datetime.now().isoformat(),
-            "error": error_msg,
-            "result": None
-        }
-
-@gemini_competitor_router.post("/fetch-menu/{report_id}")
-async def fetch_competitor_menu(
-    report_id: int,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
-):
-    """
-    Initiates the menu fetch process asynchronously using background tasks to avoid timeouts.
-    Returns immediately with a request ID that can be used to check the status later.
-    """
-    try:
-        # Check if there's already a process running for this report_id
-        if report_id in menu_fetch_status:
-            status_data = menu_fetch_status[report_id]
-            status = status_data["status"]
-            timestamp = datetime.fromisoformat(status_data["timestamp"])
-            
-            # If completed or failed, we can return the result directly
-            if status in ["completed", "failed"]:
-                # Clean up old entries if they're more than 30 minutes old
-                if datetime.now() - timestamp > timedelta(minutes=30):
-                    # Reset status so a new fetch can be started
-                    menu_fetch_status.pop(report_id, None)
-                else:
-                    # Return the cached result
-                    if status == "completed" and status_data["result"]:
-                        return status_data["result"]
-                    elif status == "failed":
-                        return {
-                            "success": False,
-                            "error": status_data["error"],
-                            "status": "failed"
-                        }
-            
-            # If processing, inform the client it's still being processed
-            if status == "processing":
-                # Check if the processing has been going on for too long (more than 5 minutes)
-                if datetime.now() - timestamp > timedelta(minutes=5):
-                    # Reset the status so a new process can be started
-                    menu_fetch_status.pop(report_id, None)
-                else:
-                    return {
-                        "success": True,
-                        "status": "processing",
-                        "message": f"Menu fetch for competitor report {report_id} is still in progress"
-                    }
-        
-        # Set initial status
-        menu_fetch_status[report_id] = {
-            "status": "initiated",
-            "timestamp": datetime.now().isoformat(),
-            "error": None,
-            "result": None
-        }
-        
-        # Start the background task
-        background_tasks.add_task(process_menu_in_background, report_id, db, current_user)
-        
-        return {
-            "success": True,
-            "status": "initiated",
-            "message": f"Menu fetch for competitor report {report_id} has been initiated"
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error initiating menu fetch: {str(e)}")
-
-@gemini_competitor_router.get("/fetch-status/{report_id}")
-async def get_menu_fetch_status(
-    report_id: int,
-    current_user: models.User = Depends(get_current_user)
-):
-    """
-    Check the status of a menu fetch operation
-    """
-    if report_id not in menu_fetch_status:
-        return {
-            "success": False,
-            "status": "not_found",
-            "message": "No menu fetch process found for this report ID"
-        }
-    
-    status_data = menu_fetch_status[report_id]
-    status = status_data["status"]
-    
-    if status == "completed" and status_data["result"]:
-        return status_data["result"]
-    
-    return {
-        "success": status != "failed",
-        "status": status,
-        "error": status_data.get("error"),
-        "message": f"Menu fetch status: {status}",
-        "timestamp": status_data["timestamp"]
-    }
+        raise HTTPException(status_code=500, detail=f"Error in menu fetch process: {str(e)}")
 
 @gemini_competitor_router.post("/manually-add")
 async def add_competitor_manually(
