@@ -500,18 +500,18 @@ async def get_stored_competitor_menu(
 @gemini_competitor_router.post("/fetch-menu/{report_id}")
 async def fetch_competitor_menu(
     report_id: int,
-    force_refresh: bool = False,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Queue a menu extraction job to run in the background
+    Full process endpoint that combines all three steps:
+    1. Find URLs
+    2. Extract menu from each URL
+    3. Consolidate data and save to database
     """
     try:
-        # Import here to avoid circular imports
-        from jobs import queue_menu_extraction
-        
-        # Get competitor details first to verify the competitor exists
+        # Get competitor details first
+        # Check if the competitor has a specified menu URL
         competitor_report = db.query(models.CompetitorReport).filter(
             models.CompetitorReport.id == report_id,
             models.CompetitorReport.user_id == current_user.id
@@ -521,28 +521,75 @@ async def fetch_competitor_menu(
             raise HTTPException(status_code=404, detail="Competitor report not found")
         
         competitor_data = competitor_report.competitor_data
-        competitor_name = competitor_data.get("name", "")
+        print(f"DEBUG: competitor_data = {competitor_data}")
+        competitor_name = competitor_data.get("name")
         competitor_category = competitor_data.get("category", "")
+        direct_menu_url = competitor_data.get("menu_url")
+        print(f"DEBUG: direct_menu_url = {direct_menu_url}")
         
-        # Queue the menu extraction job
-        job_id = queue_menu_extraction(report_id, force_refresh)
-        
-        # Return immediate response
-        return {
-            "success": True,
-            "message": "Menu extraction started in background",
-            "job_id": job_id,
-            "status": "queued",
-            "competitor": {
+        # If a direct menu URL is provided, use that instead of searching
+        if direct_menu_url:
+            print(f"Using direct menu URL: {direct_menu_url}")
+            source_urls = [{"url": direct_menu_url, "confidence": "high"}]
+            competitor = {
                 "name": competitor_name,
                 "category": competitor_category,
                 "report_id": report_id
             }
-        }
+        else:
+            # STEP 1: Find menu URLs if no direct URL is provided
+            urls_response = await find_competitor_menu_urls(report_id, db, current_user)
+            
+            if not urls_response.get("success") or not urls_response.get("urls"):
+                return {
+                    "success": False,
+                    "error": "Could not find any online menu sources for this competitor",
+                    "competitor": urls_response.get("competitor"),
+                    "menu_items": []
+                }
+                
+            # Get competitor details from the response
+            competitor = urls_response.get("competitor")
+            competitor_name = competitor.get("name")
+            competitor_category = competitor.get("category", "")
+            source_urls = urls_response.get("urls")
+            
+        # STEP 2: Extract menu items from each URL
+        all_menu_items = []
+        for source in source_urls:
+            url = source.get("url")
+            if not url:
+                continue
+                
+            url_items_response = await extract_menu_from_url(
+                url=url,
+                competitor_name=competitor_name,
+                competitor_category=competitor_category
+            )
+            
+            if url_items_response.get("success") and url_items_response.get("menu_items"):
+                all_menu_items.extend(url_items_response.get("menu_items"))
+            
+        if not all_menu_items:
+            return {
+                "success": False,
+                "error": "No menu items could be extracted from the found URLs",
+                "competitor": competitor,
+                "menu_items": []
+            }
+            
+        # STEP 3: Consolidate menu data and save to database
+        consolidated_response = await consolidate_menu(
+            report_id=report_id,
+            menu_items=all_menu_items,
+            db=db,
+            current_user=current_user
+        )
+        
+        return consolidated_response
         
     except Exception as e:
-        print(f"Error queueing menu extraction: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error queueing menu extraction job: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error in menu fetch process: {str(e)}")
 
 @gemini_competitor_router.post("/manually-add")
 async def add_competitor_manually(

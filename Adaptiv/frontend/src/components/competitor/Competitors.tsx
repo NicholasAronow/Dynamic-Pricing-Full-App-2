@@ -105,7 +105,6 @@ const Competitors: React.FC = () => {
   const [menuLoading, setMenuLoading] = useState<boolean>(false);
   const [menuVisible, setMenuVisible] = useState<boolean>(false);
   const [selectedCompetitorForMenu, setSelectedCompetitorForMenu] = useState<Competitor | null>(null);
-  const [refreshingMenu, setRefreshingMenu] = useState<boolean>(false);
   
   const navigate = useNavigate();
 
@@ -933,113 +932,43 @@ const Competitors: React.FC = () => {
 
   // Handle edit form submission
   const handleEditFinish = async (values: any) => {
-    // ... (rest of the code remains the same)
-  };
-
-  // Refresh menu data for a specific competitor
-  const handleRefreshMenu = async (competitor: Competitor) => {
+    if (!editingCompetitor || !editingCompetitor.report_id) {
+      message.error('Missing competitor information');
+      return;
+    }
+    
     try {
-      setRefreshingMenu(true);
+      setProcessing(true);
       const token = localStorage.getItem('token');
       
       if (!token) {
         message.error('Authentication required');
         return;
       }
-
-      // Inform user that this may take some time
-      message.info('Starting menu extraction. This process will run in the background and may take a few minutes...');
       
-      console.log('POST', `/gemini-competitors/fetch-menu/${competitor.report_id}`);
+      // Update the competitor in the backend - correct endpoint for updating
       // Use the configured api service instead of direct axios
-      const menuResponse = await api.post(
-        `gemini-competitors/fetch-menu/${competitor.report_id}`,
-        { force_refresh: true }
+      const response = await api.put(`gemini-competitors/${editingCompetitor.report_id}`, 
+        {
+          ...values,
+          report_id: editingCompetitor.report_id,
+          selected: true // Ensure it stays selected (backend parameter is 'selected' not 'is_selected')
+        }
       );
       
-      console.log('Menu extraction job started:', menuResponse.data);
-      
-      if (menuResponse.data.success && menuResponse.data.job_id) {
-        // If job was queued successfully, start polling for status
-        const jobId = menuResponse.data.job_id;
-        await pollJobStatus(jobId, competitor.report_id);
+      if (response.data.success) {
+        message.success('Competitor updated successfully');
+        setEditModalVisible(false);
+        // Refresh the competitor list
+        loadCompetitors();
       } else {
-        message.warning(`Could not start menu extraction: ${menuResponse.data.error || 'Unknown error'}`);
-        setRefreshingMenu(false);
+        message.error('Failed to update competitor');
       }
-      
-    } catch (error: any) {
-      console.error('Error starting menu extraction:', error);
-      message.error(`Error starting menu extraction: ${error}`);
-      setRefreshingMenu(false);
-    }
-  };
-  
-  // Poll job status until completion
-  const pollJobStatus = async (jobId: string, reportId: string | number) => {
-    // Poll every 5 seconds with a maximum of 60 attempts (5 minutes)
-    let attempts = 0;
-    const maxAttempts = 60;
-    
-    const checkStatus = async () => {
-      try {
-        const statusResponse = await api.get(`jobs/${jobId}`);
-        console.log('Job status response:', statusResponse.data);
-        
-        if (statusResponse.data.status === 'completed') {
-          message.success('Menu extraction completed!');
-          // Fetch the menu items now that they've been extracted
-          await fetchStoredMenu(reportId);
-          setRefreshingMenu(false);
-          return true; // Done polling
-        } 
-        else if (statusResponse.data.status === 'failed') {
-          message.error(`Menu extraction failed: ${statusResponse.data.error || 'Unknown error'}`);
-          setRefreshingMenu(false);
-          return true; // Done polling
-        }
-        
-        // Continue polling if not done and not exceeded max attempts
-        attempts++;
-        if (attempts >= maxAttempts) {
-          message.warning('Menu extraction is taking longer than expected. Please check back later.');
-          setRefreshingMenu(false);
-          return true; // Stop polling
-        }
-        
-        return false; // Not done polling
-      } catch (error) {
-        console.error('Error checking job status:', error);
-        message.error('Failed to check extraction status');
-        setRefreshingMenu(false);
-        return true; // Stop polling due to error
-      }
-    };
-    
-    // Start polling
-    const poll = async () => {
-      const isDone = await checkStatus();
-      if (!isDone) {
-        setTimeout(poll, 5000); // Check again in 5 seconds
-      }
-    };
-    
-    await poll();
-  };
-  
-  // Fetch stored menu items for a competitor
-  const fetchStoredMenu = async (reportId: string | number) => {
-    try {
-      const response = await api.get(`gemini-competitors/get-stored-menu/${reportId}`);
-      
-      if (response.data.success && response.data.menu_items) {
-        setMenuItems(response.data.menu_items);
-      } else {
-        message.warning('No menu items found in the database');
-      }
-    } catch (error) {
-      console.error('Error fetching stored menu:', error);
-      message.error('Failed to fetch menu items from database');
+    } catch (err: any) {
+      console.error('Error updating competitor:', err);
+      message.error(err.response?.data?.detail || 'Failed to update competitor');
+    } finally {
+      setProcessing(false);
     }
   };
 
