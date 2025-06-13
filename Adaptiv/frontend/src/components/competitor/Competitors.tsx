@@ -690,14 +690,10 @@ const Competitors: React.FC = () => {
         
         // If we have a report_id that's not manually generated, update it on the server
         if (!editingCompetitor.report_id.startsWith('manual-')) {
-          await axios.put(
-            `/api/gemini-competitors/${editingCompetitor.report_id}`, 
-            values,
-            {
-              headers: {
-                'Authorization': `Bearer ${token}`
-              }
-            }
+          // Use the configured api service instead of direct axios
+          await api.put(
+            `gemini-competitors/${editingCompetitor.report_id}`, 
+            values
           );
         }
       }
@@ -883,14 +879,14 @@ const Competitors: React.FC = () => {
               try {
                 message.loading(`Fetching menu for ${comp.name}...`, 3);
                 console.log(`Fetching menu data for ${comp.name} (ID: ${comp.report_id})`);
-                console.log('Request URL:', `/api/gemini-competitors/fetch-menu/${comp.report_id}`);
+                console.log('Request URL:', `gemini-competitors/fetch-menu/${comp.report_id}`);
                 
                 // Call the fetch-menu endpoint for this competitor - IMPORTANT: This triggers backend menu extraction
-                const menuResponse = await axios.post(
-                  `/api/gemini-competitors/fetch-menu/${comp.report_id}`,
+                // Use the configured api service instead of direct axios
+                const menuResponse = await api.post(
+                  `gemini-competitors/fetch-menu/${comp.report_id}`,
                   { force_refresh: true },  // Force a fresh menu extraction
                   {
-                    headers: { 'Authorization': `Bearer ${token}` },
                     timeout: 30000 // 30 second timeout for each competitor
                   }
                 );
@@ -951,16 +947,12 @@ const Competitors: React.FC = () => {
       }
       
       // Update the competitor in the backend - correct endpoint for updating
-      const response = await axios.put(`/api/gemini-competitors/${editingCompetitor.report_id}`, 
+      // Use the configured api service instead of direct axios
+      const response = await api.put(`gemini-competitors/${editingCompetitor.report_id}`, 
         {
           ...values,
           report_id: editingCompetitor.report_id,
           selected: true // Ensure it stays selected (backend parameter is 'selected' not 'is_selected')
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
         }
       );
       
@@ -1005,14 +997,10 @@ const Competitors: React.FC = () => {
       setMenuLoading(true);
       message.info('Fetching the latest menu data...');
       
-      const extractResponse = await axios.post(
-        `/api/gemini-competitors/fetch-menu/${competitor.report_id}`,
-        {},
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        }
+      // Use the configured api service instead of direct axios
+      const extractResponse = await api.post(
+        `gemini-competitors/fetch-menu/${competitor.report_id}`,
+        {}
       );
       
       if (extractResponse.data.success && extractResponse.data.menu_items) {
@@ -1055,13 +1043,9 @@ const Competitors: React.FC = () => {
       }
       
       // Use the get-stored-menu endpoint to retrieve menu data
-      const response = await axios.get(
-        `/api/gemini-competitors/get-stored-menu/${competitor.report_id}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        }
+      // Use the configured api service instead of direct axios
+      const response = await api.get(
+        `gemini-competitors/get-stored-menu/${competitor.report_id}`
       );
       
       if (response.data.success && response.data.menu_items && response.data.menu_items.length > 0) {
@@ -1223,11 +1207,11 @@ const Competitors: React.FC = () => {
           
           try {
             // Call the fetch-menu endpoint to trigger menu extraction
-            const menuResponse = await axios.post(
-              `/api/gemini-competitors/fetch-menu/${newReportId}`,
+            // Use the configured api service instead of direct axios
+            const menuResponse = await api.post(
+              `gemini-competitors/fetch-menu/${newReportId}`,
               { force_refresh: true },  // Force a fresh menu extraction
               {
-                headers: { 'Authorization': `Bearer ${token}` },
                 timeout: 30000 // 30 second timeout
               }
             );
