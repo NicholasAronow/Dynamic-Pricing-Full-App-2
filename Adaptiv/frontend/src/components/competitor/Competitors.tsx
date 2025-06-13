@@ -995,29 +995,87 @@ const Competitors: React.FC = () => {
       }
       
       setMenuLoading(true);
-      message.info('Fetching the latest menu data...');
+      message.info('Initiating menu data refresh...');
       
-      // Use the configured api service instead of direct axios
-      const extractResponse = await api.post(
+      // Step 1: Initiate the menu fetch process
+      const initiateResponse = await api.post(
         `gemini-competitors/fetch-menu/${competitor.report_id}`,
         {}
       );
       
-      if (extractResponse.data.success && extractResponse.data.menu_items) {
-        setMenuItems(extractResponse.data.menu_items);
-        if (extractResponse.data.batch && extractResponse.data.batch.sync_timestamp) {
-          const date = new Date(extractResponse.data.batch.sync_timestamp);
-          message.success(`Menu updated! Latest data from ${date.toLocaleDateString()} ${date.toLocaleTimeString()}`);
-        } else {
-          message.success('Menu data refreshed successfully');
-        }
-      } else {
-        message.warning('Menu extraction completed but no items were found');
+      if (!initiateResponse.data.success) {
+        throw new Error(initiateResponse.data.error || 'Failed to initiate menu fetch');
       }
+      
+      // Step 2: Show notification that processing has started
+      const loadingMessage = message.loading({
+        content: 'Processing menu data... This may take a minute.',
+        duration: 0,
+      });
+      
+      // Step 3: Poll for status until complete
+      const pollStatus = async () => {
+        try {
+          const statusResponse = await api.get(
+            `gemini-competitors/fetch-status/${competitor.report_id}`
+          );
+          
+          const status = statusResponse.data.status;
+          
+          if (status === 'completed' && statusResponse.data.menu_items) {
+            // Success! We have the menu items
+            loadingMessage(); // Dismiss the loading message
+            setMenuItems(statusResponse.data.menu_items);
+            
+            if (statusResponse.data.batch && statusResponse.data.batch.sync_timestamp) {
+              const date = new Date(statusResponse.data.batch.sync_timestamp);
+              message.success(`Menu updated! Latest data from ${date.toLocaleDateString()} ${date.toLocaleTimeString()}`);
+            } else {
+              message.success('Menu data refreshed successfully');
+            }
+            
+            setMenuLoading(false);
+            return true;
+          } 
+          else if (status === 'failed') {
+            // Process failed
+            loadingMessage(); // Dismiss the loading message
+            throw new Error(statusResponse.data.error || 'Menu extraction failed');
+          }
+          else {
+            // Still processing, wait and try again
+            return false;
+          }
+        } catch (pollError) {
+          loadingMessage(); // Dismiss the loading message
+          throw pollError;
+        }
+      };
+      
+      // Poll every 3 seconds for up to 2 minutes
+      let attempts = 0;
+      const maxAttempts = 40; // 2 minutes (40 * 3 seconds)
+      
+      const poll = async () => {
+        if (attempts >= maxAttempts) {
+          loadingMessage(); // Dismiss the loading message
+          throw new Error('Menu extraction timed out after 2 minutes');
+        }
+        
+        const completed = await pollStatus();
+        
+        if (!completed) {
+          attempts++;
+          setTimeout(poll, 3000); // Check again in 3 seconds
+        }
+      };
+      
+      // Start polling
+      setTimeout(poll, 3000);
+      
     } catch (err: any) {
       console.error('Error refreshing menu data:', err);
-      message.error(err.response?.data?.detail || 'Failed to refresh menu data');
-    } finally {
+      message.error(err.response?.data?.detail || err.message || 'Failed to refresh menu data');
       setMenuLoading(false);
     }
   };
