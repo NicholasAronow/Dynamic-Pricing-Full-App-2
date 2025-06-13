@@ -58,8 +58,7 @@ def setup_jobs_table():
 
 def queue_menu_extraction(report_id, force_refresh=False):
     """Queue up a menu extraction job"""
-    # Import here to avoid circular imports
-    from gemini_competitor_search import extract_menu_items
+    # No need to import extract_menu_items, it's defined in this module
     
     logger.info(f"Queueing menu extraction job for report_id: {report_id}")
     
@@ -354,7 +353,8 @@ def extract_menu_in_background(report_id, force_refresh):
         # Update job status to processing
         update_job_status(db, report_id, "processing")
         
-        # Run the extraction
+        # Run the extraction - using our own internal function, not importing from gemini_competitor_search
+        # to avoid circular imports
         result = extract_menu_items(db, report_id, force_refresh)
         
         # Update job status to completed
