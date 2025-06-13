@@ -497,22 +497,6 @@ async def get_stored_competitor_menu(
         raise HTTPException(status_code=500, detail=f"Error retrieving stored menu: {str(e)}")
 
 
-# New menu extraction process state enum
-from enum import Enum
-import time
-
-class ExtractionStatus(str, Enum):
-    NOT_STARTED = "not_started"
-    FINDING_URLS = "finding_urls"
-    EXTRACTING_ITEMS = "extracting_items"
-    CONSOLIDATING = "consolidating"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-# In-memory store for extraction progress
-# In production, this should be moved to a persistent storage like Redis or a database
-extraction_processes = {}
-
 @gemini_competitor_router.post("/fetch-menu/{report_id}")
 async def fetch_competitor_menu(
     report_id: int,
@@ -520,11 +504,14 @@ async def fetch_competitor_menu(
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Start the menu extraction process and return immediately.
-    The client should poll the status endpoint to check for completion.
+    Full process endpoint that combines all three steps:
+    1. Find URLs
+    2. Extract menu from each URL
+    3. Consolidate data and save to database
     """
     try:
-        # Check if competitor exists and user has access
+        # Get competitor details first
+        # Check if the competitor has a specified menu URL
         competitor_report = db.query(models.CompetitorReport).filter(
             models.CompetitorReport.id == report_id,
             models.CompetitorReport.user_id == current_user.id
@@ -533,75 +520,16 @@ async def fetch_competitor_menu(
         if not competitor_report:
             raise HTTPException(status_code=404, detail="Competitor report not found")
         
-        # Generate a unique process ID for this extraction
-        import uuid
-        process_id = str(uuid.uuid4())
-        
-        # Initialize the extraction process state
-        extraction_processes[process_id] = {
-            "status": ExtractionStatus.NOT_STARTED,
-            "report_id": report_id,
-            "user_id": current_user.id,
-            "start_time": time.time(),
-            "urls": [],
-            "menu_items": [],
-            "result": {},
-            "error": None
-        }
-        
-        # Start the extraction process in background (non-blocking)
-        import asyncio
-        asyncio.create_task(process_menu_extraction(process_id, report_id, current_user.id))
-        
-        return {
-            "success": True,
-            "message": "Menu extraction process started",
-            "process_id": process_id
-        }
-        
-    except Exception as e:
-        return {
-            "success": False,
-            "error": f"Failed to start menu extraction: {str(e)}"
-        }
-
-async def process_menu_extraction(process_id: str, report_id: int, user_id: int):
-    """
-    Background process to handle the full menu extraction workflow.
-    Updates the extraction_processes dictionary with progress and results.
-    """
-    try:
-        # Get a new DB session for this background task
-        db = next(get_db())
-        
-        # Get current user (for function compatibility)
-        current_user = db.query(models.User).filter(models.User.id == user_id).first()
-        if not current_user:
-            extraction_processes[process_id]["status"] = ExtractionStatus.FAILED
-            extraction_processes[process_id]["error"] = "User not found"
-            return
-            
-        # Get competitor details
-        competitor_report = db.query(models.CompetitorReport).filter(
-            models.CompetitorReport.id == report_id,
-            models.CompetitorReport.user_id == user_id
-        ).first()
-        
-        if not competitor_report:
-            extraction_processes[process_id]["status"] = ExtractionStatus.FAILED
-            extraction_processes[process_id]["error"] = "Competitor report not found"
-            return
-            
         competitor_data = competitor_report.competitor_data
+        print(f"DEBUG: competitor_data = {competitor_data}")
         competitor_name = competitor_data.get("name")
         competitor_category = competitor_data.get("category", "")
         direct_menu_url = competitor_data.get("menu_url")
+        print(f"DEBUG: direct_menu_url = {direct_menu_url}")
         
-        # STEP 1: Find URLs
-        extraction_processes[process_id]["status"] = ExtractionStatus.FINDING_URLS
-        
+        # If a direct menu URL is provided, use that instead of searching
         if direct_menu_url:
-            # Use direct menu URL if provided
+            print(f"Using direct menu URL: {direct_menu_url}")
             source_urls = [{"url": direct_menu_url, "confidence": "high"}]
             competitor = {
                 "name": competitor_name,
@@ -609,26 +537,25 @@ async def process_menu_extraction(process_id: str, report_id: int, user_id: int)
                 "report_id": report_id
             }
         else:
-            # Find menu URLs
+            # STEP 1: Find menu URLs if no direct URL is provided
             urls_response = await find_competitor_menu_urls(report_id, db, current_user)
             
             if not urls_response.get("success") or not urls_response.get("urls"):
-                extraction_processes[process_id]["status"] = ExtractionStatus.FAILED
-                extraction_processes[process_id]["error"] = "Could not find any online menu sources"
-                return
+                return {
+                    "success": False,
+                    "error": "Could not find any online menu sources for this competitor",
+                    "competitor": urls_response.get("competitor"),
+                    "menu_items": []
+                }
                 
+            # Get competitor details from the response
             competitor = urls_response.get("competitor")
             competitor_name = competitor.get("name")
             competitor_category = competitor.get("category", "")
             source_urls = urls_response.get("urls")
-        
-        # Update process state with found URLs
-        extraction_processes[process_id]["urls"] = source_urls
-        
+            
         # STEP 2: Extract menu items from each URL
-        extraction_processes[process_id]["status"] = ExtractionStatus.EXTRACTING_ITEMS
         all_menu_items = []
-        
         for source in source_urls:
             url = source.get("url")
             if not url:
@@ -642,18 +569,16 @@ async def process_menu_extraction(process_id: str, report_id: int, user_id: int)
             
             if url_items_response.get("success") and url_items_response.get("menu_items"):
                 all_menu_items.extend(url_items_response.get("menu_items"))
-        
-        if not all_menu_items:
-            extraction_processes[process_id]["status"] = ExtractionStatus.FAILED
-            extraction_processes[process_id]["error"] = "No menu items could be extracted from the found URLs"
-            return
             
-        # Update process state with found menu items
-        extraction_processes[process_id]["menu_items"] = all_menu_items
-        
-        # STEP 3: Consolidate and save to database
-        extraction_processes[process_id]["status"] = ExtractionStatus.CONSOLIDATING
-        
+        if not all_menu_items:
+            return {
+                "success": False,
+                "error": "No menu items could be extracted from the found URLs",
+                "competitor": competitor,
+                "menu_items": []
+            }
+            
+        # STEP 3: Consolidate menu data and save to database
         consolidated_response = await consolidate_menu(
             report_id=report_id,
             menu_items=all_menu_items,
@@ -661,108 +586,10 @@ async def process_menu_extraction(process_id: str, report_id: int, user_id: int)
             current_user=current_user
         )
         
-        # Update process with final result
-        extraction_processes[process_id]["result"] = consolidated_response
-        extraction_processes[process_id]["status"] = ExtractionStatus.COMPLETED
-        
-        # Cleanup old processes after some time
-        # In production, a proper cleanup job should be implemented
-        import asyncio
-        asyncio.create_task(cleanup_old_process(process_id, delay_seconds=3600))  # 1 hour expiration
+        return consolidated_response
         
     except Exception as e:
-        print(f"Error in menu extraction process: {str(e)}")
-        extraction_processes[process_id]["status"] = ExtractionStatus.FAILED
-        extraction_processes[process_id]["error"] = str(e)
-
-async def cleanup_old_process(process_id: str, delay_seconds: int = 3600):
-    """
-    Cleanup a completed process after some delay
-    """
-    import asyncio
-    await asyncio.sleep(delay_seconds)
-    if process_id in extraction_processes:
-        del extraction_processes[process_id]
-
-@gemini_competitor_router.get("/fetch-menu/status/{process_id}")
-async def check_menu_extraction_status(
-    process_id: str,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
-):
-    """
-    Check the status of an ongoing menu extraction process
-    """
-    if process_id not in extraction_processes:
-        raise HTTPException(status_code=404, detail="Process not found or expired")
-        
-    process = extraction_processes[process_id]
-    
-    # Security check: only the user who started the process can check it
-    if process.get("user_id") != current_user.id:
-        raise HTTPException(status_code=403, detail="You don't have permission to access this process")
-    
-    status = process.get("status")
-    elapsed_time = round(time.time() - process.get("start_time", time.time()), 2)
-    
-    response = {
-        "process_id": process_id,
-        "status": status,
-        "elapsed_seconds": elapsed_time,
-    }
-    
-    # Include error if failed
-    if status == ExtractionStatus.FAILED and process.get("error"):
-        response["error"] = process.get("error")
-        
-    # Include result data if complete
-    if status == ExtractionStatus.COMPLETED:
-        response["result"] = process.get("result")
-        
-    # Include progress information
-    if status in [ExtractionStatus.FINDING_URLS, ExtractionStatus.EXTRACTING_ITEMS, ExtractionStatus.CONSOLIDATING]:
-        response["progress_info"] = {
-            "urls_found": len(process.get("urls", [])),
-            "menu_items_found": len(process.get("menu_items", []))
-        }
-        
-    return response
-
-@gemini_competitor_router.get("/fetch-menu/result/{process_id}")
-async def get_menu_extraction_result(
-    process_id: str,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
-):
-    """
-    Get the final result of a completed menu extraction process
-    """
-    if process_id not in extraction_processes:
-        raise HTTPException(status_code=404, detail="Process not found or expired")
-        
-    process = extraction_processes[process_id]
-    
-    # Security check: only the user who started the process can get the result
-    if process.get("user_id") != current_user.id:
-        raise HTTPException(status_code=403, detail="You don't have permission to access this process")
-    
-    status = process.get("status")
-    
-    if status == ExtractionStatus.FAILED:
-        return {
-            "success": False,
-            "error": process.get("error", "Unknown error occurred")
-        }
-        
-    if status != ExtractionStatus.COMPLETED:
-        return {
-            "success": False,
-            "error": "Process not completed yet",
-            "current_status": status
-        }
-    
-    # Return the consolidated result
-    return process.get("result")
+        raise HTTPException(status_code=500, detail=f"Error in menu fetch process: {str(e)}")
 
 @gemini_competitor_router.post("/manually-add")
 async def add_competitor_manually(
