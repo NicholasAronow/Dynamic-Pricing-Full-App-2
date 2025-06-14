@@ -88,7 +88,7 @@ def start_scheduler():
 
 @app.on_event("shutdown")
 def shutdown_scheduler():
-    if scheduler.running:
+    if scheduler.is_running:
         scheduler.shutdown()
 
 if __name__ == "__main__":

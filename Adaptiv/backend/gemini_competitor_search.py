@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Body, Query
+from fastapi import APIRouter, Depends, HTTPException, Body, Query, BackgroundTasks
 from sqlalchemy.orm import Session, attributes
 from sqlalchemy import desc
 from typing import List, Dict, Any
@@ -10,11 +10,12 @@ import json
 from datetime import datetime
 import google.generativeai as genai
 from dotenv import load_dotenv
+from celery.result import AsyncResult
 # Load environment variables
 load_dotenv()
 
 # Configure Google Gemini API
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_API_KEY = "AIzaSyAxzLp6amQK1CJ87oD_eZ8QBpFYPDbXyUM"
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
@@ -504,7 +505,121 @@ async def fetch_competitor_menu(
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Full process endpoint that combines all three steps:
+    Dispatch a background task to fetch competitor menu
+    """
+    try:
+        # Import the task function locally to avoid circular imports
+        from tasks import fetch_competitor_menu_task
+        
+        # Get competitor details first
+        competitor_report = db.query(models.CompetitorReport).filter(
+            models.CompetitorReport.id == report_id,
+            models.CompetitorReport.user_id == current_user.id
+        ).first()
+        
+        if not competitor_report:
+            raise HTTPException(status_code=404, detail="Competitor report not found")
+        
+        competitor_data = competitor_report.competitor_data
+        competitor_name = competitor_data.get("name")
+        
+        # Update the metadata to store task status
+        if not competitor_report.metadata or not isinstance(competitor_report.metadata, dict):
+            competitor_report.metadata = {}
+        
+        # Set initial task status
+        competitor_report.metadata["menu_fetch_status"] = "queued"
+        db.commit()
+        
+        # Launch the Celery task
+        task = fetch_competitor_menu_task.delay(report_id, current_user.id)
+        
+        # Store the task ID in the competitor report
+        competitor_report.metadata["menu_fetch_task_id"] = task.id
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Menu fetch task has been queued",
+            "task_id": task.id,
+            "competitor_name": competitor_name,
+            "report_id": report_id
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error starting menu fetch task: {str(e)}")
+
+
+@gemini_competitor_router.get("/fetch-menu-status/{report_id}")
+async def fetch_menu_status(
+    report_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Check the status of a menu fetch task
+    """
+    try:
+        # Import the task function locally to avoid circular imports
+        from tasks import get_menu_fetch_status_task
+        
+        competitor_report = db.query(models.CompetitorReport).filter(
+            models.CompetitorReport.id == report_id,
+            models.CompetitorReport.user_id == current_user.id
+        ).first()
+        
+        if not competitor_report:
+            raise HTTPException(status_code=404, detail="Competitor report not found")
+        
+        # Get task status from metadata
+        metadata = competitor_report.metadata or {}
+        status = metadata.get("menu_fetch_status", "not_started")
+        task_id = metadata.get("menu_fetch_task_id")
+        error = metadata.get("menu_fetch_error")
+        items_count = metadata.get("menu_items_count", 0)
+        
+        # Check Celery task status if we have a task ID
+        task_status = "unknown"
+        if task_id:
+            result = AsyncResult(task_id)
+            task_status = result.status
+        
+        # If the task is complete, update the UI with menu items count
+        if status == "completed":
+            # Get the menu batches for the competitor
+            batches_response = await get_competitor_menu_batches(report_id, db, current_user)
+            batches = batches_response.get("batches", [])
+            latest_batch = batches[0] if batches else None
+            
+            return {
+                "success": True,
+                "status": status,
+                "celery_status": task_status,
+                "menu_items_count": items_count,
+                "competitor_name": competitor_report.competitor_data.get("name", ""),
+                "latest_batch": latest_batch
+            }
+        
+        return {
+            "success": True,
+            "status": status,
+            "celery_status": task_status,
+            "error": error,
+            "competitor_name": competitor_report.competitor_data.get("name", "")
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error checking menu fetch status: {str(e)}")
+
+
+@gemini_competitor_router.post("/synchronous-fetch-menu/{report_id}")
+async def synchronous_fetch_menu(
+    report_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Full synchronous process endpoint that combines all three steps (legacy method):
     1. Find URLs
     2. Extract menu from each URL
     3. Consolidate data and save to database

@@ -2,6 +2,10 @@
 fastapi>=0.100.0  # Versions 0.100.0+ support Pydantic v2
 uvicorn>=0.23.0
 
+# Task queue and message broker
+celery>=5.5.3
+redis>=6.2.0
+
 # Data validation and settings management
 pydantic>=2.10.0  # Required by openai-agents
 email-validator>=2.0.0

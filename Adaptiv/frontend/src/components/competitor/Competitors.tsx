@@ -102,6 +102,9 @@ const Competitors: React.FC = () => {
   
   // State for menu viewing
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  // State for background tasks
+  const [menuFetchStatus, setMenuFetchStatus] = useState<{[key: string]: string}>({});
+  const [pollingIntervals, setPollingIntervals] = useState<{[key: string]: any}>({});
   const [menuLoading, setMenuLoading] = useState<boolean>(false);
   const [menuVisible, setMenuVisible] = useState<boolean>(false);
   const [selectedCompetitorForMenu, setSelectedCompetitorForMenu] = useState<Competitor | null>(null);
@@ -1197,43 +1200,50 @@ const Competitors: React.FC = () => {
         addForm.resetFields();
         
         // If we have a valid response with a report_id and the competitor has a menu URL, 
-        // trigger the menu fetch process
+        // trigger the background menu fetch process
         if (response.data.competitor && response.data.competitor.report_id && values.menu_url) {
           const newReportId = response.data.competitor.report_id;
           const competitorName = values.name;
           
-          message.loading(`Fetching menu for ${competitorName}...`, 3);
-          console.log(`Fetching menu data for ${competitorName} (ID: ${newReportId})`);
+          console.log(`Starting background menu fetch for ${competitorName} (ID: ${newReportId})`);
           
           try {
-            // Call the fetch-menu endpoint to trigger menu extraction
-            // Use the configured api service instead of direct axios
+            // Update status to indicate we're starting
+            setMenuFetchStatus(prev => ({
+              ...prev,
+              [newReportId]: 'starting'
+            }));
+            
+            // Call the fetch-menu endpoint to trigger background task
             const menuResponse = await api.post(
-              `gemini-competitors/fetch-menu/${newReportId}`,
-              { force_refresh: true },  // Force a fresh menu extraction
-              {
-                timeout: 30000 // 30 second timeout
-              }
+              `gemini-competitors/fetch-menu/${newReportId}`
             );
             
-            console.log(`Menu fetch response for ${competitorName}:`, menuResponse.data);
-            message.success(`Successfully fetched menu for ${competitorName}!`, 3);
-            
-            // Add a slight delay to ensure the backend has processed the menu data
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            // Update distance if available in the response
-            if (menuResponse.data && menuResponse.data.competitor && 
-                menuResponse.data.competitor.distance_km !== undefined) {
-              console.log(`Got distance for ${competitorName}: ${menuResponse.data.competitor.distance_km} km`);
+            if (menuResponse.data.success) {
+              console.log(`Menu fetch queued for ${competitorName}:`, menuResponse.data);
+              message.info(`Menu fetch started for ${competitorName}. This may take a few minutes.`);
+              
+              // Set up polling to check status
+              const intervalId = setInterval(() => checkMenuFetchStatus(newReportId), 5000);
+              
+              // Store the interval ID
+              setPollingIntervals(prev => ({
+                ...prev,
+                [newReportId]: intervalId
+              }));
+              
+              // Update status
+              setMenuFetchStatus(prev => ({
+                ...prev,
+                [newReportId]: 'queued'
+              }));
+            } else {
+              console.error(`Error starting menu fetch for ${competitorName}:`, menuResponse.data);
+              message.error(`Could not start menu fetch: ${menuResponse.data.error || 'Unknown error'}`);
             }
-            
-            // Now refresh competitor list to get updated data including distance and menu items
-            await loadCompetitors();
-            return; // Skip the second loadCompetitors call below
           } catch (menuError: any) {
-            console.error(`Error fetching menu for ${competitorName}:`, menuError);
-            message.error(`Could not fetch menu: ${menuError.response?.data?.detail || menuError.message}`, 3);
+            console.error(`Error starting menu fetch for ${competitorName}:`, menuError);
+            message.error(`Could not start menu fetch: ${menuError.response?.data?.detail || menuError.message}`);
           }
         }
         
@@ -1288,6 +1298,149 @@ const Competitors: React.FC = () => {
     });
   };
 
+  const viewMenu = async (report_id: string) => {
+    try {
+      setMenuLoading(true);
+      setMenuVisible(true);
+      
+      // Find the competitor object
+      const competitor = competitors.find(comp => comp.report_id === report_id);
+      if (competitor) {
+        setSelectedCompetitorForMenu(competitor);
+      }
+      
+      // Use the stored menu endpoint instead of fetching again
+      const response = await api.get(`gemini-competitors/get-stored-menu/${report_id}`);
+      
+      if (response.data.success && response.data.menu_items) {
+        setMenuItems(response.data.menu_items);
+      } else {
+        setMenuItems([]);
+      }
+    } catch (err) {
+      console.error('Error fetching menu:', err);
+      message.error('Failed to fetch menu items');
+      setMenuItems([]);
+    } finally {
+      setMenuLoading(false);
+    }
+  };
+
+  // Function to check menu fetch status
+  const checkMenuFetchStatus = async (report_id: string) => {
+    try {
+      const response = await api.get(`gemini-competitors/fetch-menu-status/${report_id}`);
+      
+      if (response.data.success) {
+        const status = response.data.status;
+        
+        // Update the status in state
+        setMenuFetchStatus(prev => ({
+          ...prev,
+          [report_id]: status
+        }));
+        
+        // If the task is completed or failed, stop polling
+        if (status === 'completed' || status === 'failed') {
+          if (pollingIntervals[report_id]) {
+            clearInterval(pollingIntervals[report_id]);
+            setPollingIntervals(prev => {
+              const newIntervals = {...prev};
+              delete newIntervals[report_id];
+              return newIntervals;
+            });
+          }
+          
+          // If completed, refresh the competitors list to get updated data
+          if (status === 'completed') {
+            loadCompetitors();
+            message.success(`Menu fetched successfully for ${response.data.competitor_name}`);
+          } else if (status === 'failed') {
+            message.error(`Menu fetch failed for ${response.data.competitor_name}: ${response.data.error || 'Unknown error'}`);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error checking menu fetch status:', err);
+      // Don't show error message for each poll attempt
+    }
+  };
+
+  const startMenuFetch = async (report_id: string) => {
+    try {
+      setProcessing(true);
+      
+      // Find the competitor in our list
+      const competitor = competitors.find(comp => comp.report_id === report_id);
+      if (!competitor) {
+        message.error('Competitor not found');
+        return;
+      }
+      
+      // Update status to indicate we're starting
+      setMenuFetchStatus(prev => ({
+        ...prev,
+        [report_id]: 'starting'
+      }));
+      
+      try {
+        // Call the fetch-menu endpoint to start the background task
+        const response = await api.post(`gemini-competitors/fetch-menu/${report_id}`);
+        
+        if (response.data.success) {
+          message.info(`Menu fetch started for ${competitor.name}. This may take a few minutes.`);
+          
+          // Set up polling to check status
+          const intervalId = setInterval(() => checkMenuFetchStatus(report_id), 5000);
+          
+          // Store the interval ID
+          setPollingIntervals(prev => ({
+            ...prev,
+            [report_id]: intervalId
+          }));
+          
+          // Update status
+          setMenuFetchStatus(prev => ({
+            ...prev,
+            [report_id]: 'queued'
+          }));
+          
+        } else {
+          message.error(`${response.data.error || 'Failed to start menu fetch'}`);
+          setMenuFetchStatus(prev => ({
+            ...prev,
+            [report_id]: 'failed'
+          }));
+        }
+      } catch (innerErr: any) {
+        message.error(innerErr.response?.data?.detail || 'Failed to start menu fetch');
+        setMenuFetchStatus(prev => ({
+          ...prev,
+          [report_id]: 'failed'
+        }));
+      }
+    } catch (err) {
+      console.error('Error starting menu fetch:', err);
+      message.error('Failed to start menu fetch');
+      setMenuFetchStatus(prev => ({
+        ...prev,
+        [report_id]: 'failed'
+      }));
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // Clean up intervals on component unmount
+  useEffect(() => {
+    return () => {
+      // Clear all polling intervals
+      Object.values(pollingIntervals).forEach(interval => {
+        clearInterval(interval as number);
+      });
+    };
+  }, [pollingIntervals]);
+
   return (
     <div className="competitors-page">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -1332,12 +1485,12 @@ const Competitors: React.FC = () => {
             <span>{selectedCompetitorForMenu ? `${selectedCompetitorForMenu.name} Menu` : 'Menu'}</span>
             {selectedCompetitorForMenu && (
               <Button 
-                type="primary" 
-                icon={<SyncOutlined />} 
-                onClick={() => refreshMenuData(selectedCompetitorForMenu)}
-                loading={menuLoading}
+                icon={<SyncOutlined spin={menuFetchStatus[selectedCompetitorForMenu.report_id] === 'processing' || menuFetchStatus[selectedCompetitorForMenu.report_id] === 'queued'} />}
+                onClick={() => startMenuFetch(selectedCompetitorForMenu.report_id)}
+                loading={processing || menuFetchStatus[selectedCompetitorForMenu.report_id] === 'starting'}
+                disabled={processing || ['starting', 'processing', 'queued'].includes(menuFetchStatus[selectedCompetitorForMenu.report_id] || '')}
               >
-                Refresh Menu
+                {menuFetchStatus[selectedCompetitorForMenu.report_id] === 'processing' || menuFetchStatus[selectedCompetitorForMenu.report_id] === 'queued' ? 'Fetching...' : 'Fetch Menu'}
               </Button>
             )}
           </div>
