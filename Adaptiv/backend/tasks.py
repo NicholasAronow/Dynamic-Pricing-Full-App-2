@@ -40,6 +40,7 @@ def fetch_competitor_menu_task(report_id: int, user_id: int) -> Dict[str, Any]:
     3. Consolidate data and save to database
     """
     try:
+        print(f"DEBUG: Starting fetch_competitor_menu_task with report_id={report_id}, user_id={user_id}")
         # For Celery workers, we need to make sure the current directory is in the Python path
         import sys
         import os
@@ -62,10 +63,37 @@ def fetch_competitor_menu_task(report_id: int, user_id: int) -> Dict[str, Any]:
         current_user = UserProxy(user_id)
         
         # Get competitor details first
-        competitor_report = db.query(models.CompetitorReport).filter(
-            models.CompetitorReport.id == report_id,
-            models.CompetitorReport.user_id == user_id
-        ).first()
+        print(f"DEBUG: Querying database for CompetitorReport with id={report_id} and user_id={user_id}")
+        try:
+            # First check if the report exists at all, regardless of user_id
+            any_report = db.query(models.CompetitorReport).filter(
+                models.CompetitorReport.id == report_id
+            ).first()
+            
+            if any_report:
+                print(f"DEBUG: Found a report with id={report_id}, but it belongs to user_id={any_report.user_id}")
+            else:
+                print(f"DEBUG: No report found with id={report_id} at all")
+                
+            # Check if any reports exist for this user
+            user_reports = db.query(models.CompetitorReport).filter(
+                models.CompetitorReport.user_id == user_id
+            ).all()
+            
+            print(f"DEBUG: User {user_id} has {len(user_reports)} reports in the database")
+            if user_reports:
+                print(f"DEBUG: Available report IDs for user {user_id}: {[r.id for r in user_reports]}")
+            
+            # Now try the original query
+            competitor_report = db.query(models.CompetitorReport).filter(
+                models.CompetitorReport.id == report_id,
+                models.CompetitorReport.user_id == user_id
+            ).first()
+            
+            print(f"DEBUG: Query result for specific report: {competitor_report}")
+        except Exception as e:
+            print(f"DEBUG: Exception during database query: {str(e)}")
+            raise
         
         if not competitor_report:
             db.close()
