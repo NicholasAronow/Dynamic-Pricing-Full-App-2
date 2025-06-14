@@ -21,8 +21,8 @@ celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
-    timezone="UTC",
-    enable_utc=True,
+    timezone="America/New_York",  # Eastern Time Zone (EST/EDT)
+    enable_utc=False,  # Don't use UTC
     worker_concurrency=2,  # Adjust based on your server capacity
     task_track_started=True,
     task_time_limit=600,    # 10 minutes timeout for tasks
