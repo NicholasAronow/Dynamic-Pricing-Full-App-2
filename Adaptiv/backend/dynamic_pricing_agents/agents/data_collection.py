@@ -77,9 +77,6 @@ class DataCollectionAgent(BaseAgent):
             self.logger.info("Collecting competitor data...")
             competitor_data = self._collect_competitor_data_with_memory(db, user_id, memory_context)
             
-            self.logger.info("Collecting market data...")
-            market_data = self._collect_market_data(db, user_id)
-            
             # Get menu items
             menu_items = self._get_menu_items(db, user_id)
             
@@ -89,7 +86,6 @@ class DataCollectionAgent(BaseAgent):
                 "pos_data": pos_data,
                 "price_history": price_history,
                 "competitor_data": competitor_data,
-                "market_data": market_data
             }, previous_snapshots)
             
             # Generate recommendations using memory
@@ -125,7 +121,6 @@ class DataCollectionAgent(BaseAgent):
                     "item_name": item_name,
                     "sales_momentum": momentum_data,
                     "price_elasticity": elasticity_data,
-                    "correlations": correlation_data,
                     "seasonality": seasonality_data
                 }
                 
@@ -138,7 +133,6 @@ class DataCollectionAgent(BaseAgent):
                 "pos_data": pos_data,
                 "price_history": price_history,
                 "competitor_data": competitor_data,
-                "market_data": market_data,
                 "data_quality": data_quality,
                 "recommendations": recommendations,
                 "quantitative_insights": quantitative_insights,
@@ -260,70 +254,56 @@ class DataCollectionAgent(BaseAgent):
         }
     
     def _collect_price_history(self, db: Session, user_id: int) -> Dict[str, Any]:
-        """Collect historical price change data based on orders"""
-        # Get orders from the past 180 days
+        """Collect historical price change data based on orders using a more efficient approach"""
         start_date = datetime.now(timezone.utc) - timedelta(days=180)
-        orders = db.query(models.Order).filter(
+        
+        # Use a single join query to get all the data we need in one go
+        query = db.query(
+            models.OrderItem.item_id,
+            models.OrderItem.unit_price,
+            models.Order.order_date,
+            models.Item.name.label('item_name')
+        ).join(
+            models.Order, models.OrderItem.order_id == models.Order.id
+        ).join(
+            models.Item, models.OrderItem.item_id == models.Item.id
+        ).filter(
             models.Order.user_id == user_id,
             models.Order.order_date >= start_date
-        ).order_by(models.Order.order_date).all()
+        ).order_by(
+            models.OrderItem.item_id,
+            models.Order.order_date
+        ).all()
         
-        # Get all order items to analyze price changes
-        order_items = []
-        for order in orders:
-            items = db.query(models.OrderItem).filter(
-                models.OrderItem.order_id == order.id
-            ).all()
-            for item in items:
-                item_data = {
-                    "item_id": item.item_id,
-                    "price": float(item.price_at_time),
-                    "order_date": order.order_date
-                }
-                order_items.append(item_data)
-        
-        # Track price changes by item
-        price_history = {}
+        # Process the results in a single pass
         price_changes = []
+        current_item_id = None
+        last_price = None
         
-        # Group order items by item_id
-        items_by_id = {}
-        for item in order_items:
-            if item["item_id"] not in items_by_id:
-                items_by_id[item["item_id"]] = []
-            items_by_id[item["item_id"]].append(item)
-        
-        # Sort each item's orders by date
-        for item_id, items in items_by_id.items():
-            sorted_items = sorted(items, key=lambda x: x["order_date"])
-            last_price = None
+        for record in query:
+            item_id = record.item_id
+            price = float(record.unit_price)
+            order_date = record.order_date
+            item_name = record.item_name
             
-            for item in sorted_items:
-                current_price = item["price"]
-                if last_price is not None and abs(current_price - last_price) > 0.001:  # Small epsilon for float comparison
-                    # Price change detected
-                    change = {
-                        "item_id": item_id,
-                        "old_price": last_price,
-                        "new_price": current_price,
-                        "changed_at": item["order_date"].isoformat(),
-                        "reason": "Detected from order history"
-                    }
-                    price_changes.append(change)
+            # If we're on a new item, reset the tracking
+            if item_id != current_item_id:
+                current_item_id = item_id
+                last_price = price
+                continue
                 
-                last_price = current_price
-        
-        # Get item names for reference
-        item_names = {}
-        items = db.query(models.Item).filter(models.Item.user_id == user_id).all()
-        for item in items:
-            item_names[item.id] = item.name
-        
-        # Add item names to changes for clarity
-        for change in price_changes:
-            item_id = change["item_id"]
-            if item_id in item_names:
-                change["item_name"] = item_names[item_id]
+            # Check for price change
+            if abs(price - last_price) > 0.001:  # Small epsilon for float comparison
+                change = {
+                    "item_id": item_id,
+                    "item_name": item_name,
+                    "old_price": last_price,
+                    "new_price": price,
+                    "changed_at": order_date.isoformat(),
+                    "reason": "Detected from order history"
+                }
+                price_changes.append(change)
+                last_price = price
         
         return {
             "changes": price_changes,
@@ -339,15 +319,34 @@ class DataCollectionAgent(BaseAgent):
             DataCollectionSnapshot.user_id == user_id
         ).order_by(desc(DataCollectionSnapshot.snapshot_date)).limit(limit).all()
     
-    def _collect_competitor_data_with_memory(self, db: Session, user_id: int, 
-                                           memory_context: Dict[str, Any]) -> Dict[str, Any]:
-        """Collect competitor pricing data with historical tracking"""
+    def _collect_competitor_data_with_memory(self, db: Session, user_id: int, memory_context: Dict[str, Any]) -> Dict[str, Any]:
+        """Collect competitor pricing data with historical tracking using selected competitors from CompetitorReport"""
         self.logger.info(f"Collecting competitor data with memory for user {user_id}")
         
-        # Get current competitor items
-        current_competitor_items = db.query(models.CompetitorItem).all()
+        # Get selected competitor reports from the database
+        competitor_reports = db.query(models.CompetitorReport).filter(
+            models.CompetitorReport.user_id == user_id,
+            models.CompetitorReport.is_selected == True  # Only get selected competitors
+        ).order_by(desc(models.CompetitorReport.created_at)).all()
         
-        self.logger.info(f"Found {len(current_competitor_items)} competitor items")
+        self.logger.info(f"Found {len(competitor_reports)} selected competitor reports")
+        
+        # Extract competitors data from reports
+        competitors = []
+        for report in competitor_reports:
+            competitor_data = report.competitor_data
+            if isinstance(competitor_data, dict) and 'name' in competitor_data:
+                competitors.append({
+                    "name": competitor_data.get('name'),
+                    "address": competitor_data.get('address', ''),
+                    "category": competitor_data.get('category', ''),
+                    "report_id": report.id
+                })
+        
+        # Get our menu items for matching
+        our_menu_items = db.query(models.Item).filter(models.Item.user_id == user_id).all()
+        our_item_names = [item.name.lower() for item in our_menu_items]
+        self.logger.info(f"Found {len(our_menu_items)} menu items for matching")
         
         # Get historical competitor prices for comparison
         historical_prices = self._get_historical_competitor_prices(db, user_id, days_back=30)
@@ -356,61 +355,118 @@ class DataCollectionAgent(BaseAgent):
         price_changes = []
         competitors_dict = {}
         
-        for item in current_competitor_items:
-            # Save to history
-            history_entry = CompetitorPriceHistory(
-                user_id=user_id,
-                competitor_name=item.competitor_name,
-                item_name=item.item_name,
-                price=float(item.price) if hasattr(item, 'price') else 0.0,
-                category=item.category,
-                similarity_score=float(item.similarity_score) if item.similarity_score else None,
-                captured_at=datetime.now(timezone.utc)
-            )
+        # Process each competitor
+        for competitor in competitors:
+            competitor_name = competitor["name"]
             
-            # Check for price changes
-            historical_price = historical_prices.get(
-                (item.competitor_name, item.item_name), {}
-            ).get('price')
+            # Get the latest batch of menu items for this competitor
+            latest_batch = db.query(models.CompetitorItem.batch_id, 
+                                     func.max(models.CompetitorItem.sync_timestamp).label('latest'))\
+                .filter(models.CompetitorItem.competitor_name == competitor_name)\
+                .group_by(models.CompetitorItem.batch_id)\
+                .order_by(desc('latest')).first()
             
-            if historical_price and historical_price != history_entry.price:
-                price_change = history_entry.price - historical_price
-                # Protect against division by zero
-                if historical_price > 0:
-                    percent_change = (price_change / historical_price) * 100
-                else:
-                    percent_change = 0 if price_change == 0 else 100
+            if not latest_batch:
+                continue  # Skip if no menu items found
                 
-                history_entry.price_change_from_last = price_change
-                history_entry.percent_change_from_last = percent_change
-                
-                price_changes.append({
-                    "competitor": item.competitor_name,
-                    "item": item.item_name,
-                    "old_price": historical_price,
-                    "new_price": history_entry.price,
-                    "change_percent": percent_change
-                })
+            latest_batch_id = latest_batch[0]
             
-            db.add(history_entry)
+            # Get all menu items in the latest batch for this competitor
+            menu_items = db.query(models.CompetitorItem).filter(
+                models.CompetitorItem.competitor_name == competitor_name,
+                models.CompetitorItem.batch_id == latest_batch_id
+            ).all()
             
-            # Build competitor dictionary
-            if item.competitor_name not in competitors_dict:
-                competitors_dict[item.competitor_name] = {
-                    "name": item.competitor_name,
+            self.logger.info(f"Found {len(menu_items)} menu items for {competitor_name}")
+            
+            # Add competitor info to the dictionary
+            if competitor_name not in competitors_dict:
+                competitors_dict[competitor_name] = {
+                    "name": competitor_name,
+                    "address": competitor["address"],
+                    "category": competitor["category"],
                     "items": []
                 }
             
-            competitors_dict[item.competitor_name]["items"].append({
-                "name": item.item_name,
-                "price": float(item.price) if hasattr(item, 'price') else 0.0,
-                "category": item.category,
-                "similarity_score": float(item.similarity_score) if item.similarity_score else None,
-                "last_updated": item.updated_at.isoformat() if item.updated_at else item.created_at.isoformat(),
-                "price_trend": self._get_price_trend(
-                    historical_prices.get((item.competitor_name, item.item_name), {})
-                )
-            })
+            # Helper function for fuzzy matching
+            def is_item_match(comp_item_name, our_items):
+                """Check if competitor item matches any of our items using fuzzy matching"""
+                comp_words = comp_item_name.lower().split()
+                
+                for our_item_name in our_items:
+                    our_words = our_item_name.split()
+                    
+                    matched_words = 0
+                    for our_word in our_words:
+                        if any(comp_word.find(our_word) >= 0 or our_word.find(comp_word) >= 0 
+                               for comp_word in comp_words):
+                            matched_words += 1
+                    
+                    # Consider similar if 70% of words match (same threshold as frontend)
+                    match_ratio = matched_words / max(len(our_words), len(comp_words))
+                    if match_ratio >= 0.7:
+                        return True
+                        
+                return False
+            
+            # Process each menu item - only include items that match with our menu
+            matching_items = []
+            for item in menu_items:
+                # Check if item matches any of our menu items
+                if is_item_match(item.item_name, our_item_names):
+                    matching_items.append(item)
+                    
+                    # Save to price history
+                    history_entry = CompetitorPriceHistory(
+                        user_id=user_id,
+                        competitor_name=competitor_name,
+                        item_name=item.item_name,
+                        price=float(item.price),
+                        category=item.category,
+                        similarity_score=float(item.similarity_score) if item.similarity_score else None,
+                        captured_at=datetime.now(timezone.utc)
+                    )
+                
+                    # Check for price changes
+                    historical_price = historical_prices.get(
+                        (competitor_name, item.item_name), {}
+                    ).get('price')
+                    
+                    if historical_price and abs(historical_price - history_entry.price) > 0.001:
+                        price_change = history_entry.price - historical_price
+                        # Protect against division by zero
+                        if historical_price > 0:
+                            percent_change = (price_change / historical_price) * 100
+                        else:
+                            percent_change = 0 if price_change == 0 else 100
+                        
+                        history_entry.price_change_from_last = price_change
+                        history_entry.percent_change_from_last = percent_change
+                        
+                        price_changes.append({
+                            "competitor": competitor_name,
+                            "item": item.item_name,
+                            "old_price": historical_price,
+                            "new_price": history_entry.price,
+                            "change_percent": percent_change
+                        })
+                    
+                    db.add(history_entry)
+                    
+                    # Add matching item to competitor dictionary
+                    competitors_dict[competitor_name]["items"].append({
+                        "name": item.item_name,
+                        "price": float(item.price),
+                        "category": item.category,
+                        "description": item.description,
+                        "similarity_score": float(item.similarity_score) if item.similarity_score else None,
+                        "last_updated": item.updated_at.isoformat() if item.updated_at else item.created_at.isoformat(),
+                        "price_trend": self._get_price_trend(
+                            historical_prices.get((competitor_name, item.item_name), {})
+                        )
+                    })
+            
+            self.logger.info(f"Found {len(matching_items)} matching items out of {len(menu_items)} for {competitor_name}")
         
         db.commit()
         
@@ -522,30 +578,7 @@ class DataCollectionAgent(BaseAgent):
         return {
             "competitors": list(competitors_dict.values())
         }
-    
-    def _collect_market_data(self, db: Session, user_id: int) -> Dict[str, Any]:
-        """Collect market-level data and trends"""
-        # Get COGS data
-        cogs_data = db.query(models.COGS).filter(
-            models.COGS.user_id == user_id
-        ).order_by(models.COGS.week_end_date.desc()).limit(12).all()
-        
-        return {
-            "cogs": [{
-                "week_end": cog.week_end_date.isoformat(),
-                "amount": float(cog.amount)
-            } for cog in cogs_data],
-            "market_conditions": self._fetch_market_conditions()
-        }
-    
-    def _fetch_market_conditions(self) -> Dict[str, Any]:
-        """Fetch current market conditions (placeholder for external API)"""
-        # This would connect to external data sources in production
-        return {
-            "inflation_rate": 3.2,
-            "consumer_confidence": 102.5,
-            "seasonal_factors": ["holiday_season", "cold_weather"]
-        }
+
     
     def _assess_data_quality_with_memory(self, data: Dict[str, Any], 
                                        previous_snapshots: List[DataCollectionSnapshot]) -> Dict[str, Any]:
@@ -683,6 +716,8 @@ class DataCollectionAgent(BaseAgent):
         
         # Calculate item correlations
         item_correlations = []
+        complementary_items = []
+        substitute_items = []
         for other_item in other_items:
             other_item_id = other_item.item_id
             
@@ -714,14 +749,24 @@ class DataCollectionAgent(BaseAgent):
                 correlation = np.corrcoef(matched_quantities, matched_other_quantities)[0, 1]
                 relationship_type = "complementary" if correlation > 0.3 else "substitute" if correlation < -0.3 else "independent"
                 
-                item_correlations.append({
-                    "item_id": other_item_id,
-                    "item_name": other_item.name,
-                    "correlation": round(float(correlation), 2),
-                    "relationship": relationship_type,
-                    "confidence": round(min(len(matched_quantities) / 30, 1.0), 2),  # More data = higher confidence
-                    "frequency": other_item.frequency
-                })
+                # Only track high correlation (positive or negative)
+                if abs(correlation) >= 0.3:  # Use threshold to determine significant correlation
+                    item_correlations.append({
+                        "item_id": other_item_id,
+                        "item_name": other_item.name
+                    })
+                    
+                    # Keep track of relationship type separately for filtering
+                    if correlation > 0.3:
+                        complementary_items.append({
+                            "item_id": other_item_id,
+                            "item_name": other_item.name
+                        })
+                    elif correlation < -0.3:
+                        substitute_items.append({
+                            "item_id": other_item_id,
+                            "item_name": other_item.name
+                        })
         
         # Price-quantity correlation (elasticity check)
         if len(prices) == len(quantities) and len(prices) >= 7 and len(set(prices)) > 1:
@@ -763,24 +808,20 @@ class DataCollectionAgent(BaseAgent):
             weekday_effects.sort(key=lambda x: x["effect"], reverse=True)
             
             # Determine peak days
-            peak_days = [day["day"] for day in weekday_effects if day["effect"] > 20]  # 20% above average
-            slow_days = [day["day"] for day in weekday_effects if day["effect"] < -20]  # 20% below average
+            peak_days = [day["day"] for day in weekday_effects if day["effect"] > 10]  # 20% above average
+            slow_days = [day["day"] for day in weekday_effects if day["effect"] < -10]  # 20% below average
             
             day_of_week_effect = {
                 "effect": "strong" if peak_days or slow_days else "moderate" if any(abs(day["effect"]) > 10 for day in weekday_effects) else "minimal",
                 "peak_days": peak_days,
-                "slow_days": slow_days,
-                "day_data": weekday_effects
+                "slow_days": slow_days
             }
         else:
             day_of_week_effect = {"effect": "unknown", "reason": "insufficient_data"}
         
-        # Filter correlations
-        complementary_items = [item for item in item_correlations if item["relationship"] == "complementary"]
-        substitute_items = [item for item in item_correlations if item["relationship"] == "substitute"]
+        # We've already filtered the correlations when building the lists
         
         return {
-            "correlations": item_correlations,
             "complementary_items": complementary_items,
             "substitute_items": substitute_items,
             "price_sales_correlation": round(float(price_correlation), 2) if price_correlation is not None else None,
@@ -1052,110 +1093,6 @@ class DataCollectionAgent(BaseAgent):
 
         return sorted(recurring, key=lambda x: x['frequency'], reverse=True)
 
-    def _calculate_price_elasticity(self, db: Session, item_id: int, days_back: int = 180) -> Dict[str, Any]:
-        """Calculate price elasticity for a specific menu item
-
-    Analyzes how changes in price affect sales volume to calculate price elasticity.
-    Elasticity > 1 indicates price-sensitive item (elastic)
-        Elasticity < 1 indicates price-insensitive item (inelastic)
-
-        Args:
-            db: Database session
-            item_id: ID of the menu item
-            days_back: Number of days to analyze
-
-        Returns:
-            Dictionary containing elasticity metrics and supporting data
-        """
-        self.logger.info(f"Calculating price elasticity for item {item_id}")
-
-        # Get price history for this item
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_back)
-
-        price_changes = db.query(models.PriceHistory).filter(
-            models.PriceHistory.item_id == item_id,
-            models.PriceHistory.changed_at >= cutoff_date
-        ).order_by(models.PriceHistory.changed_at).all()
-
-        # Need at least one price change to calculate elasticity
-        if not price_changes:
-            return {
-                "elasticity": None,
-                "is_elastic": None,
-                "confidence": 0,
-                "price_changes": 0,
-                "analysis": "insufficient_data"
-            }
-
-        # Get orders containing this item, grouped by day and price point
-        elasticity_data = []
-
-        # Add current price to the price history for analysis
-        current_price = db.query(models.Item).filter(models.Item.id == item_id).first()
-        if current_price:
-            price_points = [(pc.previous_price, pc.changed_at, pc.new_price) for pc in price_changes]
-            price_points.append((price_changes[-1].new_price, price_changes[-1].changed_at, current_price.current_price))
-        else:
-            price_points = [(pc.previous_price, pc.changed_at, pc.new_price) for pc in price_changes]
-
-        # For each price change, analyze sales before and after
-        for i in range(len(price_points)):
-            old_price = price_points[i][0]
-            change_date = price_points[i][1]
-            new_price = price_points[i][2]
-
-            # Skip if no actual price change
-            if old_price == new_price:
-                continue
-
-            # Get sales 14 days before price change
-            before_start = change_date - timedelta(days=14)
-            before_sales = db.query(func.sum(OrderItem.quantity).label('total_qty')).join(
-                Order, OrderItem.order_id == Order.id
-            ).filter(
-                OrderItem.item_id == item_id,
-                Order.order_date >= before_start,
-                Order.order_date < change_date
-            ).scalar() or 0
-
-            # Get sales 14 days after price change
-            after_end = change_date + timedelta(days=14)
-            after_sales = db.query(func.sum(OrderItem.quantity).label('total_qty')).join(
-                Order, OrderItem.order_id == Order.id
-            ).filter(
-                OrderItem.item_id == item_id,
-                Order.order_date >= change_date,
-                Order.order_date < after_end
-            ).scalar() or 0
-
-            # Calculate elasticity for this price change
-            # Elasticity = % change in quantity / % change in price
-            if old_price > 0 and before_sales > 0:  # Avoid division by zero
-                percent_price_change = (new_price - old_price) / old_price
-                percent_sales_change = (after_sales - before_sales) / before_sales
-
-                # Only record meaningful changes
-                if abs(percent_price_change) > 0.01 and abs(percent_sales_change) > 0.01:
-                    point_elasticity = abs(percent_sales_change / percent_price_change)
-
-                    elasticity_data.append({
-                        "date": change_date.isoformat(),
-                        "price_change_percent": round(percent_price_change * 100, 2),
-                        "sales_change_percent": round(percent_sales_change * 100, 2),
-                        "point_elasticity": round(float(point_elasticity), 2),
-                        "old_price": float(old_price),
-                        "new_price": float(new_price),
-                        "before_sales": before_sales,
-                        "after_sales": after_sales
-                    })
-
-        # Return after processing all price changes, not inside the loop
-        return {
-            "elasticity": sum(e.get('point_elasticity', 0) for e in elasticity_data) / len(elasticity_data) if elasticity_data else None,
-            "data_points": len(elasticity_data),
-            "elasticity_history": elasticity_data,
-            "data_completeness": "high" if len(elasticity_data) >= 3 else "medium" if len(elasticity_data) >= 1 else "low"
-        }
     
     def _track_data_issues(self, db: Session, user_id: int, quality: Dict[str, Any]):
         """Track data quality issues for learning"""
@@ -1247,9 +1184,8 @@ class DataCollectionAgent(BaseAgent):
             return {
                 "elasticity": None,
                 "is_elastic": None,
-                "confidence": 0,
                 "price_changes": 0,
-                "analysis": "insufficient_data"
+                "price_sensitivity": "unknown"
             }
         
         # Get orders containing this item, grouped by day and price point
@@ -1317,25 +1253,20 @@ class DataCollectionAgent(BaseAgent):
         # If we have elasticity data points, calculate average
         if elasticity_data:
             avg_elasticity = sum(point["point_elasticity"] for point in elasticity_data) / len(elasticity_data)
-            confidence = min(len(elasticity_data) / 3, 1.0)  # Max confidence with 3+ data points
             
             return {
                 "elasticity": round(float(avg_elasticity), 2),
                 "is_elastic": avg_elasticity > 1,  # Elastic if > 1
-                "confidence": round(float(confidence), 2),
                 "price_changes": len(price_changes),
-                "data_points": len(elasticity_data),
                 "price_sensitivity": "high" if avg_elasticity > 1.5 else 
-                                    "medium" if avg_elasticity > 0.7 else "low",
-                "historical_elasticity": elasticity_data
+                                     "medium" if avg_elasticity > 0.7 else "low"
             }
         else:
             return {
                 "elasticity": None,
                 "is_elastic": None,
-                "confidence": 0,
                 "price_changes": len(price_changes),
-                "analysis": "insufficient_data_for_elasticity"
+                "price_sensitivity": "unknown"
             }
     
     def _analyze_competitor_trends(self, db: Session, user_id: int) -> Dict[str, Any]:
@@ -1412,7 +1343,6 @@ class DataCollectionAgent(BaseAgent):
             return {
                 "momentum_score": 0,
                 "trend": "insufficient_data",
-                "confidence": 0,
                 "total_sales": 0,
                 "days_with_data": 0
             }
@@ -1434,7 +1364,6 @@ class DataCollectionAgent(BaseAgent):
             return {
                 "momentum_score": 0,
                 "trend": "insufficient_data",
-                "confidence": 0,
                 "total_sales": sum(sales),
                 "days_with_data": (max(order_date for _, order_date in order_items) - 
                                  min(order_date for _, order_date in order_items)).days + 1
@@ -1461,12 +1390,10 @@ class DataCollectionAgent(BaseAgent):
             trend = "stable"
         
         # Calculate confidence based on amount of data
-        confidence = min(len(sales) / 12, 1.0)  # Max confidence with 12+ weeks of data
         
         return {
             "momentum_score": round(float(momentum_score), 2),
             "trend": trend,
-            "confidence": round(float(confidence), 2),
             "total_sales": sum(sales),
             "weekly_pattern": sales,
             "days_with_data": (max(order_date for _, order_date in order_items) - 
@@ -1540,18 +1467,16 @@ class DataCollectionAgent(BaseAgent):
             return {
                 "seasonality_detected": False,
                 "reason": "no_data",
-                "monthly_pattern": None,
-                "quarterly_pattern": None
+                "pattern_type": None,
+                "strength": None
             }
         
         if len(daily_sales) < 60:  # Need at least 2 months of data
             return {
                 "seasonality_detected": False,
                 "reason": "insufficient_data",
-                "confidence": 0,
-                "data_span_days": len(daily_sales),
-                "monthly_pattern": None,
-                "quarterly_pattern": None
+                "pattern_type": None,
+                "strength": None
             }
         
         # Group sales by month for monthly seasonality
@@ -1684,7 +1609,6 @@ class DataCollectionAgent(BaseAgent):
         first_date = min(date_objects)
         last_date = max(date_objects)
         days_span = (last_date - first_date).days + 1
-        confidence = min(days_span / 365, 1.0)  # Max confidence with 1+ year of data
         
         # Identify pattern type (strongest variation)
         pattern_type = "monthly" if monthly_variation > quarterly_variation else "quarterly"
@@ -1693,14 +1617,9 @@ class DataCollectionAgent(BaseAgent):
             "seasonality_detected": has_seasonality,
             "pattern_type": pattern_type if has_seasonality else None,
             "strength": seasonality_strength,
-            "confidence": round(confidence, 2),
-            "data_span_days": days_span,
             "months_analyzed": len(months),
             "peak_month": peak_month,
             "peak_quarter": peak_quarter,
             "monthly_variation": round(float(monthly_variation * 100), 1),  # As percentage
-            "quarterly_variation": round(float(quarterly_variation * 100), 1),  # As percentage
-            "monthly_pattern": monthly_pattern,
-            "quarterly_pattern": quarterly_pattern,
-            "month_over_month": mom_changes[:6]  # Show most recent 6 changes
+            "quarterly_variation": round(float(quarterly_variation * 100), 1)  # As percentage
         }
