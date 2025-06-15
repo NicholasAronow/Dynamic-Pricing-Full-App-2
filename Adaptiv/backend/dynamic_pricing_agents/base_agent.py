@@ -62,17 +62,11 @@ class BaseAgent(ABC):
                     messages=messages,
                     tools=tools,
                     tool_choice="auto",
-                    temperature=0.7,
-                    max_tokens=2000,
-                    timeout=30  # 30 second timeout
                 )
             else:
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
-                    temperature=0.7,
-                    max_tokens=2000,
-                    timeout=30  # 30 second timeout
                 )
             
             # Extract the response

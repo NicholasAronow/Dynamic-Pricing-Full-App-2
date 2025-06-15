@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Alert, Button, Card, Col, Divider, Row, Select, Spin, Typography, message } from 'antd';
-import { RobotOutlined, PlayCircleOutlined, SyncOutlined } from '@ant-design/icons';
+import { RobotOutlined, PlayCircleOutlined, SyncOutlined, BarChartOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { API_BASE_URL } from 'config';
 
@@ -21,6 +21,8 @@ const AgentTesting: React.FC = () => {
   const [agentOutput, setAgentOutput] = useState<any>(null);
   const [outputLoading, setOutputLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [llmAnalysisOutput, setLlmAnalysisOutput] = useState<string | null>(null);
+  const [llmAnalysisLoading, setLlmAnalysisLoading] = useState<boolean>(false);
   
   // Fetch available agents on component mount
   useEffect(() => {
@@ -77,6 +79,7 @@ const AgentTesting: React.FC = () => {
     setOutputLoading(true);
     setError(null);
     setAgentOutput(null);
+    setLlmAnalysisOutput(null);
     
     try {
       // Call the backend endpoint to test the agent
@@ -97,6 +100,35 @@ const AgentTesting: React.FC = () => {
       message.error('Failed to test agent');
     } finally {
       setOutputLoading(false);
+    }
+  };
+  
+  // Run LLM analysis on the agent output
+  const runLlmAnalysis = async () => {
+    if (!agentOutput) {
+      message.warning('Please run the agent test first');
+      return;
+    }
+    
+    setLlmAnalysisLoading(true);
+    setLlmAnalysisOutput(null);
+    
+    try {
+      // Send the agent output data directly to our backend for LLM analysis
+      const response = await axios.post(`${API_BASE_URL}/api/agents/dynamic-pricing/llm-analysis`, 
+        agentOutput || {}
+      );
+      
+      if (response.data && response.data.content) {
+        setLlmAnalysisOutput(response.data.content);
+        message.success('LLM analysis completed');
+      }
+    } catch (err: any) {
+      console.error('Error running LLM analysis:', err);
+      setError(err.response?.data?.detail || 'Failed to run LLM analysis. Please try again later.');
+      message.error('Failed to run LLM analysis');
+    } finally {
+      setLlmAnalysisLoading(false);
     }
   };
   
@@ -218,6 +250,40 @@ const AgentTesting: React.FC = () => {
                         <pre style={{ maxHeight: '500px', overflow: 'auto', margin: 0 }}>
                           {JSON.stringify(agentOutput.output || agentOutput, null, 2)}
                         </pre>
+                        
+                        <div style={{ marginTop: '16px' }}>
+                          <Button 
+                            type="primary"
+                            icon={<BarChartOutlined />}
+                            onClick={runLlmAnalysis}
+                            loading={llmAnalysisLoading}
+                            disabled={!agentOutput}
+                          >
+                            Run LLM Analysis
+                          </Button>
+                        </div>
+                        
+                        {llmAnalysisLoading && (
+                          <div style={{ marginTop: '16px', textAlign: 'center' }}>
+                            <Spin />
+                            <div style={{ marginTop: '8px' }}>
+                              <Text>Generating analysis with AI...</Text>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {llmAnalysisOutput && (
+                          <div style={{ marginTop: '16px' }}>
+                            <Divider>
+                              <Text strong>LLM Analysis</Text>
+                            </Divider>
+                            <div style={{ backgroundColor: '#f0f9ff', padding: '16px', borderRadius: '4px', border: '1px solid #d1e9ff' }}>
+                              <pre style={{ whiteSpace: 'pre-wrap', overflow: 'auto', margin: 0 }}>
+                                {llmAnalysisOutput}
+                              </pre>
+                            </div>
+                          </div>
+                        )}
                       </Paragraph>
                     </div>
                   </div>

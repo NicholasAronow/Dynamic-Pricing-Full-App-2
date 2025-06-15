@@ -440,6 +440,46 @@ async def test_agent(
         }
 
 
+@router.post("/llm-analysis")
+async def generate_llm_analysis(
+    data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    Generate an LLM analysis of the provided data using the Data Collection Agent
+    """
+    try:
+        user_id = current_user.id
+        
+        # Get the data collection agent
+        data_collection_agent = orchestrator.agents.get("data_collection")
+        if not data_collection_agent:
+            raise HTTPException(
+                status_code=404,
+                detail="Data Collection Agent not found"
+            )
+        
+        # Extract the actual data to analyze
+        # The frontend sends the entire agent output, but we only need the 'output' part
+        agent_data = data
+        if isinstance(data, dict) and data.get("output"):
+            agent_data = data.get("output")
+            
+        # Call the analyze_with_llm method
+        result = data_collection_agent.analyze_with_llm(agent_data)
+        
+        return result
+        
+    except Exception as e:
+        logger.exception(f"Error generating LLM analysis: {str(e)}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "error_type": type(e).__name__
+        }
+
+
 # Background task function
 def _run_analysis_task(user_id: int, task_id: str, trigger_source: str):
     """

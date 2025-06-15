@@ -2,20 +2,19 @@
 Data Collection Agent with Memory - Gathers, analyzes, and distills data to extract meaningful insights
 """
 
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Set, Union
 from datetime import datetime, timedelta, timezone
-import json
 from sqlalchemy.orm import Session
+import json
+import requests
 from sqlalchemy import desc, func
 import numpy as np
 from collections import defaultdict
 import pandas as pd
 import uuid
-import numbers
 from scipy import stats
 from ..base_agent import BaseAgent
 import models
-import requests
 import os
 # Import memory models directly from models.py
 from models import (
@@ -33,7 +32,7 @@ class DataCollectionAgent(BaseAgent):
     """Agent responsible for collecting, analyzing, and distilling data to extract item-specific insights"""
     
     def __init__(self):
-        super().__init__("DataCollectionAgent", model="gpt-4o-mini")
+        super().__init__("DataCollectionAgent", model="o3")
         
     def get_system_prompt(self) -> str:
         return """You are a Data Collection and Analysis Agent for a dynamic pricing system with memory capabilities. Your role is to:
@@ -1623,3 +1622,71 @@ class DataCollectionAgent(BaseAgent):
             "monthly_variation": round(float(monthly_variation * 100), 1),  # As percentage
             "quarterly_variation": round(float(quarterly_variation * 100), 1)  # As percentage
         }
+        
+    def analyze_with_llm(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate an LLM analysis of the collected data to create concise, structured item profiles"""
+        try:
+            self.logger.info("Starting LLM analysis of collected data")
+            
+            # Extract menu items for context
+            menu_items = data.get("menu_items", [])
+            
+            # Create the prompt for the LLM
+            prompt = f"""You are the Data Collection Agent responsible for consolidating item data for dynamic pricing analysis. 
+            Your task is to analyze the raw data for the menu and create a concise, structured summary that contains all essential information for pricing decisions while minimizing token usage.
+            
+            MENU: {json.dumps(menu_items)}
+
+RAW DATA: {json.dumps(data)}
+            
+            For each item in our menu, create a consolidated item profile with the following structure:
+            1. ITEM BASICS - Provide a one-line summary with: ID, name, category, current price, cost, margin
+            2. SALES METRICS - Summarize: Momentum, trends, peak sales periods, average order size, etc.
+            3. ELASTICITY INDICATORS - Include: last measured elasticity, price sensitivity classification
+            4. COMPETITIVE POSITION - List: average competitor price, our price delta (%), market position (premium/value/parity)
+            5. COST DYNAMICS - Note: recent cost changes, margin trend, seasonal cost factors
+            6. PRICE CHANGE HISTORY - Summarize: last change date, amount, result (volume impact)
+            7. CUSTOMER SEGMENTS - Identify: primary purchasing segments, price sensitivity by segment
+            8. OPTIMIZATION SIGNALS - Flag: any indicators suggesting immediate pricing opportunities
+            
+            Keep each section UNDER 100 words. Use quantitative data whenever possible.
+            Format values consistently (2 decimal places for currency, 1 decimal place for percentages).
+            Exclude any redundant or non-actionable information.
+            
+            Return ONLY the structured item profile with no additional commentary.
+            
+            Please output your response in this format:
+            [
+                {{
+                    "item_id": "123",
+                    "item_name": "item name",
+                    "item_basics": "item_basics",
+                    "sales_metrics": "sales_metrics",
+                    "elasticity_indicators": "elasticity_indicators",
+                    "competitive_position": "competitive_position",
+                    "cost_dynamics": "cost_dynamics",
+                    "price_change_history": "price_change_history",
+                    "customer_segments": "customer_segments",
+                    "optimization_signals": "optimization_signals"
+                }}
+            ]
+            """
+            
+            # Use OpenAI API through the BaseAgent's call_llm method
+            messages = [
+                {"role": "system", "content": prompt}
+            ]
+            
+            response = self.call_llm(messages)
+            
+            return {
+                "status": "success",
+                "content": response.get("content", "")
+            }
+            
+        except Exception as e:
+            self.logger.exception(f"Error in LLM analysis: {str(e)}")
+            return {
+                "status": "error",
+                "error": str(e)
+            }
