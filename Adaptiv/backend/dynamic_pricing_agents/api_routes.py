@@ -375,6 +375,71 @@ async def get_execution_history(
     }
 
 
+@router.post("/test-agent/{agent_name}")
+async def test_agent(
+    agent_name: str,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    Test a specific agent and return its output
+    
+    Allows testing individual agents with direct output display
+    """
+    # Validate agent name
+    if agent_name not in orchestrator.agents:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Agent '{agent_name}' not found. Available agents: {list(orchestrator.agents.keys())}"
+        )
+    
+    user_id = current_user.id
+    start_time = datetime.now()
+    agent_instance = orchestrator.agents[agent_name]
+    
+    try:
+        # Prepare context for the agent
+        context = {
+            "user_id": user_id,
+            "test_mode": True,  # Flag to indicate test mode
+            "request_timestamp": start_time.isoformat(),
+            # Add any other context needed by the agent
+        }
+        
+        # Add db to context instead of passing it directly to process method
+        context["db"] = db
+        
+        # Run the agent with context
+        agent_output = agent_instance.process(context)
+        
+        # Record test execution
+        test_record = {
+            "test_id": f"test_{agent_name}_{start_time.strftime('%Y%m%d_%H%M%S')}",
+            "user_id": user_id,
+            "agent_name": agent_name,
+            "start_time": start_time.isoformat(),
+            "end_time": datetime.now().isoformat(),
+            "duration_seconds": (datetime.now() - start_time).total_seconds(),
+            "status": "success"
+        }
+        
+        return {
+            "status": "success",
+            "agent_name": agent_name,
+            "output": agent_output,
+            "execution_details": test_record
+        }
+        
+    except Exception as e:
+        logger.exception(f"Error testing agent {agent_name}: {str(e)}")
+        return {
+            "status": "error",
+            "agent_name": agent_name,
+            "error": str(e),
+            "error_type": type(e).__name__
+        }
+
+
 # Background task function
 def _run_analysis_task(user_id: int, task_id: str, trigger_source: str):
     """

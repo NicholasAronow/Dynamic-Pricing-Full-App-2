@@ -48,7 +48,7 @@ class DynamicPricingOrchestrator:
             # Phase 1: Data Collection (must run first)
             self._update_task_status(user_id, "running", "Phase 1: Collecting data...")
             collection_results = self._run_data_collection(db, user_id)
-            
+            self.logger.info(f"Data collection results: {collection_results}")
             # Phase 2: Parallel Analysis (market analysis and performance monitoring can run together)
             self._update_task_status(user_id, "running", "Phase 2: Running market analysis and performance monitoring...")
             analysis_results = self._run_parallel_analysis(db, user_id, collection_results)
