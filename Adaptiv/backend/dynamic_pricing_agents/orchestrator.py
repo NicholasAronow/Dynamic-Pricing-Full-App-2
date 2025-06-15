@@ -13,7 +13,8 @@ from .agents import (
     MarketAnalysisAgent,
     PricingStrategyAgent,
     PerformanceMonitorAgent,
-    ExperimentationAgent
+    ExperimentationAgent,
+    get_openai_agent
 )
 from .task_manager import running_tasks  # Import from shared module
 
@@ -30,7 +31,8 @@ class DynamicPricingOrchestrator:
             'market_analysis': MarketAnalysisAgent(),
             'pricing_strategy': PricingStrategyAgent(),
             'performance_monitor': PerformanceMonitorAgent(),
-            'experimentation': ExperimentationAgent()
+            'experimentation': ExperimentationAgent(),
+            'openai_agent': get_openai_agent()
         }
         
         self.execution_history = []

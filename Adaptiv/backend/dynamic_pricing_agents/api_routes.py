@@ -343,6 +343,11 @@ async def get_agent_capabilities() -> Dict[str, Any]:
             "name": "Experimentation Agent",
             "description": "Manages pricing experiments and A/B tests",
             "actions": ["design_experiments", "analyze_results", "recommend_rollouts"]
+        },
+        "openai_agent": {
+            "name": "OpenAI Market Research Agent",
+            "description": "Analyzes data collection output to identify items that need market research and conducts that research",
+            "actions": ["analyze_data", "identify_research_candidates", "conduct_market_research", "gather_competitor_data", "provide_recommendations"]
         }
     }
     
@@ -447,29 +452,36 @@ async def generate_llm_analysis(
     current_user = Depends(get_current_user)
 ) -> Dict[str, Any]:
     """
-    Generate an LLM analysis of the provided data using the Data Collection Agent
+    Generate an LLM analysis of the provided data using the appropriate agent
     """
     try:
         user_id = current_user.id
         
-        # Get the data collection agent
-        data_collection_agent = orchestrator.agents.get("data_collection")
-        if not data_collection_agent:
-            raise HTTPException(
-                status_code=404,
-                detail="Data Collection Agent not found"
-            )
+        # Extract the agent name from the data
+        agent_name = data.get("agent_name", "data_collection")
         
         # Extract the actual data to analyze
-        # The frontend sends the entire agent output, but we only need the 'output' part
         agent_data = data
         if isinstance(data, dict) and data.get("output"):
             agent_data = data.get("output")
-            
-        # Call the analyze_with_llm method
-        result = data_collection_agent.analyze_with_llm(agent_data)
         
-        return result
+        # Get the appropriate agent based on agent_name
+        if agent_name == "openai_agent":
+            # Special handling for OpenAI agent output
+            return analyze_openai_agent_output(agent_data)
+        else:
+            # Default to data_collection agent for other outputs
+            data_collection_agent = orchestrator.agents.get("data_collection")
+            if not data_collection_agent:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Data Collection Agent not found"
+                )
+                
+            # Call the analyze_with_llm method
+            result = data_collection_agent.analyze_with_llm(agent_data)
+            
+            return result
         
     except Exception as e:
         logger.exception(f"Error generating LLM analysis: {str(e)}")
@@ -477,6 +489,115 @@ async def generate_llm_analysis(
             "status": "error",
             "error": str(e),
             "error_type": type(e).__name__
+        }
+
+
+def analyze_openai_agent_output(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Analyze OpenAI agent output with a formatted summary
+    """
+    try:
+        # Extract relevant information from the OpenAI agent output
+        research_candidates = data.get("research_candidates", [])
+        research_results = data.get("research_results", {})
+        status = data.get("status", "unknown")
+        message = data.get("message", "")
+        
+        # Generate a formatted analysis
+        analysis = [
+            "## OpenAI Agent Output Analysis\n\n",
+            f"**Status**: {status}\n\n",
+            f"**Message**: {message}\n\n",
+        ]
+        
+        # Analyze research candidates
+        if research_candidates:
+            analysis.append(f"### Research Candidates Identified ({len(research_candidates)})\n\n")
+            
+            for i, candidate in enumerate(research_candidates):
+                item_name = candidate.get("item_name", f"Item {i+1}")
+                item_id = candidate.get("item_id", "unknown")
+                reason = candidate.get("research_reason", "No reason specified")
+                
+                analysis.append(f"**{item_name}** (ID: {item_id})\n")
+                analysis.append(f"- Research Reason: {reason}\n")
+                
+                # Add other relevant details
+                if "price" in candidate:
+                    analysis.append(f"- Current Price: ${candidate.get('price', 'N/A')}\n")
+                if "elasticity" in candidate:
+                    analysis.append(f"- Elasticity: {candidate.get('elasticity', 'N/A')}\n")
+                analysis.append("\n")
+        else:
+            analysis.append("### No Research Candidates Identified\n\n")
+            
+        # Analyze research results if available
+        if isinstance(research_results, dict) and research_results:
+            analysis.append("### Research Results\n\n")
+            
+            # Check if summary or recommendations exist
+            if "summary" in research_results:
+                analysis.append(f"**Summary**: {research_results['summary']}\n\n")
+            if "recommendations" in research_results and research_results["recommendations"]:
+                analysis.append("**Recommendations**:\n")
+                for rec in research_results["recommendations"]:
+                    analysis.append(f"- {rec}\n")
+                analysis.append("\n")
+                
+            # Check for individual research items
+            if "items" in research_results and research_results["items"]:
+                analysis.append("**Detailed Research**:\n\n")
+                for item in research_results["items"]:
+                    item_name = item.get("item_name", "Unknown item")
+                    analysis.append(f"**{item_name}**:\n")
+                    
+                    # Market trends
+                    if "market_trends" in item:
+                        analysis.append(f"- Market Trends: {item['market_trends']}\n")
+                    
+                    # Competitor information
+                    if "competitor_info" in item:
+                        analysis.append(f"- Competitor Info: {item['competitor_info']}\n")
+                    
+                    # Supply chain insights
+                    if "supply_chain_insights" in item:
+                        analysis.append(f"- Supply Chain: {item['supply_chain_insights']}\n")
+                    
+                    # Events
+                    if "relevant_events" in item:
+                        analysis.append(f"- Relevant Events: {item['relevant_events']}\n")
+                    
+                    # Price recommendation
+                    if "price_recommendation" in item:
+                        analysis.append(f"- Price Recommendation: {item['price_recommendation']}\n")
+                    
+                    analysis.append("\n")
+        
+        # Final conclusion
+        analysis.append("### Conclusion\n\n")
+        if status == "success":
+            analysis.append("The OpenAI agent successfully identified items for market research ")
+            if "research_results" in data and data["research_results"]:
+                analysis.append("and conducted detailed market analysis to inform pricing decisions. ")
+            else:
+                analysis.append("but did not conduct the full market research phase. ")
+                
+            analysis.append("The agent can identify promising candidates for price adjustments based on ")
+            analysis.append("elasticity, market position, and other factors.")
+        else:
+            analysis.append("The agent encountered issues during execution. Please check the error messages ")
+            analysis.append("and consider providing an OpenAI API key if one is required.")
+        
+        return {
+            "content": "".join(analysis),
+            "status": "success"
+        }
+        
+    except Exception as e:
+        logger.exception(f"Error analyzing OpenAI agent output: {str(e)}")
+        return {
+            "content": f"Error analyzing OpenAI agent output: {str(e)}",
+            "status": "error"
         }
 
 
