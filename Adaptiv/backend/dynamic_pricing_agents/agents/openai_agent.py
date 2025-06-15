@@ -65,12 +65,8 @@ class ResearchResults(BaseModel):
     """Model for research results for a specific item"""
     item_id: str = Field(description="The unique identifier for the item")
     item_name: str = Field(description="The name of the item")
-    market_trends: str = Field(description="Market trends affecting this item")
-    supply_chain_insights: str = Field(description="Supply chain information relevant to pricing")
-    competitor_analysis: str = Field(description="Analysis of competitor strategies and pricing")
     upcoming_events: List[Dict[str, str]] = Field(description="Events that might impact sales", default=[])
-    recommendation: str = Field(description="Research-based pricing recommendation")
-    confidence: float = Field(description="Confidence in the recommendation (0.0-1.0)")
+    confidence: float = Field(description="Confidence in the research (0.0-1.0)")
     sources: List[str] = Field(description="Sources used for this research", default=[])
     research_summary: str = Field(description="Item-specific detailed research summary", default="")
 
@@ -114,7 +110,7 @@ You are an advanced market research agent for dynamic pricing optimization. Your
    - For identified items, conduct targeted market research using web search
    - Research supply chain trends that impact costs and availability
    - Identify competitor information and strategies
-   - Look for upcoming events that might impact sales
+   - Look for upcoming events in the user's area that might impact sales
    - Research overall market trends for the product category and industry
 
 3. PROVIDE ACTIONABLE INSIGHTS:
@@ -582,39 +578,29 @@ def conduct_research(items_to_research: List[ResearchItem], all_items: List[Dict
             for item_data in all_items:
                 item_id = item_data.get("item_id", "")
                 item_name = item_data.get("item_name", "")
-                
-                # If this item was researched, add full research results with its specific summary
+                                # If this item was researched, add full research results with its specific summary
                 if item_id in research_item_ids:
                     item_specific_summary = item_summaries.get(item_id, "Analysis not available for this specific item.")
                     
-                    # Extract insights from the summary if possible
-                    market_trends = "See full analysis in item summary"
-                    supply_insights = "See full analysis in item summary"
-                    competitor_analysis = "See full analysis in item summary"
-                    recommendation = "See full analysis in item summary"
-                    
-                    # Try to extract recommendation if present
-                    if "recommendation" in item_specific_summary.lower() or "pricing recommendation" in item_specific_summary.lower():
+                    # Extract any upcoming events if mentioned
+                    upcoming_events = []
+                    # Simple heuristic to find mentioned events
+                    if "upcoming event" in item_specific_summary.lower() or "seasonal event" in item_specific_summary.lower():
                         try:
-                            # Look for recommendation section
-                            rec_section = re.split(r'\b(recommendation|pricing recommendation)\b', item_specific_summary.lower(), flags=re.IGNORECASE)[2]
-                            # Take just 1-2 sentences
-                            rec_parts = rec_section.split(".")
-                            if len(rec_parts) > 2:
-                                recommendation = "..".join(rec_parts[:2]) + "."
+                            # Look for events mentioned
+                            event_matches = re.findall(r'([A-Z][a-z]+ (?:festival|concert|holiday|season|event))', item_specific_summary)
+                            if event_matches:
+                                for event in event_matches[:3]:  # Limit to 3 events
+                                    upcoming_events.append({"name": event, "date": ""})  # Date not extracted
                         except:
                             pass
                     
                     research_result = ResearchResults(
                         item_id=item_id,
                         item_name=item_name,
-                        market_trends=market_trends,
-                        supply_chain_insights=supply_insights,
-                        competitor_analysis=competitor_analysis,
-                        recommendation=recommendation,
                         confidence=0.7,
                         sources=["OpenAI API Analysis"],
-                        upcoming_events=[],
+                        upcoming_events=upcoming_events,
                         research_summary=item_specific_summary  # Add the item-specific summary
                     )
                 # If not researched, add a placeholder with blank research fields
@@ -622,10 +608,6 @@ def conduct_research(items_to_research: List[ResearchItem], all_items: List[Dict
                     research_result = ResearchResults(
                         item_id=item_id,
                         item_name=item_name,
-                        market_trends="",  # Blank for non-researched items
-                        supply_chain_insights="",
-                        competitor_analysis="", 
-                        recommendation="",
                         confidence=0.0,  # Zero confidence since no research was done
                         sources=[],
                         upcoming_events=[],
