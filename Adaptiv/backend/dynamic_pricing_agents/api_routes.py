@@ -325,11 +325,6 @@ async def get_agent_capabilities() -> Dict[str, Any]:
             "description": "Gathers POS data, competitor pricing, and historical price changes",
             "actions": ["collect_pos_data", "collect_competitor_data", "collect_price_history"]
         },
-        "market_analysis": {
-            "name": "Market Analysis Agent",
-            "description": "Analyzes market conditions and competitive landscape",
-            "actions": ["analyze_competitors", "identify_trends", "assess_market_position"]
-        },
         "pricing_strategy": {
             "name": "Pricing Strategy Agent",
             "description": "Develops and optimizes pricing strategies",
@@ -345,11 +340,6 @@ async def get_agent_capabilities() -> Dict[str, Any]:
             "description": "Manages pricing experiments and A/B tests",
             "actions": ["design_experiments", "analyze_results", "recommend_rollouts"]
         },
-        "openai_agent": {
-            "name": "OpenAI Market Research Agent",
-            "description": "Analyzes data collection output to identify items that need market research and conducts that research",
-            "actions": ["analyze_data", "identify_research_candidates", "conduct_market_research", "gather_competitor_data", "provide_recommendations"]
-        },
         "competitor_agent": {
             "name": "Competitor Analysis Agent",
             "description": "Analyzes data collection output to identify items that would benefit from competitor analysis and generates detailed competitive insights",
@@ -359,6 +349,11 @@ async def get_agent_capabilities() -> Dict[str, Any]:
             "name": "Web Search Test Agent",
             "description": "Demonstrates web search capabilities using the OpenAI Agents SDK",
             "actions": ["search_web", "summarize_results"]
+        },
+        "competitor_tracking_db": {
+            "name": "Competitor Tracking Agent",
+            "description": "Analyzes menu items against competitors to provide detailed pricing comparisons and recommendations",
+            "actions": ["analyze_competitor_prices", "determine_competitive_positioning", "provide_pricing_recommendations"]
         }
     }
     

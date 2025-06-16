@@ -8,7 +8,6 @@ from .base_agent import BaseAgent
 from .orchestrator import DynamicPricingOrchestrator
 from .agents import (
     DataCollectionAgent,
-    MarketAnalysisAgent,
     PricingStrategyAgent,
     PerformanceMonitorAgent,
     ExperimentationAgent

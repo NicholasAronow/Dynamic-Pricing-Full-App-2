@@ -133,8 +133,6 @@ class TestWebAgentWrapper:
         # Build the query with menu data
         base_query = """
         Analyze these menu items and conduct relevant market research.
-        
-        Menu Items:
         """
         
         # Load menu data (with fallback)
