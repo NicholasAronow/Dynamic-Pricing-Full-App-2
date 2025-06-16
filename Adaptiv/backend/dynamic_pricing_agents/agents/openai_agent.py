@@ -1,5 +1,5 @@
 """
-OpenAI Agent implementation using the OpenAI Agent SDK
+Market Analysis Agent implementation using the OpenAI Agent SDK
 
 This agent analyzes data collection output to identify items that would benefit from 
 further market research, then uses tools to conduct that research.
@@ -482,7 +482,7 @@ def conduct_research(items_to_research: List[ResearchItem], all_items: List[Dict
         For each item, provide structured analysis covering:
         1. Current market trends affecting pricing potential
         2. Supply chain insights/challenges
-        3. Upcoming events/seasonality impacts on demand
+        3. Upcoming events in the user's area and seasonality impacts on demand
         4. Competitor analysis and strategies
         5. A specific pricing recommendation with reasoning and confidence level
         
