@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+import asyncio
 import logging
 
 from database import get_db
@@ -348,6 +349,16 @@ async def get_agent_capabilities() -> Dict[str, Any]:
             "name": "OpenAI Market Research Agent",
             "description": "Analyzes data collection output to identify items that need market research and conducts that research",
             "actions": ["analyze_data", "identify_research_candidates", "conduct_market_research", "gather_competitor_data", "provide_recommendations"]
+        },
+        "competitor_agent": {
+            "name": "Competitor Analysis Agent",
+            "description": "Analyzes data collection output to identify items that would benefit from competitor analysis and generates detailed competitive insights",
+            "actions": ["analyze_data", "identify_competitor_candidates", "analyze_competitive_landscape", "calculate_pricing_gaps", "provide_positioning_recommendations"]
+        },
+        "test_web_agent": {
+            "name": "Web Search Test Agent",
+            "description": "Demonstrates web search capabilities using the OpenAI Agents SDK",
+            "actions": ["search_web", "summarize_results"]
         }
     }
     
@@ -403,19 +414,49 @@ async def test_agent(
     agent_instance = orchestrator.agents[agent_name]
     
     try:
-        # Prepare context for the agent
+        # Fetch business profile data if available
+        try:
+            business_profile = db.query(models.BusinessProfile).filter(
+                models.BusinessProfile.user_id == user_id
+            ).first()
+            
+            business_context = {}
+            if business_profile:
+                business_context = {
+                    "business_name": business_profile.business_name,
+                    "industry": business_profile.industry,
+                    "company_size": business_profile.company_size,
+                    "city": business_profile.city,
+                    "state": business_profile.state,
+                    "country": business_profile.country or "USA",
+                    "location": f"{business_profile.city or ''}, {business_profile.state or ''}, {business_profile.country or 'USA'}".strip().strip(',')
+                }
+                logging.info(f"Found business profile for user {user_id}: {business_context['business_name']} in {business_context['location']}")
+        except Exception as e:
+            logging.error(f"Error fetching business profile: {e}")
+            business_context = {}
+            
+        # Create execution context with key parameters needed by the agent
+        # Get username from current_user if available or use user_id as fallback
+        username = getattr(current_user, 'username', None) or getattr(current_user, 'email', None) or str(user_id)
+        
         context = {
             "user_id": user_id,
+            "username": username,
             "test_mode": True,  # Flag to indicate test mode
             "request_timestamp": start_time.isoformat(),
+            **business_context,  # Add business profile data if available
             # Add any other context needed by the agent
         }
         
         # Add db to context instead of passing it directly to process method
         context["db"] = db
         
-        # Run the agent with context
-        agent_output = agent_instance.process(context)
+        # Run the agent with context - handle both async and sync process methods
+        if asyncio.iscoroutinefunction(agent_instance.process):
+            agent_output = await agent_instance.process(context)
+        else:
+            agent_output = agent_instance.process(context)
         
         # Record test execution
         test_record = {
