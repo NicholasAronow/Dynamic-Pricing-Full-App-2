@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Card, Button, Typography, List, Divider, message, Spin, Alert, Empty, Space, Tag, Tooltip } from 'antd';
 import { CheckCircleOutlined, CloseCircleOutlined, SyncOutlined, ShopOutlined, ShoppingOutlined, LinkOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { integrationService } from '../../services/integrationService';
-import api from '../../services/api';
+import { integrationService } from '../../../services/integrationService';
+import api from '../../../services/api';
 
 const { Title, Text, Paragraph } = Typography;
 

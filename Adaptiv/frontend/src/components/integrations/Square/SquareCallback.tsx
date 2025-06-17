@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Result, Spin } from 'antd';
-import { integrationService } from '../../services/integrationService';
-import { useAuth } from '../../context/AuthContext';
+import { integrationService } from '../../../services/integrationService';
+import { useAuth } from '../../../context/AuthContext';
 
 /**
  * Component to handle the OAuth callback from Square

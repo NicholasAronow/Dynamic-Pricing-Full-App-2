@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card, Button, Typography, Table, Spin, message, Empty, Tabs, Badge } from 'antd';
 import { ReloadOutlined, SyncOutlined, CheckCircleOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import { useLocation } from 'react-router-dom';
-import { integrationService } from '../../services/integrationService';
+import { integrationService } from '../../../services/integrationService';
 
 const { Title, Text, Paragraph } = Typography;
 const { TabPane } = Tabs;

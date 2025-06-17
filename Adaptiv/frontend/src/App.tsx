@@ -6,15 +6,12 @@ import './App.css';
 // Auth components
 import Login from './components/auth/Login';
 import Register from './components/auth/Register';
-import AuthDebug from './components/auth/AuthDebug';
 
 // Main components
 import Dashboard from './components/dashboard/Dashboard';
 import BusinessProfile from './components/profile/BusinessProfile';
 import MainLayout from './components/layout/MainLayout';
-import PriceRecommendations from './components/pricing/PriceRecommendations';
-import AgentPricingRecommendations from './components/pricing/AgentPricingRecommendations';
-// CompetitorAnalysis has been replaced by Competitors component
+import PriceRecommendations from './components/menu/PriceRecommendations';
 import CompetitorDetail from './components/competitor/CompetitorDetail';
 import Competitors from './components/competitor/Competitors';
 import ProductDetail from './components/products/ProductDetail';
@@ -22,9 +19,9 @@ import DynamicPricingAgents from './components/agents/DynamicPricingAgents';
 
 
 // Integration components
-import SquareCallback from './components/integrations/SquareCallback';
-import SquareOrderTester from './components/integrations/SquareOrderTester';
-import SquareIntegrationPage from './components/integrations/SquareIntegrationPage';
+import SquareCallback from './components/integrations/Square/SquareCallback';
+import SquareOrderTester from './components/integrations/Square/SquareOrderTester';
+import SquareIntegrationPage from './components/integrations/Square/SquareIntegrationPage';
 
 // Auth context
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -57,7 +54,6 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          <Route path="/auth-debug" element={<AuthDebug />} />
           <Route path="/integrations/square/callback" element={<SquareCallback />} />
           <Route path="/" element={
             <ProtectedRoute>
@@ -67,8 +63,6 @@ function App() {
             <Route index element={<Dashboard />} />
             <Route path="profile" element={<BusinessProfile />} />
             <Route path="price-recommendations" element={<PriceRecommendations />} />
-            <Route path="agent-recommendations" element={<AgentPricingRecommendations />} />
-            {/* CompetitorAnalysis route removed - now using Competitors component */}
             <Route path="competitors" element={<Competitors />} />
             <Route path="competitor/:competitorId" element={<CompetitorDetail />} />
             <Route path="product/:productId" element={<ProductDetail />} />

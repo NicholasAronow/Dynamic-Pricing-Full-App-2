@@ -500,7 +500,7 @@ const PriceRecommendations: React.FC = () => {
 
   return (
     <div>
-      <Title level={2}>Price Recommendations</Title>
+      <Title level={2}>Your Items</Title>
       <Title level={5} type="secondary" style={{ marginTop: 0 }}>
         Optimize your product pricing strategy with AI-driven insights
       </Title>
@@ -516,6 +516,7 @@ const PriceRecommendations: React.FC = () => {
             {/* Summary Card with sample data */}
             <Card style={{ marginTop: 24, marginBottom: 24 }}>
               <Row gutter={24}>
+                {/*
                 <Col span={8}>
                   <Statistic
                     title="Net Revenue Impact"
@@ -526,6 +527,7 @@ const PriceRecommendations: React.FC = () => {
                     prefix="$"
                   />
                 </Col>
+                */}
                 <Col span={8}>
                   <Statistic
                     title="Price Changes"
@@ -602,7 +604,8 @@ const PriceRecommendations: React.FC = () => {
               prefix="$"
             />
             <Text type="secondary">
-              {netRevenueImpact > 0 ? 'Increase' : netRevenueImpact < 0 ? 'Decrease' : 'No change'} of {formatNumberWithCommas(Math.abs(Math.round(percentChange * 10) / 10))}%
+              Feature in development
+              {/*{netRevenueImpact > 0 ? 'Increase' : netRevenueImpact < 0 ? 'Decrease' : 'No change'} of {formatNumberWithCommas(Math.abs(Math.round(percentChange * 10) / 10))}%*/}
             </Text>
           </Col>
           <Col span={8}>
