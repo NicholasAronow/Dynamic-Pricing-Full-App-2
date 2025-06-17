@@ -32,7 +32,7 @@ class DataCollectionAgent(BaseAgent):
     """Agent responsible for collecting, analyzing, and distilling data to extract item-specific insights"""
     
     def __init__(self):
-        super().__init__("DataCollectionAgent", model="o3")
+        super().__init__("DataCollectionAgent", model="gpt-4o")
         
     def get_system_prompt(self) -> str:
         return """You are a Data Collection and Analysis Agent for a dynamic pricing system with memory capabilities. Your role is to:
@@ -174,7 +174,9 @@ class DataCollectionAgent(BaseAgent):
             if "pos_data" in final_data_copy:
                 del final_data_copy["pos_data"]
 
-            return final_data_copy
+            analyzed = self.analyze_with_llm(final_data_copy)
+
+            return analyzed
             
         except Exception as e:
             self.logger.error(f"Error in data collection process: {str(e)}")
@@ -195,9 +197,7 @@ class DataCollectionAgent(BaseAgent):
             models.Order.user_id == user_id,
             models.Order.order_date >= datetime.now(timezone.utc) - timedelta(days=90)
         ).order_by(models.Order.order_date.desc()).limit(1000).all()  # Limit to 1000 most recent orders
-        
-        self.logger.info(f"Found {len(recent_orders)} recent orders")
-        
+                
         # Get all order IDs
         order_ids = [order.id for order in recent_orders]
         
@@ -1660,14 +1660,14 @@ RAW DATA: {json.dumps(data)}
                 {{
                     "item_id": "123",
                     "item_name": "item name",
-                    "item_basics": "item_basics",
-                    "sales_metrics": "sales_metrics",
-                    "elasticity_indicators": "elasticity_indicators",
-                    "competitive_position": "competitive_position",
-                    "cost_dynamics": "cost_dynamics",
-                    "price_change_history": "price_change_history",
-                    "customer_segments": "customer_segments",
-                    "optimization_signals": "optimization_signals"
+                    "item_basics": "1 | Espresso | Hot Drinks | $2.75 | $0.65 | 76.4%"",
+                    "sales_metrics": "Momentum 0.05 stable; 831 sales/59d ≈14/d; peak May mornings; avg units/order 1.0",
+                    "elasticity_indicators": "E 0.76 (med-inelastic)",
+                    "competitive_position": "Comp avg $3.00; Δ −8.3%; value tier",
+                    "cost_dynamics": "Bean cost flat; margin steady; no seasonality",
+                    "price_change_history": "No recent changes",
+                    "customer_segments": "Commuters & regulars; low price focus",
+                    "optimization_signals": "Room to +5-8% w/low volume risk"
                 }}
             ]
             """

@@ -354,6 +354,11 @@ async def get_agent_capabilities() -> Dict[str, Any]:
             "name": "Competitor Tracking Agent",
             "description": "Analyzes menu items against competitors to provide detailed pricing comparisons and recommendations",
             "actions": ["analyze_competitor_prices", "determine_competitive_positioning", "provide_pricing_recommendations"]
+        },
+        "aggregate_pricing": {
+            "name": "Aggregate Pricing Agent",
+            "description": "Orchestrates and aggregates outputs from data collection, competitor analysis, and market research agents into a consolidated view",
+            "actions": ["run_data_collection", "run_competitor_analysis", "run_market_research", "aggregate_results"]
         }
     }
     

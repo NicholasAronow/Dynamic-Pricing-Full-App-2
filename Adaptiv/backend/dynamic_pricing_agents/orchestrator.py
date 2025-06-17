@@ -17,6 +17,7 @@ from .agents import (
     get_test_web_agent,
     get_test_db_agent
 )
+from .agents.aggregate_pricing_agent import AggregatePricingAgent
 from .task_manager import running_tasks  # Import from shared module
 
 class DynamicPricingOrchestrator:
@@ -34,7 +35,8 @@ class DynamicPricingOrchestrator:
             'experimentation': ExperimentationAgent(),
             'competitor_agent': get_competitor_agent(),
             'market_analysis_web_enabled': get_test_web_agent(),
-            'competitor_tracking_db': get_test_db_agent()
+            'competitor_tracking_db': get_test_db_agent(),
+            'aggregate_pricing': AggregatePricingAgent()
         }
         
         self.execution_history = []

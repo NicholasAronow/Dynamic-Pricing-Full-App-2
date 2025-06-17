@@ -416,9 +416,17 @@ class TestDBAgentWrapper:
     def _safe_parse_menu_items(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Safely parse menu items from context with fallback"""
         try:
-            # Try to get menu items from context
-            menu_items = context.get("menu_items")
+            # First try to get data from data_collection_results in context
+            data_collection_results = context.get("data_collection_results", {})
+            if data_collection_results:
+                # Try to get menu items from data collection results
+                menu_items = data_collection_results.get("menu_items", [])
+                if menu_items and isinstance(menu_items, list):
+                    self.logger.info(f"Using menu items from data_collection_results: {len(menu_items)} items")
+                    return menu_items
             
+            # Then try to get menu items directly from context
+            menu_items = context.get("menu_items")
             if menu_items and isinstance(menu_items, list):
                 # Validate each item is a dictionary
                 valid_items = []
@@ -435,6 +443,7 @@ class TestDBAgentWrapper:
             try:
                 from ..sample_outputs.data_collection_output import output
                 if isinstance(output, list):
+                    self.logger.warning("Using fallback sample data")
                     return output
             except ImportError:
                 self.logger.warning("Could not import sample data")

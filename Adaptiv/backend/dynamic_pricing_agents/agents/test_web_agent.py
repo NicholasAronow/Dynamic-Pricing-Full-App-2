@@ -135,13 +135,34 @@ class TestWebAgentWrapper:
         Analyze these menu items and conduct relevant market research.
         """
         
-        # Load menu data (with fallback)
-        try:
-            from ..sample_outputs.data_collection_output import output as sample_output
-            menu_items = parse_data_collection_output(file_content=sample_output)
-        except:
-            # Fallback sample data
-            menu_items = [
+        # Load menu data from context or fall back to sample data
+        menu_items = []
+        
+        # First try to get data collection results from context
+        data_collection_results = context.get("data_collection_results", {})
+        if data_collection_results:
+            menu_items_from_data = data_collection_results.get("menu_items", [])
+            if menu_items_from_data and isinstance(menu_items_from_data, list):
+                logger.info(f"Using menu items from data_collection_results: {len(menu_items_from_data)} items")
+                menu_items = menu_items_from_data
+                
+        # If no menu items found, try getting them directly from context
+        if not menu_items:
+            direct_menu_items = context.get("menu_items")
+            if direct_menu_items and isinstance(direct_menu_items, list):
+                menu_items = direct_menu_items
+                logger.info(f"Using menu items directly from context: {len(menu_items)} items")
+        
+        # If still no menu items, fall back to sample data
+        if not menu_items:
+            try:
+                from ..sample_outputs.data_collection_output import output as sample_output
+                menu_items = parse_data_collection_output(file_content=sample_output)
+                logger.warning("Using sample data from data_collection_output")
+            except Exception as e:
+                logger.warning(f"Could not import sample data: {e}")
+                # Final fallback sample data
+                menu_items = [
                 {
                     "item_id": "LATTE001",
                     "item_name": "Latte", 
@@ -187,7 +208,6 @@ class TestWebAgentWrapper:
         
         # Build query with all items and business context
         query = base_query + "\n" + business_context + "\n\nMENU ITEMS:\n"
-        
         for item in menu_items:
             query += f"\n{item['item_name']} ({item['item_id']}):"
             query += f"\n- {item.get('item_basics', 'No basics')}"
