@@ -480,11 +480,11 @@ const DynamicPricingAgents: React.FC = () => {
       setAgentStatuses(prev => prev.map(agent => ({ ...agent, status: 'running' })));
       
       // Debug logging
-      console.log('Calling API to run aggregate pricing agent...');
+      console.log('Calling API to start agent analysis task via Celery worker...');
       
-      // Run the aggregate pricing agent
+      // Start the agent analysis as a background task via Celery worker
       const response = await axios.post(
-        `${API_BASE_URL}/api/agents/dynamic-pricing/run-agent`,
+        `${API_BASE_URL}/api/agents/dynamic-pricing/start-task`,
         {
           agent_name: 'aggregate_pricing',
           action: 'process',
@@ -498,36 +498,20 @@ const DynamicPricingAgents: React.FC = () => {
       );
       
       // Debug logging
-      console.log('Aggregate pricing agent response:', response.data);
+      console.log('Task initiation response:', response.data);
 
-      if (response.data && response.data.success) {
-        // Process pricing recommendations
-        if (response.data.pricing_recommendations && 
-            Array.isArray(response.data.pricing_recommendations)) {
-          
-          console.log('Received pricing recommendations:', response.data.pricing_recommendations);
-          
-          // Generate a unique batch ID for this set of recommendations
-          const batchId = `batch_${Date.now()}`;
-          
-          // Save recommendations to database
-          await saveRecommendationsToDatabase(response.data.pricing_recommendations, batchId);
-          
-          // Fetch the newly saved recommendations
-          await fetchAgentRecommendations(batchId);
-          
-          // Mark analysis as completed
-          setAnalysisStatus('completed');
-          setAgentStatuses(prev => prev.map(agent => ({ ...agent, status: 'completed' })));
-          message.success('Pricing analysis completed successfully!');
-        } else {
-          console.error('No valid pricing recommendations returned');
-          message.warning('Analysis completed but no pricing recommendations were generated');
-          setAnalysisStatus('error');
-        }
+      if (response.data && response.data.success && response.data.task_id) {
+        // Get task ID from response
+        const newTaskId = response.data.task_id;
+        setTaskId(newTaskId);
+        
+        message.info('Analysis started. This may take a few minutes...');
+        
+        // Start polling for results
+        pollForResults(newTaskId);
       } else {
         // Handle error response
-        message.warning(`Analysis failed: ${response.data.error || 'unknown error'}`);
+        message.warning(`Failed to start analysis: ${response.data.error || 'unknown error'}`);
         setAnalysisStatus('error');
         setAgentStatuses(prev => prev.map(agent => ({ ...agent, status: 'error' })));
       }
@@ -542,7 +526,7 @@ const DynamicPricingAgents: React.FC = () => {
   };
 
   const pollForResults = async (taskId: string) => {
-    const maxAttempts = 600; // 10 minutes max
+    const maxAttempts = 600; // 10 minutes max (5 second interval = 50 minutes total)
     let attempts = 0;
     
     console.log('Starting to poll for results with task ID:', taskId);
@@ -552,7 +536,7 @@ const DynamicPricingAgents: React.FC = () => {
         console.log(`Polling attempt ${attempts + 1}...`);
         
         const response = await axios.get(
-          `${API_BASE_URL}/api/agents/dynamic-pricing/analysis-status/${taskId}`,
+          `${API_BASE_URL}/api/agents/dynamic-pricing/task-status/${taskId}`,
           {
             headers: {
               Authorization: `Bearer ${localStorage.getItem('token')}`
@@ -560,23 +544,69 @@ const DynamicPricingAgents: React.FC = () => {
           }
         );
         
-        console.log('Poll response:', response.data);
+        console.log('Celery task status poll response:', response.data);
 
         // Update status message if available
-        if (response.data.message) {
-          setAnalysisStatus(response.data.message);
-          console.log('Updated status message:', response.data.message);
+        if (response.data.status_message) {
+          setAnalysisStatus(response.data.status_message);
+          console.log('Updated status message:', response.data.status_message);
+          
+          // Update agent statuses based on task progress
+          if (response.data.agent_statuses) {
+            setAgentStatuses(prev => prev.map(agent => {
+              const matchingStatus = response.data.agent_statuses.find((status: any) => 
+                status.name === agent.name
+              );
+              
+              if (matchingStatus) {
+                return {
+                  ...agent,
+                  status: matchingStatus.status || 'running',
+                  lastRun: matchingStatus.lastRun || ''
+                };
+              }
+              return agent;
+            }));
+          }
         }
 
-        if (response.data.status === 'completed') {
+        if (response.data.task_status === 'SUCCESS') {
           clearInterval(poll);
           setAnalysisStatus('completed');
-          console.log('Analysis complete! Results:', response.data.results);
+          console.log('Analysis task complete! Results:', response.data.result);
           
           // Check if results structure is as expected
-          if (response.data.results) {
-            setResults(response.data.results);
-            console.log('Results set in state');
+          if (response.data.result) {
+            // Store analysis results
+            if (response.data.result.analysis_results) {
+              setResults(response.data.result.analysis_results);
+              console.log('Analysis results set in state');
+              
+              // Save results to localStorage
+              localStorage.setItem('adaptiv_analysis_results', JSON.stringify(response.data.result.analysis_results));
+              localStorage.setItem('adaptiv_analysis_timestamp', Date.now().toString());
+              
+              // Store analysis date if available
+              if (response.data.result.analysis_date) {
+                setAnalysisDate(response.data.result.analysis_date);
+              }
+            }
+            
+            // Process pricing recommendations if available
+            if (response.data.result.pricing_recommendations && 
+                Array.isArray(response.data.result.pricing_recommendations)) {
+              
+              console.log('Received pricing recommendations:', response.data.result.pricing_recommendations);
+              
+              // Generate a unique batch ID for this set of recommendations
+              const batchId = response.data.result.batch_id || `batch_${Date.now()}`;
+              
+              // Save recommendations to database
+              await saveRecommendationsToDatabase(response.data.result.pricing_recommendations, batchId);
+              
+              // Fetch the newly saved recommendations
+              await fetchAgentRecommendations(batchId);
+            }
           } else {
             console.error('Results missing from response');
             message.warning('Analysis completed but results are not available');
@@ -588,13 +618,14 @@ const DynamicPricingAgents: React.FC = () => {
             lastRun: new Date().toLocaleTimeString()
           })));
           message.success('Analysis completed successfully!');
-        } else if (response.data.status === 'error') {
+        } else if (response.data.task_status === 'FAILURE') {
           clearInterval(poll);
           setAnalysisStatus('error');
-          console.error('Analysis failed with error:', response.data.error);
+          console.error('Analysis task failed with error:', response.data.error);
           setAgentStatuses(prev => prev.map(agent => ({ ...agent, status: 'error' })));
           message.error(`Analysis failed: ${response.data.error || 'Unknown error'}`);
         }
+        // PENDING and STARTED states will continue polling
         
         attempts++;
         if (attempts >= maxAttempts) {

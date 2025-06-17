@@ -467,6 +467,27 @@ class TestDBAgentWrapper:
             return []
         
     async def process(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        # First try to parse menu items from data collection results if it contains a content field with JSON
+        data_collection_results = context.get("data_collection_results", {})
+        menu_items = []
+        
+        # Check if the data_collection_results contains a content field with JSON
+        if data_collection_results and 'content' in data_collection_results:
+            content = data_collection_results.get('content', '')
+            self.logger.info(f"Found content field in data_collection_results")
+            
+            # Check if content is a string containing markdown JSON block
+            if isinstance(content, str) and '```json' in content:
+                # Extract the JSON from markdown code block
+                try:
+                    json_str = content.split('```json\n', 1)[1].split('```', 1)[0].strip()
+                    menu_items_from_json = json.loads(json_str)
+                    if isinstance(menu_items_from_json, list) and len(menu_items_from_json) > 0:
+                        self.logger.info(f"Successfully parsed {len(menu_items_from_json)} items from data collection JSON")
+                        # Store the parsed menu items in the context for later use
+                        context["menu_items"] = menu_items_from_json
+                except Exception as e:
+                    self.logger.error(f"Failed to parse JSON from content: {str(e)}")
         """
         Process menu items with competitor analysis.
         

@@ -140,7 +140,28 @@ class TestWebAgentWrapper:
         
         # First try to get data collection results from context
         data_collection_results = context.get("data_collection_results", {})
-        if data_collection_results:
+        logger.info("Data collection results structure:")
+        logger.info(data_collection_results)
+        
+        # Check if the data_collection_results contains a content field with JSON
+        if data_collection_results and 'content' in data_collection_results:
+            content = data_collection_results.get('content', '')
+            logger.info(f"Found content field in data_collection_results")
+            
+            # Check if content is a string containing markdown JSON block
+            if isinstance(content, str) and '```json' in content:
+                # Extract the JSON from markdown code block
+                try:
+                    json_str = content.split('```json\n', 1)[1].split('```', 1)[0].strip()
+                    menu_items_from_json = json.loads(json_str)
+                    if isinstance(menu_items_from_json, list) and len(menu_items_from_json) > 0:
+                        logger.info(f"Successfully parsed {len(menu_items_from_json)} items from data collection JSON")
+                        menu_items = menu_items_from_json
+                except Exception as e:
+                    logger.error(f"Failed to parse JSON from content: {str(e)}")
+                    
+        # Try the original approach as fallback
+        if not menu_items and data_collection_results:
             menu_items_from_data = data_collection_results.get("menu_items", [])
             if menu_items_from_data and isinstance(menu_items_from_data, list):
                 logger.info(f"Using menu items from data_collection_results: {len(menu_items_from_data)} items")

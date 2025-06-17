@@ -1,12 +1,15 @@
 """
 API Routes for Dynamic Pricing Agent System
 """
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Path
 from sqlalchemy.orm import Session
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import asyncio
 import logging
+
+# Import Celery tasks
+from tasks import run_dynamic_pricing_analysis_task, get_dynamic_pricing_task_status
 
 from database import get_db
 from auth import get_current_user
@@ -578,6 +581,84 @@ async def test_agent(
             "agent_name": agent_name,
             "error": str(e),
             "error_type": type(e).__name__
+        }
+
+
+@router.post("/start-task")
+async def start_dynamic_pricing_task(
+    data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    Start a dynamic pricing analysis task to run on Celery worker
+    """
+    try:
+        user_id = current_user.id
+        
+        # Check if analysis is already running for this user
+        if user_id in running_tasks and running_tasks[user_id].get('status') == 'running':
+            return {
+                "status": "already_running",
+                "message": "Analysis is already in progress for this user",
+                "task_id": running_tasks[user_id].get('task_id')
+            }
+        
+        # Extract parameters from request if provided, or use default empty dict
+        parameters = data.get("parameters", {})
+        
+        # Launch the Celery task
+        task = run_dynamic_pricing_analysis_task.delay(user_id, parameters)
+        task_id = task.id
+        
+        # Store task info
+        running_tasks[user_id] = {
+            'task_id': task_id,
+            'status': 'running',
+            'started_at': datetime.now().isoformat()
+        }
+        
+        logger.info(f"Started Celery task {task_id} for user {user_id}")
+        
+        return {
+            "status": "started",
+            "task_id": task_id,
+            "message": "Dynamic pricing analysis started successfully"
+        }
+        
+    except Exception as e:
+        logger.exception(f"Error starting dynamic pricing task: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Error starting task: {str(e)}",
+            "error": str(e)
+        }
+
+
+@router.get("/task-status/{task_id}")
+async def check_task_status(
+    task_id: str = Path(..., title="Task ID"),
+    current_user = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    Check the status of a dynamic pricing analysis task running on Celery
+    """
+    try:
+        user_id = current_user.id
+        
+        # Call the Celery task status check function
+        result = get_dynamic_pricing_task_status.delay(task_id, user_id)
+        status_result = result.get(timeout=10)  # Wait up to 10 seconds for result
+        
+        return status_result
+        
+    except Exception as e:
+        logger.exception(f"Error checking task status: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "task_status": "ERROR",
+            "status_message": "Error checking task status"
         }
 
 
