@@ -4,7 +4,8 @@ from sqlalchemy import desc, func
 from sqlalchemy.exc import SQLAlchemyError
 from typing import List, Optional
 from datetime import datetime, timedelta
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from uuid import uuid4
 
 from database import get_db
 from models import PricingRecommendation, Item, User
@@ -36,6 +37,80 @@ class PricingRecommendationResponse(BaseModel):
 class PricingRecommendationAction(BaseModel):
     action: str  # "accept" or "reject"
     feedback: Optional[str] = None
+    
+class RecommendationItem(BaseModel):
+    item_id: int
+    item_name: str
+    current_price: float
+    recommended_price: float
+    price_change_amount: float
+    price_change_percent: float
+    confidence_score: float
+    rationale: str
+    implementation_status: str = "pending"
+    batch_id: str
+    reevaluation_date: Optional[datetime] = None
+
+class BulkRecommendationInput(BaseModel):
+    recommendations: List[RecommendationItem]
+    
+
+@pricing_recommendations_router.post("/bulk-recommendations", status_code=status.HTTP_201_CREATED)
+def create_bulk_recommendations(
+    recommendation_data: BulkRecommendationInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Create multiple pricing recommendations at once from agent results
+    """
+    try:
+        # Track successfully created recommendations
+        created_recommendations = []
+        
+        # Process each recommendation
+        for rec_item in recommendation_data.recommendations:
+            # Create a new recommendation instance
+            db_recommendation = PricingRecommendation(
+                user_id=current_user.id,
+                item_id=rec_item.item_id,  # Only include item_id, not item_name
+                current_price=rec_item.current_price,
+                recommended_price=rec_item.recommended_price,
+                price_change_amount=rec_item.price_change_amount,
+                price_change_percent=rec_item.price_change_percent,
+                confidence_score=rec_item.confidence_score,
+                rationale=rec_item.rationale,
+                implementation_status=rec_item.implementation_status,
+                recommendation_date=datetime.utcnow(),
+                reevaluation_date=rec_item.reevaluation_date,
+                batch_id=rec_item.batch_id
+            )
+            
+            # Add to database
+            db.add(db_recommendation)
+            created_recommendations.append(db_recommendation)
+        
+        # Commit all changes
+        db.commit()
+        
+        # Refresh to get the assigned IDs
+        for rec in created_recommendations:
+            db.refresh(rec)
+            
+        return {
+            "status": "success",
+            "message": f"Created {len(created_recommendations)} recommendations",
+            "batch_id": recommendation_data.recommendations[0].batch_id if recommendation_data.recommendations else None,
+            "count": len(created_recommendations)
+        }
+        
+    except SQLAlchemyError as e:
+        # Roll back on error
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error creating recommendations: {str(e)}"
+        )
 
 @pricing_recommendations_router.get("/recommendations", response_model=List[PricingRecommendationResponse])
 def get_pricing_recommendations(

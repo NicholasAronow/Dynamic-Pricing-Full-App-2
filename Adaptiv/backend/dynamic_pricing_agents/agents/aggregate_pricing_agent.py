@@ -36,13 +36,26 @@ class AggregatePricingAgent(BaseAgent):
         logger.info("Starting aggregate pricing process")
         
         try:
+            # Ensure context has required fields with reasonable defaults
+            safe_context = context.copy()
+            
+            # If username isn't provided but email is, use email
+            if "username" not in safe_context and "user_id" in safe_context:
+                # Just use user_id as a placeholder if needed
+                safe_context["username"] = f"user_{safe_context['user_id']}"
+                logger.info(f"Using user_id as username substitute: {safe_context['username']}")
+                
+            # Ensure we have business_context
+            if "business_context" not in safe_context:
+                safe_context["business_context"] = {}
+                
             # Step 1: Run DataCollectionAgent
             logger.info("Running DataCollectionAgent")
-            data_collection_results = self.data_collection_agent.process(context)
+            data_collection_results = self.data_collection_agent.process(safe_context)
             logger.info("DataCollectionAgent completed successfully")
             
             # Create updated context with data collection results for other agents
-            updated_context = context.copy()
+            updated_context = safe_context.copy()
             updated_context["data_collection_results"] = data_collection_results
             
             # Step 2: Run TestDBAgent (competitor analysis)

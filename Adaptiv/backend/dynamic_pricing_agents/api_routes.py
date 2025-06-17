@@ -269,6 +269,101 @@ async def get_latest_results(
         }
 
 
+@router.post("/run-agent")
+async def run_agent(
+    request_data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    Run a specific agent with parameters
+    """
+    user_id = current_user.id
+    
+    # Extract agent_name, action and parameters
+    agent_name = request_data.get("agent_name")
+    action = request_data.get("action", "process")
+    parameters = request_data.get("parameters", {})
+    
+    # Validate agent name
+    if agent_name not in orchestrator.agents:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Agent '{agent_name}' not found. Available agents: {list(orchestrator.agents.keys())}"
+        )
+    
+    try:
+        # Get the agent instance
+        agent_instance = orchestrator.agents[agent_name]
+        
+        # Fetch business profile data if available
+        try:
+            business_profile = db.query(models.BusinessProfile).filter(
+                models.BusinessProfile.user_id == user_id
+            ).first()
+            
+            business_context = {}
+            if business_profile:
+                business_context = {
+                    "business_name": business_profile.business_name,
+                    "industry": business_profile.industry,
+                    "company_size": business_profile.company_size,
+                    "location": f"{business_profile.city or ''}, {business_profile.state or ''}, {business_profile.country or 'USA'}".strip().strip(','),
+                    "city": business_profile.city,
+                    "state": business_profile.state,
+                    "country": business_profile.country or "USA"
+                }
+        except Exception as e:
+            logger.error(f"Error fetching business profile: {e}")
+            business_context = {}
+            
+        # Debug log to understand the User object
+        logger.info(f"User object attributes: {dir(current_user)}")
+        logger.info(f"User ID: {user_id}")
+        
+        # Create execution context with minimal required parameters
+        # and handle potential missing attributes safely
+        context = {
+            "db": db,
+            "user_id": user_id,
+            # Only include email if it exists, otherwise use id as a string
+            "email": getattr(current_user, 'email', f'user_{user_id}@example.com'),
+            "business_context": business_context,
+            "parameters": parameters
+        }
+        
+        # Log the execution details
+        logger.info(f"Running agent {agent_name} with action {action} for user {user_id}")
+        logger.info(f"Agent context keys: {list(context.keys())}")
+        
+        try:
+            # Execute the agent's process method
+            if action == "process":
+                result = await agent_instance.process(context)
+                logger.info(f"Agent {agent_name} completed successfully with result keys: {list(result.keys()) if isinstance(result, dict) else 'non-dict result'}")
+                return result
+            else:
+                # For future, could support other actions
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Action '{action}' not supported for agent '{agent_name}'"
+                )
+        except Exception as e:
+            logger.error(f"Error executing agent {agent_name}: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return {
+                "success": False,
+                "error": f"Error executing agent {agent_name}: {str(e)}"
+            }
+        
+    except Exception as e:
+        logger.error(f"Error running agent {agent_name}: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
 @router.post("/agent/{agent_name}/action")
 async def trigger_agent_action(
     agent_name: str,

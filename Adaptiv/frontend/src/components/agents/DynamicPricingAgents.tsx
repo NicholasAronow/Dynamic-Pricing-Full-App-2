@@ -397,6 +397,80 @@ const DynamicPricingAgents: React.FC = () => {
 
   // Action confirmation handler removed as per requirements - functionality moved to handleActionClick
   
+  // Function to save pricing recommendations to the database
+  const saveRecommendationsToDatabase = async (recommendations: any[], batchId: string) => {
+    try {
+      console.log(`Saving ${recommendations.length} recommendations to database with batch ID: ${batchId}`);
+      
+      // Format to match our backend schema
+      const formattedRecommendations = recommendations.map(rec => {
+        // Clean up price strings by removing $ and % symbols
+        const currentPrice = typeof rec.current_price === 'string' ? 
+          parseFloat(rec.current_price.replace('$', '').trim()) : 
+          typeof rec.current_price === 'number' ? 
+          rec.current_price : 0;
+          
+        const suggestedPrice = typeof rec.suggested_price === 'string' ? 
+          parseFloat(rec.suggested_price.replace('$', '').trim()) : 
+          typeof rec.suggested_price === 'number' ? 
+          rec.suggested_price : 0;
+        
+        // Calculate price change amount if not provided
+        const changeAmount = suggestedPrice - currentPrice;
+        
+        // Parse change percentage
+        let changePercent = 0;
+        if (rec.change_percentage) {
+          const percentStr = rec.change_percentage.toString().replace('%', '').trim();
+          changePercent = parseFloat(percentStr);
+        } else if (currentPrice > 0) {
+          changePercent = (changeAmount / currentPrice) * 100;
+        }
+        
+        // Calculate re-evaluation date
+        const daysToReEvaluate = rec.re_evaluation_days ? parseInt(rec.re_evaluation_days.toString()) : 30;
+        const reevalDate = new Date(Date.now() + daysToReEvaluate * 24 * 60 * 60 * 1000);
+        
+        console.log(`Processing item ${rec.item_name}: Current $${currentPrice}, Suggested $${suggestedPrice}, Change ${changePercent}%`);
+        
+        return {
+          item_id: rec.item_id,
+          item_name: rec.item_name,
+          current_price: currentPrice,
+          recommended_price: suggestedPrice,
+          price_change_percent: changePercent,
+          price_change_amount: changeAmount,
+          confidence_score: 0.85, // Default confidence score
+          rationale: rec.rationale || '',
+          implementation_status: 'pending',
+          batch_id: batchId,
+          reevaluation_date: reevalDate.toISOString()
+        };
+      });
+      
+      // Call our backend API to save recommendations
+      const response = await axios.post(
+        `${API_BASE_URL}/api/pricing/bulk-recommendations`,
+        {
+          recommendations: formattedRecommendations
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+      
+      console.log('Recommendations saved to database:', response.data);
+      message.success(`${recommendations.length} pricing recommendations saved successfully`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Error saving recommendations to database:', error);
+      message.error(`Failed to save recommendations: ${error.message || 'Unknown error'}`);
+      return null;
+    }
+  };
+  
   const runFullAnalysis = async () => {
     try {
       setLoading(true);
@@ -406,11 +480,16 @@ const DynamicPricingAgents: React.FC = () => {
       setAgentStatuses(prev => prev.map(agent => ({ ...agent, status: 'running' })));
       
       // Debug logging
-      console.log('Calling API to start analysis...');
+      console.log('Calling API to run aggregate pricing agent...');
       
+      // Run the aggregate pricing agent
       const response = await axios.post(
-        `${API_BASE_URL}/api/agents/dynamic-pricing/run-full-analysis`,
-        {},
+        `${API_BASE_URL}/api/agents/dynamic-pricing/run-agent`,
+        {
+          agent_name: 'aggregate_pricing',
+          action: 'process',
+          parameters: {}
+        },
         {
           headers: {
             Authorization: `Bearer ${localStorage.getItem('token')}`
@@ -419,18 +498,38 @@ const DynamicPricingAgents: React.FC = () => {
       );
       
       // Debug logging
-      console.log('API response:', response.data);
+      console.log('Aggregate pricing agent response:', response.data);
 
-      if (response.data.status === 'started') {
-        setTaskId(response.data.task_id);
-        message.info('Dynamic pricing analysis started. This may take a few moments...');
-        
-        // Start polling for results
-        pollForResults(response.data.task_id);
+      if (response.data && response.data.success) {
+        // Process pricing recommendations
+        if (response.data.pricing_recommendations && 
+            Array.isArray(response.data.pricing_recommendations)) {
+          
+          console.log('Received pricing recommendations:', response.data.pricing_recommendations);
+          
+          // Generate a unique batch ID for this set of recommendations
+          const batchId = `batch_${Date.now()}`;
+          
+          // Save recommendations to database
+          await saveRecommendationsToDatabase(response.data.pricing_recommendations, batchId);
+          
+          // Fetch the newly saved recommendations
+          await fetchAgentRecommendations(batchId);
+          
+          // Mark analysis as completed
+          setAnalysisStatus('completed');
+          setAgentStatuses(prev => prev.map(agent => ({ ...agent, status: 'completed' })));
+          message.success('Pricing analysis completed successfully!');
+        } else {
+          console.error('No valid pricing recommendations returned');
+          message.warning('Analysis completed but no pricing recommendations were generated');
+          setAnalysisStatus('error');
+        }
       } else {
-        // Handle other response statuses
-        message.warning(`Unexpected response: ${response.data.status || 'unknown'}`);
+        // Handle error response
+        message.warning(`Analysis failed: ${response.data.error || 'unknown error'}`);
         setAnalysisStatus('error');
+        setAgentStatuses(prev => prev.map(agent => ({ ...agent, status: 'error' })));
       }
     } catch (error) {
       console.error('Error starting analysis:', error);
