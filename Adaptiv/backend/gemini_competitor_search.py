@@ -75,7 +75,7 @@ RULES:
 1. Include ONLY working URLs that specifically relate to THIS business at THIS location
 2. PRIORITIZE: official website, online ordering systems (Toast, Square, etc.), and third-party menu directories
 3. VERIFY: Double-check address/location matches
-4. Include the 3 MOST RELIABLE sources, not an exhaustive list
+4. Include only the MOST RELIABLE source to reference both items and price, not an exhaustive list
 5. Set confidence based on how certain you are that the URL belongs to this specific business location
 
 If you cannot find ANY reliable sources, return: []""" 
