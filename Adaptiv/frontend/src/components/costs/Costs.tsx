@@ -361,7 +361,7 @@ const Costs: React.FC = () => {
     try {
       // Fetch existing menu items from itemService
       const items = await itemService.getItems();
-      
+      console.log(items)
       // Convert to our MenuItem format
       const existingMenuItems = items.map(item => ({
         id: item.id.toString(), // Convert number to string for id
@@ -372,13 +372,15 @@ const Costs: React.FC = () => {
       }));
       
       setMenuItems(existingMenuItems);
+
+      await generateAiSuggestions();
     } catch (error) {
       console.error('Error fetching menu items:', error);
       message.error('Could not load menu items. Starting with empty list.');
       setMenuItems([]);
     } finally {
       setQuickSetupLoading(false);
-      setCurrentStep(1);
+      setCurrentStep(2);
       setQuickSetupVisible(true);
       setScreenBlurred(true);
     }

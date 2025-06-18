@@ -985,7 +985,7 @@ class DataCollectionAgent(BaseAgent):
         elif isinstance(obj, np.ndarray):
             return self._convert_numpy_types(obj.tolist())
         # Check for boolean types by name as well as instance
-        elif isinstance(obj, (np.bool_, np.bool8)) or (hasattr(obj, 'dtype') and str(obj.dtype) == 'bool'):
+        elif isinstance(obj, np.bool_) or (hasattr(obj, 'dtype') and np.issubdtype(obj.dtype, np.bool_)):
             return bool(obj)  # Convert numpy booleans to native Python boolean values
         # Handle numpy scalar types generally
         elif isinstance(obj, np.generic):
