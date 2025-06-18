@@ -3,15 +3,21 @@ import { Layout, Menu, Avatar, Dropdown, Button } from 'antd';
 import { 
   MenuUnfoldOutlined, 
   MenuFoldOutlined,
-  DashboardOutlined,
+  HomeOutlined,
   UserOutlined,
   LogoutOutlined,
-  AreaChartOutlined,
-  ShoppingOutlined,
-  TeamOutlined,
-  RobotOutlined,
-  AppstoreOutlined,
-  DollarOutlined
+  BookOutlined,
+  ShopOutlined,
+  GlobalOutlined,
+  RocketOutlined,
+  SettingOutlined,
+  CalculatorOutlined,
+  PieChartOutlined,
+  CrownOutlined,
+  BankOutlined,
+  FileTextOutlined,
+  CoffeeOutlined,
+  ReadOutlined
 } from '@ant-design/icons';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -30,11 +36,11 @@ const MainLayout: React.FC = () => {
 
   const userMenu = (
     <Menu>
-      <Menu.Item key="profile" icon={<UserOutlined />}>
+      <Menu.Item key="profile" icon={<UserOutlined style={{ fontSize: '16px', color: '#7546C9' }} />}>
         <Link to="/profile">Profile</Link>
       </Menu.Item>
       <Menu.Divider />
-      <Menu.Item key="logout" icon={<LogoutOutlined />} onClick={handleLogout}>
+      <Menu.Item key="logout" icon={<LogoutOutlined style={{ fontSize: '16px', color: '#7546C9' }} />} onClick={handleLogout}>
         Logout
       </Menu.Item>
     </Menu>
@@ -48,22 +54,22 @@ const MainLayout: React.FC = () => {
             Adaptiv
           </div>
           <Menu theme="light" mode="inline" selectedKeys={[location.pathname]} style={{ flex: '1 0 auto' }}>
-          <Menu.Item key="/" icon={<DashboardOutlined />}>
+          <Menu.Item key="/" icon={<HomeOutlined style={{ fontSize: '18px', color: '#7546C9' }} />}>
             <Link to="/">Dashboard</Link>
           </Menu.Item>
-          <Menu.Item key="/price-recommendations" icon={<AreaChartOutlined />}>
-            <Link to="/price-recommendations">Menu</Link>
+          <Menu.Item key="/price-recommendations" icon={<CoffeeOutlined style={{ fontSize: '18px', color: '#7546C9' }} />}>
+            <Link to="/price-recommendations">Products</Link>
           </Menu.Item>
-          <Menu.Item key="/costs" icon={<DollarOutlined />}>
+          <Menu.Item key="/costs" icon={<CalculatorOutlined style={{ fontSize: '18px', color: '#7546C9' }} />}>
             <Link to="/costs">Costs</Link>
           </Menu.Item>
-          <Menu.Item key="/competitors" icon={<TeamOutlined />}>
+          <Menu.Item key="/competitors" icon={<GlobalOutlined style={{ fontSize: '18px', color: '#7546C9' }} />}>
             <Link to="/competitors">Competitors</Link>
           </Menu.Item>
-          <Menu.Item key="/agents" icon={<RobotOutlined />}>
-            <Link to="/agents">Agent Dashboard</Link>
+          <Menu.Item key="/agents" icon={<RocketOutlined style={{ fontSize: '18px', color: '#7546C9' }} />}>
+            <Link to="/agents">Price Optimization</Link>
           </Menu.Item>
-          <Menu.Item key="/profile" icon={<UserOutlined />}>
+          <Menu.Item key="/profile" icon={<BankOutlined style={{ fontSize: '18px', color: '#7546C9' }} />}>
             <Link to="/profile">Business Profile</Link>
           </Menu.Item>
         </Menu>
