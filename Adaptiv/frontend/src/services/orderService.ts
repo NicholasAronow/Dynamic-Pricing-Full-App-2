@@ -93,7 +93,7 @@ export const orderService = {
       
       // Call the backend endpoint that triggers the Square order sync with pagination
       // This will use the enhanced get_square_orders function with pagination
-      const response = await api.post('/square/sync', {
+      const response = await api.post('/integrations/square/sync', {
         account_id: currentUser.id
       });
       
