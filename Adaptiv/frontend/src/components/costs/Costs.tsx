@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import './custom-tabs.css';
 import { Card, Table, Typography, Space, Button, Empty, Spin, message, Tabs, Modal, Tooltip, Input, Alert, List, Statistic, AutoComplete, Select } from 'antd';
 import { PlusOutlined, DollarOutlined, CoffeeOutlined, AppstoreOutlined, ExclamationCircleOutlined, ThunderboltOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import * as recipeService from '../../services/recipeService';
@@ -546,12 +547,21 @@ const Costs: React.FC = () => {
       <Title level={5} type="secondary" style={{ marginTop: 0 }}>
         Track ingredient costs for your menu items to optimize your margin
       </Title>
-      <Tabs activeKey={activeTab} onChange={handleTabChange} style={{ marginBottom: 20 }}>
+      <Tabs 
+        activeKey={activeTab} 
+        onChange={handleTabChange} 
+        style={{ marginBottom: 20 }}
+        className="custom-tabs"
+        type="card"
+        tabBarStyle={{
+          background: '#f5f5f5',
+          borderBottom: '2px solid #9370DB'
+        }}
+      >
         <TabPane
           tab={<span><AppstoreOutlined /> Recipes</span>}
           key="1"
         >
-          <Card>
             {recipesLoading ? (
               <div style={{ textAlign: 'center', padding: '50px' }}>
                 <Spin size="large" />
@@ -562,6 +572,7 @@ const Costs: React.FC = () => {
                 columns={recipeColumns} 
                 rowKey="item_id" 
                 pagination={{ pageSize: 10 }}
+                style={{ backgroundColor: 'white' }}
                 footer={() => (
                   <Button 
                     type="dashed" 
@@ -681,14 +692,12 @@ const Costs: React.FC = () => {
                 </Button>
               </Empty>
             )}
-          </Card>
         </TabPane>
 
         <TabPane
           tab={<span><CoffeeOutlined /> Ingredients</span>}
           key="2"
         >
-          <Card>
             {ingredientsLoading ? (
               <div style={{ textAlign: 'center', padding: '50px' }}>
                 <Spin size="large" />
@@ -696,6 +705,7 @@ const Costs: React.FC = () => {
             ) : ingredients.length > 0 ? (
               <Table 
                 dataSource={ingredients} 
+                style={{ backgroundColor: 'white' }}
                 columns={ingredientColumns} 
                 rowKey="ingredient_id" 
                 pagination={{ pageSize: 10 }}
@@ -725,7 +735,6 @@ const Costs: React.FC = () => {
                 </Button>
               </Empty>
             )}
-          </Card>
         </TabPane>
       </Tabs>
       

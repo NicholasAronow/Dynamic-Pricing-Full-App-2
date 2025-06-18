@@ -1,0 +1,52 @@
+.custom-tabs .ant-tabs-nav {
+  margin-bottom: 0 !important;
+}
+
+.custom-tabs .ant-tabs-tab {
+  border-radius: 8px 8px 0 0 !important;
+  background-color: #f0f0f0 !important;
+  border: none !important;
+  margin-right: 4px !important;
+  padding: 12px 20px !important;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-weight: 500;
+}
+
+.custom-tabs .ant-tabs-tab-active {
+  background-color: #9370DB !important;
+  border-bottom: none !important;
+}
+
+.custom-tabs .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #ffffff !important;
+}
+
+.custom-tabs .ant-tabs-tab-btn {
+  color: #666666;
+}
+
+.custom-tabs .ant-tabs-content-holder {
+  border-left: 1px solid #f0f0f0;
+  border-right: 1px solid #f0f0f0;
+  border-bottom: 1px solid #f0f0f0;
+  padding: 16px;
+}
+
+.custom-tabs .ant-tabs-nav-wrap {
+  background-color: transparent !important;
+}
+
+.custom-tabs .ant-tabs-nav-list {
+  border-bottom: none !important;
+}
+
+/* Hide the ink bar */
+.custom-tabs .ant-tabs-ink-bar {
+  display: none !important;
+}
+
+/* Add bottom border to nav container */
+.custom-tabs .ant-tabs-nav:before {
+  border-bottom: none !important;
+}
