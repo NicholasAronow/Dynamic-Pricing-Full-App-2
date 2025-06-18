@@ -7,7 +7,7 @@ import models
 import json
 import sys
 from datetime import datetime, timedelta
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 
 def extract_pricing_recommendations(user_id=None, days=None, output_format='display', output_file=None):
     """

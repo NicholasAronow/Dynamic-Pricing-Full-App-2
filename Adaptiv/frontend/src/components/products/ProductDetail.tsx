@@ -1343,84 +1343,13 @@ const ProductDetail: React.FC = () => {
               </ResponsiveContainer>
             </div>
           </Card>
-          
-          {/* Sales Forecast Card */}
-          <Card
-            title={<span><AreaChartOutlined /> Sales Forecast</span>}
-            style={{ marginBottom: 24 }}
-          >
-            <Row gutter={[24, 24]}>
-              <Col xs={24} sm={8}>
-                <Statistic
-                  title="Forecast (Next Month)"
-                  value={forecastMetrics.nextMonthForecast}
-                  precision={0}
-                  prefix="$"
-                  valueStyle={{ color: 'rgba(0, 0, 0, 0.85)' }}
-                />
-              </Col>
-              <Col xs={24} sm={8}>
-                <Statistic
-                  title="Growth Rate"
-                  value={forecastMetrics.growthRate}
-                  precision={1}
-                  suffix="%"
-                  valueStyle={{ color: forecastMetrics.growthRate >= 0 ? '#3f8600' : '#cf1322' }}
-                  prefix={forecastMetrics.growthRate >= 0 ? <ArrowUpOutlined /> : <ArrowDownOutlined />}
-                />
-              </Col>
-              <Col xs={24} sm={8}>
-                <Statistic
-                  title="Forecast Accuracy"
-                  value={forecastMetrics.forecastAccuracy}
-                  suffix="%"
-                  valueStyle={{ color: forecastMetrics.forecastAccuracy > 90 ? '#3f8600' : forecastMetrics.forecastAccuracy > 80 ? '#d48806' : '#cf1322' }}
-                />
-              </Col>
-            </Row>
-            
-            <Divider />
-            
-            <div style={{ width: '100%', height: 300 }}>
-              <ResponsiveContainer>
-                <LineChart
-                  data={forecastData}
-                  margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="month" />
-                  <YAxis />
-                  <RechartsTooltip />
-                  <Legend />
-                  <Line 
-                    type="monotone" 
-                    dataKey="actual" 
-                    name="Actual Sales" 
-                    stroke="#666" 
-                    strokeWidth={2}
-                    dot={{ r: 5 }}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="forecast" 
-                    name="Forecast" 
-                    stroke="#666" 
-                    strokeWidth={2}
-                    strokeDasharray="5 5"
-                    dot={{ r: 5 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
         </Tabs.TabPane>
         
-        {/* Competitors Tab */}
+        {/* Competitors Tab 
         <Tabs.TabPane 
           tab={<span><ShopOutlined /> Competitors</span>}
           key="competitors"
         >
-          {/* Market Overview Card */}
           <Card
             title={<span><ShopOutlined /> Market Overview</span>}
             style={{ marginBottom: 24 }}
@@ -1468,7 +1397,6 @@ const ProductDetail: React.FC = () => {
               <div style={{ position: 'relative', height: 10, background: 'linear-gradient(to right, #f0f0f0, #d9d9d9, #bfbfbf)', borderRadius: 4 }}>
                 {marketPositionData && (
                   <>
-                    {/* Our price dot */}
                     <div
                       style={{
                         position: 'absolute',
@@ -1484,7 +1412,6 @@ const ProductDetail: React.FC = () => {
                       }}
                     />
                     
-                    {/* Market average dot with hover effect */}
                     <div style={{ position: 'relative' }}>
                       <div
                         style={{
@@ -1539,7 +1466,6 @@ const ProductDetail: React.FC = () => {
                       </div>
                     </div>
                     
-                    {/* Scale markings - showing actual prices instead of 1-10 */}
                     <div 
                       style={{
                         position: 'absolute',
@@ -1567,7 +1493,6 @@ const ProductDetail: React.FC = () => {
                       ${marketPositionData ? marketPositionData.marketHigh.toFixed(2) : '0.00'}
                     </div>
                     
-                    {/* Our price marker */}
                     <div 
                       style={{ 
                         position: 'absolute', 
@@ -1597,7 +1522,6 @@ const ProductDetail: React.FC = () => {
             </Text>
           </Card>
           
-          {/* Competitor Data Card */}
           <Card
             title={<span><ShopOutlined /> Competitor Pricing Data</span>}
             style={{ marginBottom: 24 }}
@@ -1717,7 +1641,7 @@ const ProductDetail: React.FC = () => {
               ]}
             />
           </Card>
-        </Tabs.TabPane>
+        </Tabs.TabPane> */}
       </Tabs>
     </div>
   );

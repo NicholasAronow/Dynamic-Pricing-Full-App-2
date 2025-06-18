@@ -59,7 +59,17 @@ def run_all_extractions(user_id=None, days=None, output_format='json', output_di
     # 3. Extract competitor data
     print("\n3. Extracting competitor data...")
     competitor_output = os.path.join(output_dir, f"competitor_data.{output_format}")
-    extract_competitor_data(user_id, None, days, output_format, competitor_output)
+    try:
+        # Only include output_format and output_file if they are not 'display'
+        if output_format == 'display':
+            extract_competitor_data(user_id, None, days, 'json', competitor_output, fallback_to_all=True)
+            print(f"Competitor data saved to {competitor_output} (JSON format)")
+        else:
+            extract_competitor_data(user_id, None, days, output_format, competitor_output, fallback_to_all=True)
+    except Exception as e:
+        print(f"Warning: Error extracting competitor data: {e}")
+        print(f"  Competitor data may be incomplete or not available for user {user_id}")
+        print(f"  Try running extract_competitor_data.py directly for more details")
     
     # 4. Extract pricing recommendations
     print("\n4. Extracting pricing recommendations...")
