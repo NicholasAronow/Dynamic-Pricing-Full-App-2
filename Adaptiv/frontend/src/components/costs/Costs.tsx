@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Typography, Space, Button, Empty, Spin, message, Tabs, Modal, Tooltip, Input, Alert, List, Statistic, AutoComplete, Select } from 'antd';
-import { PlusOutlined, DollarOutlined, CoffeeOutlined, AppstoreOutlined, ExclamationCircleOutlined, ThunderboltOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, DollarOutlined, CoffeeOutlined, AppstoreOutlined, ExclamationCircleOutlined, ThunderboltOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import * as recipeService from '../../services/recipeService';
 import { generateSuggestionsFromMenu } from '../../services/recipeService';
 import itemService from '../../services/itemService';
@@ -177,10 +177,11 @@ const Costs: React.FC = () => {
     {
       title: 'Action',
       key: 'action',
+      width: '80px',
       render: (_: any, record: RecipeItem) => (
-        <Space size="middle">
-          <Button type="link" onClick={() => handleEditRecipe(record)}>Edit</Button>
-          <Button type="link" danger onClick={() => handleDeleteRecipe(record)}>Delete</Button>
+        <Space size="small">
+          <Button type="text" icon={<EditOutlined />} onClick={() => handleEditRecipe(record)} />
+          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => handleDeleteRecipe(record)} />
         </Space>
       ),
     },
@@ -213,10 +214,11 @@ const Costs: React.FC = () => {
     {
       title: 'Action',
       key: 'action',
+      width: '80px',
       render: (_: any, record: IngredientItem) => (
-        <Space size="middle">
-          <Button type="link" onClick={() => handleEditIngredient(record)}>Edit</Button>
-          <Button type="link" danger onClick={() => handleDeleteIngredient(record)}>Delete</Button>
+        <Space size="small">
+          <Button type="text" icon={<EditOutlined />} onClick={() => handleEditIngredient(record)} />
+          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => handleDeleteIngredient(record)} />
         </Space>
       ),
     },
@@ -540,22 +542,15 @@ const Costs: React.FC = () => {
 
   return (
     <div>
+      <Title level={2}>Costs</Title>
+      <Title level={5} type="secondary" style={{ marginTop: 0 }}>
+        Track ingredient costs for your menu items to optimize your margin
+      </Title>
       <Tabs activeKey={activeTab} onChange={handleTabChange} style={{ marginBottom: 20 }}>
         <TabPane
           tab={<span><AppstoreOutlined /> Recipes</span>}
           key="1"
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
-            <Title level={3}>Menu Item Recipes</Title>
-            <Button 
-              type="primary" 
-              icon={<PlusOutlined />} 
-              onClick={handleAddRecipe}
-            >
-              Add Recipe
-            </Button>
-          </div>
-
           <Card>
             {recipesLoading ? (
               <div style={{ textAlign: 'center', padding: '50px' }}>
@@ -567,6 +562,17 @@ const Costs: React.FC = () => {
                 columns={recipeColumns} 
                 rowKey="item_id" 
                 pagination={{ pageSize: 10 }}
+                footer={() => (
+                  <Button 
+                    type="dashed" 
+                    block 
+                    icon={<PlusOutlined />} 
+                    onClick={handleAddRecipe}
+                    style={{ height: '60px' }}
+                  >
+                    Add Recipe
+                  </Button>
+                )}
                 expandable={{
                   expandedRowRender: (record: RecipeItem) => (
                     <div style={{ padding: '8px 0' }}>
@@ -682,17 +688,6 @@ const Costs: React.FC = () => {
           tab={<span><CoffeeOutlined /> Ingredients</span>}
           key="2"
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
-            <Title level={3}>Ingredient Management</Title>
-            <Button 
-              type="primary" 
-              icon={<PlusOutlined />} 
-              onClick={handleAddIngredient}
-            >
-              Add Ingredient
-            </Button>
-          </div>
-
           <Card>
             {ingredientsLoading ? (
               <div style={{ textAlign: 'center', padding: '50px' }}>
@@ -704,6 +699,17 @@ const Costs: React.FC = () => {
                 columns={ingredientColumns} 
                 rowKey="ingredient_id" 
                 pagination={{ pageSize: 10 }}
+                footer={() => (
+                  <Button 
+                    type="dashed" 
+                    block 
+                    icon={<PlusOutlined />} 
+                    onClick={handleAddIngredient}
+                    style={{ height: '60px' }}
+                  >
+                    Add Ingredient
+                  </Button>
+                )}
               />
             ) : (
               <Empty 
@@ -881,7 +887,7 @@ const Costs: React.FC = () => {
                     width: '10%',
                     render: (_, record: any, index: number) => (
                       <Button
-                        type="link"
+                        type="text"
                         danger
                         icon={<DeleteOutlined />}
                         onClick={() => removeMenuItem(index)}
@@ -1061,7 +1067,7 @@ const Costs: React.FC = () => {
                           width: '10%',
                           render: (_: any, record: any, rowIndex: number) => (
                             <Button
-                              type="link"
+                              type="text"
                               danger
                               icon={<DeleteOutlined />}
                               onClick={() => {
