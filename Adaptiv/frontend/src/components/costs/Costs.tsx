@@ -16,6 +16,68 @@ const { TabPane } = Tabs;
 const { confirm } = Modal;
 
 const Costs: React.FC = () => {
+  // Unit conversion function to convert between different measurement systems
+  const getConversionFactor = (fromUnit: string, toUnit: string): number => {
+    // Standardize unit formatting
+    const from = fromUnit?.toLowerCase().trim() || '';
+    const to = toUnit?.toLowerCase().trim() || '';
+    
+    // Same unit, no conversion needed
+    if (from === to) return 1;
+    
+    // Weight conversions (standardize to grams)
+    const weightConversions: Record<string, number> = {
+      'g': 1,
+      'gram': 1,
+      'grams': 1,
+      'kg': 1000,
+      'oz': 28.3495,
+      'ounce': 28.3495,
+      'ounces': 28.3495,
+      'lb': 453.592,
+      'pound': 453.592,
+      'pounds': 453.592
+    };
+    
+    // Volume conversions (standardize to ml)
+    const volumeConversions: Record<string, number> = {
+      'ml': 1,
+      'milliliter': 1,
+      'milliliters': 1,
+      'l': 1000,
+      'liter': 1000,
+      'liters': 1000,
+      'cup': 236.588,
+      'cups': 236.588,
+      'tbsp': 14.7868,
+      'tablespoon': 14.7868,
+      'tablespoons': 14.7868,
+      'tsp': 4.92892,
+      'teaspoon': 4.92892,
+      'teaspoons': 4.92892,
+      'gallon': 3785.41,
+      'gallons': 3785.41,
+      'quart': 946.353,
+      'quarts': 946.353,
+      'pint': 473.176,
+      'pints': 473.176
+    };
+    
+    // Check if both units are in the same category
+    if (weightConversions[from] && weightConversions[to]) {
+      // Convert from source unit to grams, then from grams to target unit
+      return weightConversions[from] / weightConversions[to];
+    } else if (volumeConversions[from] && volumeConversions[to]) {
+      // Convert from source unit to ml, then from ml to target unit
+      return volumeConversions[from] / volumeConversions[to];
+    }
+    
+    // Units are not compatible or not recognized, return 1 as fallback
+    console.warn(`Incompatible units: ${fromUnit} to ${toUnit}`);
+    return 1;
+  };
+
+  // State for recipes and ingredients
   const [recipes, setRecipes] = useState<RecipeItem[]>([]);
   const [ingredients, setIngredients] = useState<IngredientItem[]>([]);
   const [recipesLoading, setRecipesLoading] = useState<boolean>(true);
@@ -91,16 +153,32 @@ const Costs: React.FC = () => {
       render: (ingredients: any[]) => ingredients.length,
     },
     {
-      title: 'Created On',
-      dataIndex: 'date_created',
-      key: 'date_created',
+      title: 'Total Ingredient Cost',
+      key: 'total_ingredient_cost',
+      render: (_: any, record: RecipeItem) => {
+        let totalCost = 0;
+        record.ingredients.forEach(ing => {
+          const ingredient = ingredients.find(i => i.ingredient_id === ing.ingredient_id);
+          if (ingredient && ingredient.price && ingredient.quantity) {
+            const baseUnitPrice = ingredient.price / ingredient.quantity;
+            
+            if (ing.unit === ingredient.unit) {
+              totalCost += baseUnitPrice * ing.quantity;
+            } else {
+              const conversionFactor = getConversionFactor(ingredient.unit, ing.unit);
+              totalCost += baseUnitPrice * ing.quantity / conversionFactor;
+            }
+          }
+        });
+        
+        return <span style={{ color: totalCost === 0 ? '#ff4d4f' : 'inherit' }}>${totalCost.toFixed(2)}</span>;
+      },
     },
     {
       title: 'Action',
       key: 'action',
       render: (_: any, record: RecipeItem) => (
         <Space size="middle">
-          <Button type="link" onClick={() => showRecipeDetails(record)}>View Details</Button>
           <Button type="link" onClick={() => handleEditRecipe(record)}>Edit</Button>
           <Button type="link" danger onClick={() => handleDeleteRecipe(record)}>Delete</Button>
         </Space>
@@ -130,12 +208,7 @@ const Costs: React.FC = () => {
     {
       title: 'Unit Price',
       key: 'unit_price',
-      render: (text: string, record: IngredientItem) => `$${(record.price / record.quantity).toFixed(4)} / ${record.unit}`,
-    },
-    {
-      title: 'Created On',
-      dataIndex: 'date_created',
-      key: 'date_created',
+      render: (text: string, record: IngredientItem) => `$${(record.price / record.quantity).toFixed(2)} / ${record.unit}`,
     },
     {
       title: 'Action',
@@ -160,11 +233,6 @@ const Costs: React.FC = () => {
     setSelectedRecipe(recipe);
     setIsNewRecipe(false);
     setRecipeModalVisible(true);
-  };
-
-  const showRecipeDetails = (recipe: RecipeItem) => {
-    setSelectedRecipe(recipe);
-    setRecipeDetailsVisible(true);
   };
 
   const handleSaveRecipe = async (recipe: RecipeItem) => {
@@ -499,6 +567,99 @@ const Costs: React.FC = () => {
                 columns={recipeColumns} 
                 rowKey="item_id" 
                 pagination={{ pageSize: 10 }}
+                expandable={{
+                  expandedRowRender: (record: RecipeItem) => (
+                    <div style={{ padding: '8px 0' }}>
+                      <div>
+                        <Table 
+                          dataSource={record.ingredients.map((ing, idx) => ({ key: idx, ...ing }))} 
+                          columns={[
+                            {
+                              title: 'Ingredient',
+                              key: 'ingredient_name',
+                              render: (_, record) => {
+                                const ingredient = ingredients.find(ing => ing.ingredient_id === record.ingredient_id);
+                                return ingredient ? ingredient.ingredient_name : 'Unknown';
+                              }
+                            },
+                            {
+                              title: 'Quantity',
+                              dataIndex: 'quantity',
+                              key: 'quantity'
+                            },
+                            {
+                              title: 'Unit',
+                              dataIndex: 'unit',
+                              key: 'unit'
+                            },
+                            {
+                              title: 'Price',
+                              key: 'calculated_price',
+                              render: (_, record) => {
+                                // Find the base ingredient
+                                const ingredient = ingredients.find(ing => ing.ingredient_id === record.ingredient_id);
+                                if (!ingredient || !ingredient.price || !ingredient.quantity) return '$0.00';
+                                
+                                // Calculate the unit price for the base ingredient (price per unit)
+                                const baseUnitPrice = ingredient.price / ingredient.quantity;
+                                
+                                let finalPrice;
+                                // Check if units need conversion
+                                if (record.unit === ingredient.unit) {
+                                  // No conversion needed, simple multiplication
+                                  finalPrice = baseUnitPrice * record.quantity;
+                                } else {
+                                  // Handle unit conversions
+                                  const conversionFactor = getConversionFactor(ingredient.unit, record.unit);
+                                  // When converting from larger to smaller units, we divide by conversion factor
+                                  // e.g., if ingredient is in kg but recipe uses g, conversion factor is 1000/1 = 1000
+                                  // so we calculate: (price per kg) * (grams / 1000) = price for the grams used
+                                  finalPrice = baseUnitPrice * record.quantity / conversionFactor;
+                                }
+                                
+                                return (
+                                  <span style={{ color: finalPrice > 0 ? 'inherit' : 'red' }}>
+                                    ${finalPrice > 0 ? finalPrice.toFixed(2) : '0.00'}
+                                  </span>
+                                );
+                              }
+                            }
+                          ]}
+                          pagination={false}
+                          size="small"
+                          summary={() => {
+                            // Calculate total ingredient cost
+                            let totalCost = 0;
+                            record.ingredients.forEach(ing => {
+                              const ingredient = ingredients.find(i => i.ingredient_id === ing.ingredient_id);
+                              if (ingredient && ingredient.price && ingredient.quantity) {
+                                const baseUnitPrice = ingredient.price / ingredient.quantity;
+                                
+                                if (ing.unit === ingredient.unit) {
+                                  totalCost += baseUnitPrice * ing.quantity;
+                                } else {
+                                  const conversionFactor = getConversionFactor(ingredient.unit, ing.unit);
+                                  totalCost += baseUnitPrice * ing.quantity / conversionFactor;
+                                }
+                              }
+                            });
+                            
+                            return (
+                              <Table.Summary.Row>
+                                <Table.Summary.Cell index={0} colSpan={3}>
+                                  Total Ingredient Cost:
+                                </Table.Summary.Cell>
+                                <Table.Summary.Cell index={1}>
+                                  ${totalCost.toFixed(2)}
+                                </Table.Summary.Cell>
+                              </Table.Summary.Row>
+                            );
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ),
+                }}
               />
             ) : (
               <Empty 
@@ -865,28 +1026,29 @@ const Costs: React.FC = () => {
                           dataIndex: 'unit',
                           key: 'unit',
                           width: '20%',
-                          render: (text: string, record: any, index: number) => {
-                            // Common units for cooking/food
-                            const commonUnits = [
-                              'each', 'gram', 'kg', 'oz', 'lb', 'cup', 'tbsp', 'tsp', 
-                              'ml', 'l', 'gallon', 'quart', 'pint', 'slice', 'piece', 
-                              'bunch', 'pinch', 'dash', 'clove', 'leaf', 'sprig'
+                          render: (unitValue: string, record: any, rowIndex: number) => {
+                             // Define units for dropdown selection
+                            const units = [
+                              'g', 'kg', 'oz', 'lb', 'ml', 'l', 'cup', 'tbsp', 'tsp', 'ea', 'pieces', 'bunch', 'pinch'
                             ];
                             
                             return (
                               <Select
-                                value={text}
+                                value={unitValue}
                                 style={{ width: '100%' }}
-                                onChange={(value) => {
+                                onChange={(value: string) => {
                                   const updatedSuggestions = {...suggestions};
-                                  updatedSuggestions.recipes[recipeIndex].ingredients[index].unit = value;
-                                  setSuggestions(updatedSuggestions);
+                                  if (updatedSuggestions.recipes[recipeIndex] && 
+                                      updatedSuggestions.recipes[recipeIndex].ingredients[rowIndex]) {
+                                    updatedSuggestions.recipes[recipeIndex].ingredients[rowIndex].unit = value;
+                                    setSuggestions(updatedSuggestions);
+                                  }
                                 }}
                                 showSearch
                                 allowClear
                                 placeholder="Select unit"
                               >
-                                {commonUnits.map((unit: string) => (
+                                {units.map((unit: string) => (
                                   <Select.Option key={unit} value={unit}>{unit}</Select.Option>
                                 ))}
                               </Select>
