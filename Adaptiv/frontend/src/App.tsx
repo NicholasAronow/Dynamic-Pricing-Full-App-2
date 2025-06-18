@@ -16,6 +16,7 @@ import CompetitorDetail from './components/competitor/CompetitorDetail';
 import Competitors from './components/competitor/Competitors';
 import ProductDetail from './components/products/ProductDetail';
 import DynamicPricingAgents from './components/agents/DynamicPricingAgents';
+import Costs from './components/costs/Costs';
 
 
 // Integration components
@@ -63,6 +64,7 @@ function App() {
             <Route index element={<Dashboard />} />
             <Route path="profile" element={<BusinessProfile />} />
             <Route path="price-recommendations" element={<PriceRecommendations />} />
+            <Route path="costs" element={<Costs />} />
             <Route path="competitors" element={<Competitors />} />
             <Route path="competitor/:competitorId" element={<CompetitorDetail />} />
             <Route path="product/:productId" element={<ProductDetail />} />

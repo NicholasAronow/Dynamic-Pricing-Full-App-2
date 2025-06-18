@@ -305,6 +305,12 @@ class PriceRecommendationAction(Base):
 
 
 # =====================================================
+# Recipe and Ingredient Models
+# =====================================================
+
+from recipe_models import Ingredient, Recipe, RecipeIngredient
+
+# =====================================================
 # Dynamic Pricing Agent Memory Database Models
 # =====================================================
 
