@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Alert, Badge, Button, Card, Col, Empty, Input, Modal, Radio, Row, Select, Space, Spin, Statistic, Steps, Tabs, Tag, Timeline, message } from 'antd';
 import { CheckCircleOutlined, CheckOutlined, ClockCircleOutlined, CloseOutlined, DownOutlined, ExperimentOutlined, LineChartOutlined, PlayCircleOutlined, RobotOutlined, SearchOutlined, ThunderboltOutlined, UpOutlined, WarningOutlined } from '@ant-design/icons';
 import axios from 'axios';
+import { api } from '../../services/api';
 import { API_BASE_URL } from 'config';
 import pricingService, { AgentPricingRecommendation } from '../../services/pricingService';
 
@@ -167,13 +168,9 @@ const DynamicPricingAgents: React.FC = () => {
       console.log('Fetching latest analysis results from API...');
       
       // First, try to get results from the API
-      const response = await axios.get(
-        `${API_BASE_URL}/api/agents/dynamic-pricing/latest-results`,
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('token')}`
-          }
-        }
+      // Use the centralized api service instead of direct axios
+      const response = await api.get(
+        `agents/dynamic-pricing/latest-results`
       );
       
       console.log('Latest analysis results response:', response.data);
@@ -347,18 +344,14 @@ const DynamicPricingAgents: React.FC = () => {
         if (action === 'accept') {
           try {
             // Call an API to update the price in Square
-            await axios.post(
-              `${API_BASE_URL}/api/integrations/square/update-price`,
+            // Use the centralized api service instead of direct axios
+            await api.post(
+              `integrations/square/update-price`,
               {
                 item_id: recommendation.item_id,
                 new_price: recommendation.recommended_price
-              },
-              {
-                headers: {
-                  Authorization: `Bearer ${localStorage.getItem('token')}`
-                }
               }
-            );
+            )
             message.success(`Price updated to $${Number(recommendation.recommended_price).toFixed(2)} in Square`);
           } catch (squareError) {
             console.error('Error updating price in Square:', squareError);
@@ -449,15 +442,11 @@ const DynamicPricingAgents: React.FC = () => {
       });
       
       // Call our backend API to save recommendations
-      const response = await axios.post(
-        `${API_BASE_URL}/api/pricing/bulk-recommendations`,
+      // Use the centralized api service instead of direct axios
+      const response = await api.post(
+        `pricing/bulk-recommendations`,
         {
           recommendations: formattedRecommendations
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('token')}`
-          }
         }
       );
       
@@ -483,17 +472,13 @@ const DynamicPricingAgents: React.FC = () => {
       console.log('Calling API to start agent analysis task via Celery worker...');
       
       // Start the agent analysis as a background task via Celery worker
-      const response = await axios.post(
-        `${API_BASE_URL}/api/agents/dynamic-pricing/start-task`,
+      // Use the centralized api service instead of direct axios
+      const response = await api.post(
+        `agents/dynamic-pricing/start-task`,
         {
           agent_name: 'aggregate_pricing',
           action: 'process',
           parameters: {}
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('token')}`
-          }
         }
       );
       
@@ -535,13 +520,9 @@ const DynamicPricingAgents: React.FC = () => {
       try {
         console.log(`Polling attempt ${attempts + 1}...`);
         
-        const response = await axios.get(
-          `${API_BASE_URL}/api/agents/dynamic-pricing/task-status/${taskId}`,
-          {
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem('token')}`
-            }
-          }
+        // Use the centralized api service instead of direct axios
+        const response = await api.get(
+          `agents/dynamic-pricing/task-status/${taskId}`
         );
         
         console.log('Celery task status poll response:', response.data);

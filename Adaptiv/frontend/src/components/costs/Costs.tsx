@@ -590,6 +590,7 @@ const Costs: React.FC = () => {
                       <div>
                         <Table 
                           dataSource={record.ingredients.map((ing, idx) => ({ key: idx, ...ing }))} 
+                          style={{ backgroundColor: 'white' }}
                           columns={[
                             {
                               title: 'Ingredient',

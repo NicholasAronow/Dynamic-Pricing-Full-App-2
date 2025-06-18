@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { api } from './api';
 import { API_BASE_URL } from '../config';
 
 // Define types for the service
@@ -140,7 +141,8 @@ const agentService = {
   // Run the full agent process
   runFullAgentProcess: async (): Promise<AgentResponseData> => {
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/agents-sdk/run-full-process`);
+      // Use the centralized api service instead of direct axios
+      const response = await api.post(`agents-sdk/run-full-process`);
       return response.data;
     } catch (error) {
       console.error('Error running full agent process:', error);
@@ -158,10 +160,12 @@ const agentService = {
         // Ensure the Authorization header is set for this specific request
         const token = localStorage.getItem('token');
         if (token) {
-          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+          // Authorization is handled by the api service automatically
+          // No need to manually set the Authorization header
         }
         
-        const response = await axios.get(`${API_BASE_URL}/api/agents-sdk/latest-reports`);
+        // Use the centralized api service instead of direct axios
+        const response = await api.get(`agents-sdk/latest-reports`);
         return response.data;
       } catch (error: any) {
         // Check if this is a 401 error that should be retried
@@ -182,7 +186,8 @@ const agentService = {
   // Run a specific agent
   runAgent: async (agentType: string): Promise<AgentResponseData> => {
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/agents-sdk/run-agent`, { agent_type: agentType });
+      // Use the centralized api service instead of direct axios
+      const response = await api.post(`agents-sdk/run-agent`, { agent_type: agentType });
       return response.data;
     } catch (error) {
       console.error(`Error running ${agentType} agent:`, error);
@@ -193,7 +198,8 @@ const agentService = {
   // Get a specific report by type
   getReportByType: async (reportType: string): Promise<any> => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/api/agents-sdk/report/${reportType}`);
+      // Use the centralized api service instead of direct axios
+      const response = await api.get(`agents-sdk/report/${reportType}`);
       return response.data;
     } catch (error) {
       console.error(`Error getting ${reportType} report:`, error);
@@ -204,7 +210,8 @@ const agentService = {
   // Implement price recommendations from the pricing agent
   implementRecommendations: async (recommendationIds: number[]): Promise<AgentResponseData> => {
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/agents-sdk/implement-recommendations`, {
+      // Use the centralized api service instead of direct axios
+      const response = await api.post(`agents-sdk/implement-recommendations`, {
         recommendation_ids: recommendationIds
       });
       return response.data;
@@ -217,7 +224,8 @@ const agentService = {
   // Get the status of a specific agent process
   getProcessStatus: async (processId: string): Promise<AgentProgressData> => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/api/agents-sdk/process/${processId}`);
+      // Use the centralized api service instead of direct axios
+      const response = await api.get(`agents-sdk/process/${processId}`);
       return response.data;
     } catch (error) {
       console.error('Error getting process status:', error);
@@ -227,7 +235,8 @@ const agentService = {
 
   // Get the latest agent process for the current user
   getLatestProcess(): Promise<AgentProgressData> {
-    return axios.get(`${API_BASE_URL}/agents/process/latest`)
+    // Use the centralized api service instead of direct axios
+    return api.get(`agents/process/latest`)
       .then(response => {
         return response.data.data;
       })
@@ -239,7 +248,8 @@ const agentService = {
 
   // Handle price change recommendation approval or denial
   handlePriceRecommendation(productId: number, approved: boolean): Promise<AgentResponseData> {
-    return axios.post(`${API_BASE_URL}/agents-sdk/pricing/recommendation`, {
+    // Use the centralized api service instead of direct axios
+    return api.post(`agents-sdk/pricing/recommendation`, {
       product_id: productId,
       approved: approved,
       action_taken: new Date().toISOString()
