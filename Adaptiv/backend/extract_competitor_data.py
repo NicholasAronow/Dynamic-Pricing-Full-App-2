@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timedelta
 from sqlalchemy import func, desc
 
-def extract_competitor_data(user_id=None, competitor_name=None, days=None, output_format='display', output_file=None):
+def extract_competitor_data(user_id=None, competitor_name=None, days=None, output_format='display', output_file=None, fallback_to_all=True):
     """
     Extract competitor data from the database
     
@@ -19,32 +19,37 @@ def extract_competitor_data(user_id=None, competitor_name=None, days=None, outpu
         days: Optional number of days to look back
         output_format: 'display', 'json', or 'csv'
         output_file: Optional file path to save output
+        fallback_to_all: Whether to fall back to all competitor data if no user-specific data is found
     """
     db = SessionLocal()
     try:
+        # Track whether we're using the fallback format
+        using_fallback_format = False
+        
         # First get a list of unique competitors
         competitor_query = db.query(models.CompetitorItem.competitor_name, 
                                     func.count(models.CompetitorItem.id).label('item_count'),
                                     func.max(models.CompetitorItem.sync_timestamp).label('last_sync')) \
-                             .group_by(models.CompetitorItem.competitor_name)
-                             
+                            .group_by(models.CompetitorItem.competitor_name)
+                           
         # Filter by user_id if specified
         if user_id:
-            # Get batch IDs associated with the user from CompetitorReport
-            # Since CompetitorReport doesn't directly have batch_id, we need to find another way
-            # Look for pricing recommendations for this user
+            # Look for pricing recommendations or items for this user
+            print(f"Looking up batch IDs for user {user_id}...")
+            
+            # Try first with PricingRecommendation
             user_batch_ids = db.query(models.PricingRecommendation.batch_id)\
                             .filter(models.PricingRecommendation.user_id == user_id)\
                             .distinct().all()
-            
-            if user_batch_ids:
+                            
+            if not user_batch_ids:
+                print("No batches found in PricingRecommendation, will skip user filtering")
+            else:
                 # Convert list of tuples to list of batch_ids
                 batch_ids = [bid[0] for bid in user_batch_ids]
+                print(f"Found {len(batch_ids)} batch IDs for user {user_id}")
                 competitor_query = competitor_query.filter(models.CompetitorItem.batch_id.in_(batch_ids))
-            else:
-                # No batches found for this user, return empty result
-                return
-                             
+                           
         # Filter competitors if requested
         if competitor_name:
             competitor_query = competitor_query.filter(models.CompetitorItem.competitor_name == competitor_name)
@@ -58,9 +63,33 @@ def extract_competitor_data(user_id=None, competitor_name=None, days=None, outpu
         competitors = competitor_query.all()
         
         if not competitors:
-            print(f"No competitors found{f' for competitor {competitor_name}' if competitor_name else ''}"
-                 f"{f' in the last {days} days' if days else ''}.")
-            return
+            if user_id and fallback_to_all:
+                print(f"No competitors found for user {user_id}. Falling back to showing all competitor data.")
+                # Start a new query without user_id filter
+                competitor_query = db.query(models.CompetitorItem).distinct(models.CompetitorItem.competitor_name)
+                
+                # Re-apply other filters
+                if competitor_name:
+                    competitor_query = competitor_query.filter(models.CompetitorItem.competitor_name == competitor_name)
+                    
+                if days:
+                    cutoff_date = datetime.now() - timedelta(days=days)
+                    competitor_query = competitor_query.filter(models.CompetitorItem.sync_timestamp >= cutoff_date)
+                    
+                competitors = competitor_query.all()
+                using_fallback_format = True  # Flag that we're using the fallback format
+                
+                if not competitors:
+                    print("Still no competitors found after removing user filter.")
+                    return
+                    
+                print(f"Found {len(competitors)} competitors (all users)")
+            else:
+                print(f"No competitors found{f' for competitor {competitor_name}' if competitor_name else ''}"
+                     f"{f' in the last {days} days' if days else ''}{f' for user {user_id}' if user_id else ''}.")
+                return
+        
+        print(f"Found {len(competitors)} competitors{f' for user {user_id}' if user_id else ''}")
             
         # Process results based on format
         if output_format == 'display':
@@ -71,9 +100,23 @@ def extract_competitor_data(user_id=None, competitor_name=None, days=None, outpu
             
             # Display each competitor's summary
             for competitor_info in competitors:
-                competitor = competitor_info[0]
-                item_count = competitor_info[1]
-                last_sync = competitor_info[2].strftime('%Y-%m-%d %H:%M') if competitor_info[2] else 'Unknown'
+                if using_fallback_format:
+                    # In fallback format, we get CompetitorItem objects directly
+                    competitor = competitor_info.competitor_name
+                    # Get item count and last sync separately
+                    item_count_query = db.query(func.count(models.CompetitorItem.id))\
+                                       .filter(models.CompetitorItem.competitor_name == competitor)
+                    item_count = item_count_query.scalar() or 0
+                    
+                    last_sync_query = db.query(func.max(models.CompetitorItem.sync_timestamp))\
+                                      .filter(models.CompetitorItem.competitor_name == competitor)
+                    last_sync_date = last_sync_query.scalar()
+                    last_sync = last_sync_date.strftime('%Y-%m-%d %H:%M') if last_sync_date else 'Unknown'
+                else:
+                    # In original format, we get tuples with (name, count, timestamp)
+                    competitor = competitor_info[0]
+                    item_count = competitor_info[1]
+                    last_sync = competitor_info[2].strftime('%Y-%m-%d %H:%M') if competitor_info[2] else 'Unknown'
                 
                 print(f"\n## {competitor} ({item_count} items)")
                 print(f"Last sync: {last_sync}")
@@ -96,6 +139,7 @@ def extract_competitor_data(user_id=None, competitor_name=None, days=None, outpu
                 
                 # Apply additional filters
                 if days:
+                    cutoff_date = datetime.now() - timedelta(days=days)
                     items_query = items_query.filter(models.CompetitorItem.sync_timestamp >= cutoff_date)
                     
                 # Get latest items first
@@ -119,10 +163,19 @@ def extract_competitor_data(user_id=None, competitor_name=None, days=None, outpu
                     for item in cat_items[:10]:
                         sync_date = item.sync_timestamp.strftime('%Y-%m-%d %H:%M') if item.sync_timestamp else 'Unknown'
                         batch_id_display = item.batch_id[:18] if item.batch_id else '-'
+                        
                         # Ensure values can't be None before display formatting
                         item_name = item.item_name if item.item_name else ''
-                        batch_id_display = item.batch_id[:18] if item.batch_id else '-'
-                        price_display = f"${item.price:<9.2f}" if item.price is not None else "$-.--"
+                        
+                        # Handle price display safely
+                        if item.price is not None:
+                            try:
+                                price_display = f"${item.price:<9.2f}"
+                            except (TypeError, ValueError):
+                                price_display = f"${float(item.price):<9.2f}" if item.price else "$-.--"
+                        else:
+                            price_display = "$-.--"
+                            
                         print(f"{item_name[:38]:<40} {price_display} {batch_id_display:<20} {sync_date:<20}")
                     
                     if len(cat_items) > 10:
@@ -132,7 +185,12 @@ def extract_competitor_data(user_id=None, competitor_name=None, days=None, outpu
             result = []
             
             for competitor_info in competitors:
-                competitor = competitor_info[0]
+                if using_fallback_format:
+                    # In fallback format, we get CompetitorItem objects directly
+                    competitor = competitor_info.competitor_name
+                else:
+                    # In original format, we get tuples with (name, count, timestamp)
+                    competitor = competitor_info[0]
                 
                 # Get competitor items
                 items_query = db.query(models.CompetitorItem) \
@@ -152,41 +210,45 @@ def extract_competitor_data(user_id=None, competitor_name=None, days=None, outpu
                         'id': item.id,
                         'item_name': item.item_name,
                         'description': item.description,
+                        'price': float(item.price) if item.price is not None else None,
                         'category': item.category,
-                        'price': item.price,
-                        'similarity_score': item.similarity_score,
+                        # Note: 'subcategory' doesn't exist in the model
                         'url': item.url,
                         'batch_id': item.batch_id,
-                        'sync_timestamp': item.sync_timestamp.isoformat() if item.sync_timestamp else None,
-                        'created_at': item.created_at.isoformat() if item.created_at else None,
-                        'updated_at': item.updated_at.isoformat() if item.updated_at else None
+                        'sync_timestamp': item.sync_timestamp.isoformat() if item.sync_timestamp else None
                     })
                 
-                # Create competitor object
-                competitor_dict = {
+                # Group by category
+                categories = {}
+                for item in formatted_items:
+                    category = item['category'] or 'Uncategorized'
+                    if category not in categories:
+                        categories[category] = []
+                    categories[category].append(item)
+                
+                result.append({
                     'name': competitor,
-                    'item_count': len(items),
-                    'last_sync': competitor_info[2].isoformat() if competitor_info[2] else None,
-                    'items': formatted_items
-                }
-                
-                result.append(competitor_dict)
-                
-            json_output = json.dumps(result, indent=2)
+                    'item_count': len(formatted_items),
+                    'categories': categories
+                })
             
+            # Output JSON result
             if output_file:
                 with open(output_file, 'w') as f:
-                    f.write(json_output)
-                print(f"Exported {len(result)} competitors to {output_file}")
+                    json.dump(result, f, indent=2)
             else:
-                print(json_output)
-                
+                print(json.dumps(result, indent=2))
+        
         elif output_format == 'csv':
-            # CSV header
-            csv_lines = ["competitor_name,item_name,category,price,similarity_score,url,batch_id,sync_timestamp,created_at"]
+            csv_lines = ["competitor_name,item_id,item_name,description,price,category,subcategory,url,batch_id,sync_timestamp"]
             
             for competitor_info in competitors:
-                competitor = competitor_info[0]
+                if using_fallback_format:
+                    # In fallback format, we get CompetitorItem objects directly
+                    competitor = competitor_info.competitor_name
+                else:
+                    # In original format, we get tuples with (name, count, timestamp)
+                    competitor = competitor_info[0]
                 
                 # Get competitor items
                 items_query = db.query(models.CompetitorItem) \
@@ -199,39 +261,32 @@ def extract_competitor_data(user_id=None, competitor_name=None, days=None, outpu
                 
                 items = items_query.all()
                 
-                # Add each item to CSV
                 for item in items:
-                    # Use a more reliable approach by avoiding nested quotes in f-strings
-                    comp_name_escaped = item.competitor_name.replace('"', '""') if item.competitor_name else ''
-                    item_name_escaped = item.item_name.replace('"', '""') if item.item_name else ''
+                    # Safely handle potential None values and escaping for CSV
+                    name_escaped = item.item_name.replace('"', '""') if item.item_name else ''
+                    description_escaped = item.description.replace('"', '""') if item.description else ''
                     category_escaped = item.category.replace('"', '""') if item.category else ''
+                    # No subcategory field in the model
                     url_escaped = item.url.replace('"', '""') if item.url else ''
+                    batch_id_escaped = item.batch_id.replace('"', '""') if item.batch_id else ''
+                    competitor_escaped = competitor.replace('"', '""')
                     
-                    csv_lines.append(
-                        f'"{comp_name_escaped}",'
-                        f'"{item_name_escaped}",'
-                        f'"{category_escaped}",'
-                        f'{item.price},'
-                        f'{item.similarity_score if item.similarity_score else ""},'
-                        f'"{url_escaped}",'
-                        f'"{item.batch_id}",'
-                        f'{item.sync_timestamp.isoformat() if item.sync_timestamp else ""},'
-                        f'{item.created_at.isoformat() if item.created_at else ""}'
-                    )
-                
-            csv_output = "\n".join(csv_lines)
+                    # Build one CSV line at a time (no string concatenation issues)
+                    csv_line = f'"{competitor_escaped}",{item.id},"{name_escaped}","{description_escaped}",'
+                    csv_line += f'{item.price if item.price is not None else ""},"{category_escaped}",'
+                    csv_line += f'"","{url_escaped}","{batch_id_escaped}",'
+                    csv_line += f'{item.sync_timestamp.isoformat() if item.sync_timestamp else ""}'
+                    
+                    csv_lines.append(csv_line)
             
+            # Output CSV result
+            csv_output = "\n".join(csv_lines)
             if output_file:
                 with open(output_file, 'w') as f:
                     f.write(csv_output)
-                print(f"Exported competitor items to {output_file}")
             else:
                 print(csv_output)
-                
-    except Exception as e:
-        print(f"Error extracting competitor data: {e}")
-        import traceback
-        traceback.print_exc()
+        
     finally:
         db.close()
 
@@ -241,12 +296,26 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description='Extract competitor data from database')
     parser.add_argument('--user-id', type=int, help='Filter by user ID')
-    parser.add_argument('--competitor', type=str, help='Filter by competitor name')
+    parser.add_argument('--competitor', help='Filter by competitor name')
     parser.add_argument('--days', type=int, help='Filter by number of days to look back')
     parser.add_argument('--format', choices=['display', 'json', 'csv'], default='display',
                         help='Output format (default: display)')
-    parser.add_argument('--output', type=str, help='Output file path (for json/csv formats)')
+    parser.add_argument('--output', help='Output file path (if not provided, print to console)')
+    parser.add_argument('--no-fallback', action='store_true', 
+                        help='Do not fall back to showing all competitor data if no user-specific data is found')
     
     args = parser.parse_args()
     
-    extract_competitor_data(args.user_id, args.competitor, args.days, args.format, args.output)
+    try:
+        extract_competitor_data(
+            args.user_id, 
+            args.competitor, 
+            args.days, 
+            args.format, 
+            args.output,
+            fallback_to_all=not args.no_fallback
+        )
+    except Exception as e:
+        print(f"\nError extracting competitor data: {e}")
+        import traceback
+        traceback.print_exc()
