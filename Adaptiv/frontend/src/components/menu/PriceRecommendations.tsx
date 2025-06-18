@@ -562,6 +562,18 @@ const PriceRecommendations: React.FC = () => {
       <Title level={5} type="secondary" style={{ marginTop: 0 }}>
         Optimize your product pricing strategy with AI-driven insights
       </Title>
+      <Button 
+        onClick={handleSyncOrders} 
+        disabled={syncingOrders} 
+        type="default" 
+        size="small"
+        icon={syncingOrders ? <LoadingOutlined /> : <SyncOutlined />}
+      >
+        {syncingOrders ? 'Syncing Orders...' : 'Re-sync Orders'}
+      </Button>
+      <Text type="secondary" style={{ fontSize: '12px', marginLeft: 8, display: 'block', marginTop: 4 }}>
+        Refresh order data from Square
+      </Text>
       
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: '100px 0' }}>
@@ -703,18 +715,7 @@ const PriceRecommendations: React.FC = () => {
                 <Radio.Button value="1yr">1Y</Radio.Button>
               </Radio.Group>
               <br />
-              <Button 
-                onClick={handleSyncOrders} 
-                disabled={syncingOrders} 
-                type="default" 
-                size="small"
-                icon={syncingOrders ? <LoadingOutlined /> : <SyncOutlined />}
-              >
-                {syncingOrders ? 'Syncing Orders...' : 'Re-sync Orders'}
-              </Button>
-              <Text type="secondary" style={{ fontSize: '12px', marginLeft: 8, display: 'block', marginTop: 4 }}>
-                Refresh order data from Square
-              </Text>
+              
             </div>
           </Col>
         </Row>
