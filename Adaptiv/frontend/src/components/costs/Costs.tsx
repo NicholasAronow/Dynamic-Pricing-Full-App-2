@@ -41,6 +41,7 @@ const Costs: React.FC = () => {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [suggestions, setSuggestions] = useState<MenuSuggestionResponse | null>(null);
   const [generatingAiSuggestions, setGeneratingAiSuggestions] = useState<boolean>(false);
+  const [baseIngredients, setBaseIngredients] = useState<Omit<IngredientItem, 'ingredient_id' | 'date_created'>[]>([]);
 
   // Fetch recipe data
   useEffect(() => {
@@ -381,17 +382,25 @@ const Costs: React.FC = () => {
     try {
       setQuickSetupLoading(true);
       
-      // Extract all unique ingredients from recipes
+      // Use baseIngredients state for price, quantity, and unit instead of default values
+      // Create a map of the base ingredients by name for easy lookup
+      const baseIngredientsMap = new Map();
+      baseIngredients.forEach(ing => {
+        baseIngredientsMap.set(ing.ingredient_name.toLowerCase(), ing);
+      });
+
+      // Extract all unique ingredients from recipes, using baseIngredients data when available
       const uniqueIngredients = new Map();
       suggestions.recipes.forEach((recipe: RecipeSuggestion) => {
         recipe.ingredients.forEach((ing: SuggestionIngredient) => {
           const key = ing.ingredient.toLowerCase();
           if (!uniqueIngredients.has(key)) {
+            const baseIngredient = baseIngredientsMap.get(key);
             uniqueIngredients.set(key, {
               ingredient_name: ing.ingredient,
-              quantity: 100, // Default quantity
-              unit: ing.unit,
-              price: 0 // Default price, will need to be updated
+              quantity: baseIngredient?.quantity || 0, // Use base ingredient quantity when available
+              unit: baseIngredient?.unit || ing.unit || '', 
+              price: baseIngredient?.price || 0 // Use base ingredient price when available
             });
           }
         });
@@ -1016,32 +1025,168 @@ const Costs: React.FC = () => {
                 />
               </TabPane>
               <TabPane tab="Ingredients" key="2">
+                <div style={{ marginBottom: 16 }}>
+                  <Alert
+                    message="Ingredient Setup"
+                    description="Set the price, quantity, and unit for each unique ingredient below. These values will be used for cost calculations."
+                    type="info"
+                    showIcon
+                  />
+                </div>
                 <Table
-                  dataSource={Array.from(
-                    new Map(
-                      suggestions.recipes.flatMap(recipe => 
-                        recipe.ingredients.map(ing => [
-                          ing.ingredient.toLowerCase(), 
-                          { ingredient: ing.ingredient, unit: ing.unit }
-                        ])
-                      )
-                    ).values()
-                  ).map((ing, idx) => ({ key: idx, ...ing }))}
+                  dataSource={
+                    (() => {
+                      // Initialize base ingredients if they don't exist yet
+                      if (suggestions && baseIngredients.length === 0) {
+                        const uniqueIngredients = Array.from(
+                          new Map(
+                            suggestions.recipes.flatMap(recipe => 
+                              recipe.ingredients.map(ing => [
+                                ing.ingredient.toLowerCase(), 
+                                { 
+                                  ingredient_name: ing.ingredient, 
+                                  unit: ing.unit,
+                                  quantity: ing.quantity || 100, // Default quantity
+                                  price: ing.price || 0, // Default price
+                                  unit_price: 0 // Will be calculated on the backend
+                                }
+                              ])
+                            )
+                          ).values()
+                        );
+                        
+                        // Set the base ingredients once
+                        if (uniqueIngredients.length > 0 && baseIngredients.length === 0) {
+                          setBaseIngredients(uniqueIngredients);
+                        }
+                      }
+                      
+                      // Always return the current state of baseIngredients for rendering
+                      return baseIngredients.map((ing, idx) => ({ key: idx, ...ing }));
+                    })()
+                  }
                   columns={[
                     {
                       title: 'Ingredient Name',
-                      dataIndex: 'ingredient',
-                      key: 'ingredient',
+                      dataIndex: 'ingredient_name',
+                      key: 'ingredient_name',
+                      render: (text: string, record: any) => (
+                        <Input
+                          value={text}
+                          onChange={(e) => {
+                            // Update the ingredient name in baseIngredients
+                            const updatedBaseIngredients = baseIngredients.map(ing => 
+                              ing.ingredient_name === text 
+                                ? { ...ing, ingredient_name: e.target.value }
+                                : ing
+                            );
+                            setBaseIngredients(updatedBaseIngredients);
+                            
+                            // Also update in recipes for display purposes (the recipes use ingredient names from baseIngredients)
+                            const updatedSuggestions = {...suggestions};
+                            updatedSuggestions.recipes = updatedSuggestions.recipes.map(recipe => ({
+                              ...recipe,
+                              ingredients: recipe.ingredients.map(ing => 
+                                ing.ingredient === text 
+                                  ? { ...ing, ingredient: e.target.value }
+                                  : ing
+                              )
+                            }));
+                            setSuggestions(updatedSuggestions);
+                          }}
+                        />
+                      ),
                     },
                     {
-                      title: 'Default Unit',
+                      title: 'Price ($)',
+                      key: 'price',
+                      dataIndex: 'price',
+                      render: (price: number, record: any) => (
+                        <Input
+                          type="number"
+                          min={0}
+                          step={0.01}
+                          defaultValue={price || 0}
+                          prefix="$"
+                          onChange={(e) => {
+                            // Get the current input value
+                            let inputVal = e.target.value;
+                            // Allow empty input for user to type
+                            const newPrice = inputVal === '' ? 0 : parseFloat(inputVal) || 0;
+                            
+                            // Only update this specific base ingredient's price
+                            const updatedBaseIngredients = baseIngredients.map(ing => 
+                              ing.ingredient_name === record.ingredient_name 
+                                ? { ...ing, price: newPrice }
+                                : ing
+                            );
+                            setBaseIngredients(updatedBaseIngredients);
+                          }}
+                        />
+                      ),
+                    },
+                    {
+                      title: 'Quantity',
+                      key: 'quantity',
+                      dataIndex: 'quantity',
+                      render: (quantity: number, record: any) => (
+                        <Input
+                          type="number"
+                          min={0}
+                          step={0.01}
+                          defaultValue={quantity || 100}
+                          onChange={(e) => {
+                            // Get the current input value
+                            let inputVal = e.target.value;
+                            // Allow empty input for user to type
+                            const newQuantity = inputVal === '' ? 0 : parseFloat(inputVal) || 0;
+                            
+                            // Only update this specific base ingredient's quantity
+                            const updatedBaseIngredients = baseIngredients.map(ing => 
+                              ing.ingredient_name === record.ingredient_name 
+                                ? { ...ing, quantity: newQuantity }
+                                : ing
+                            );
+                            setBaseIngredients(updatedBaseIngredients);
+                          }}
+                        />
+                      ),
+                    },
+                    {
+                      title: 'Unit',
                       dataIndex: 'unit',
                       key: 'unit',
-                    },
-                    {
-                      title: 'Default Values',
-                      key: 'defaults',
-                      render: () => 'Quantity: 100, Price: $0.00'
+                      render: (text: string, record: any) => {
+                        // Common units for cooking/food
+                        const commonUnits = [
+                          'each', 'gram', 'kg', 'oz', 'lb', 'cup', 'tbsp', 'tsp', 
+                          'ml', 'l', 'gallon', 'quart', 'pint', 'slice', 'piece', 
+                          'bunch', 'pinch', 'dash', 'clove', 'leaf', 'sprig'
+                        ];
+                        
+                        return (
+                          <Select
+                            value={text}
+                            style={{ width: '100%' }}
+                            onChange={(value) => {
+                              // Only update this specific base ingredient's unit
+                              const updatedBaseIngredients = baseIngredients.map(ing => 
+                                ing.ingredient_name === record.ingredient_name 
+                                  ? { ...ing, unit: value }
+                                  : ing
+                              );
+                              setBaseIngredients(updatedBaseIngredients);
+                            }}
+                            showSearch
+                            allowClear
+                            placeholder="Select unit"
+                          >
+                            {commonUnits.map((unit) => (
+                              <Select.Option key={unit} value={unit}>{unit}</Select.Option>
+                            ))}
+                          </Select>
+                        );
+                      },
                     }
                   ]}
                   pagination={false}

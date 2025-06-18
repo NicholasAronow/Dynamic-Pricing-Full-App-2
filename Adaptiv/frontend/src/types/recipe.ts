@@ -11,6 +11,7 @@ export interface SuggestionIngredient {
   ingredient: string;
   quantity: number;
   unit: string;
+  price?: number; // Added for ingredient pricing in the form
 }
 
 export interface RecipeSuggestion {
