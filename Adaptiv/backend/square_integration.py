@@ -722,12 +722,89 @@ async def get_square_orders(
                     "orders": []
                 }
             
+            # Get initial orders from the response
+            all_orders = orders_data.get("orders", [])
+            initial_count = len(all_orders)
+            logger.info(f"Initial fetch returned {initial_count} orders")
+            
+            # Check for pagination
+            cursor = orders_data.get("cursor")
+            if cursor:
+                logger.info("Additional orders available, fetching via pagination")
+                
+                # Construct request JSON for pagination
+                request_json = {
+                    "location_ids": [location_id],
+                    "query": {
+                        "filter": {
+                            "state_filter": {"states": ["COMPLETED"]}
+                        }
+                    },
+                    "cursor": cursor
+                }
+                
+                # Fetch additional pages until no more cursor is returned (max 10 pages to prevent infinite loops)
+                page_count = 1
+                max_pages = 100
+                
+                while cursor and page_count < max_pages:
+                    try:
+                        logger.info(f"Fetching page {page_count + 1} of orders with cursor")
+                        
+                        # Update request with cursor
+                        request_json["cursor"] = cursor
+                        
+                        # Fetch next page
+                        page_response = requests.post(
+                            f"{SQUARE_API_BASE}/v2/orders/search",
+                            headers={
+                                "Authorization": f"Bearer {integration.access_token}",
+                                "Content-Type": "application/json"
+                            },
+                            json=request_json,
+                            timeout=15
+                        )
+                        
+                        if page_response.status_code != 200:
+                            logger.error(f"Failed to get page {page_count + 1}: {page_response.status_code}")
+                            break
+                            
+                        page_data = page_response.json()
+                        page_orders = page_data.get("orders", [])
+                        
+                        # Add this page's orders to our collection
+                        all_orders.extend(page_orders)
+                        logger.info(f"Added {len(page_orders)} orders from page {page_count + 1}")
+                        
+                        # Get cursor for next page
+                        cursor = page_data.get("cursor")
+                        
+                        # Increment page counter
+                        page_count += 1
+                        
+                        if not cursor:
+                            logger.info("No more pages available")
+                            break
+                            
+                    except Exception as e:
+                        logger.exception(f"Error fetching paginated orders: {str(e)}")
+                        break
+            
+            # Return all orders
+            total_count = len(all_orders)
+            logger.info(f"Returning {total_count} total orders after pagination")
+            
             return {
                 "success": True,
                 "connected": True,
                 "auth_status": "valid",
-                "orders": orders_data.get("orders", []),
-                "count": len(orders_data.get("orders", [])),
+                "orders": all_orders,
+                "count": total_count,
+                "pagination_info": {
+                    "initial_page_count": initial_count,
+                    "total_pages_fetched": 1 if not cursor else page_count,
+                    "has_more": cursor is not None
+                },
                 "location": {
                     "id": location_id,
                     "name": locations_data["locations"][0].get("name", "Unknown Location")
@@ -1105,10 +1182,141 @@ async def sync_initial_data(user_id: int, db: Session):
                 
                 orders_created += 1
             
-            # Check for pagination (not handling pages beyond first in this implementation)
+            # Handle pagination to fetch all orders
             cursor = orders_data.get("cursor")
-            if cursor:
-                logger.info(f"More orders available for location {location_name} (cursor available)")
+            while cursor:
+                logger.info(f"Fetching additional orders with cursor for location {location_name}")
+                
+                # Update request JSON with cursor for next page
+                request_json["cursor"] = cursor
+                
+                # Fetch next page of orders
+                next_page_response = requests.post(
+                    f"{SQUARE_API_BASE}/v2/orders/search",
+                    headers={
+                        "Authorization": f"Bearer {integration.access_token}",
+                        "Content-Type": "application/json"
+                    },
+                    json=request_json,
+                    timeout=15  # Longer timeout for orders
+                )
+                
+                if next_page_response.status_code != 200:
+                    logger.error(f"Failed to get paginated orders from location {location_name}: {next_page_response.json().get('errors', [])}")
+                    break
+                
+                next_page_data = next_page_response.json()
+                next_page_orders = next_page_data.get("orders", [])
+                
+                logger.info(f"Found {len(next_page_orders)} additional orders in location {location_name}")
+                
+                # Process each order in the next page
+                for order in next_page_orders:
+                    # Get order date and ID
+                    created_at = order.get("created_at")
+                    if not created_at:
+                        continue
+                    
+                    order_date = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                    square_order_id = order.get("id")
+                    
+                    # Check if order already exists
+                    existing_order = db.query(models.Order).filter(
+                        models.Order.user_id == user_id,
+                        models.Order.pos_id == square_order_id
+                    ).first()
+                    
+                    if existing_order:
+                        logger.debug(f"Order {square_order_id} already exists, skipping")
+                        continue
+                    
+                    # Calculate total from line items
+                    total_amount = 0
+                    order_items = []
+                    
+                    line_items = order.get("line_items", [])
+                    for line_item in line_items:
+                        # Get item details
+                        name = line_item.get("name", "")
+                        quantity = int(line_item.get("quantity", 1))
+                        
+                        # Get catalog ID from variation ID if available
+                        catalog_object_id = line_item.get("catalog_object_id")
+                        
+                        # Extract price
+                        base_price_money = line_item.get("base_price_money", {})
+                        unit_price = base_price_money.get("amount", 0) / 100.0  # Convert cents to dollars
+                        
+                        # Calculate line item total
+                        item_total = unit_price * quantity
+                        total_amount += item_total
+                        
+                        # Find matching item in database through the catalog mapping
+                        item_id = None
+                        if catalog_object_id and catalog_object_id in catalog_mapping:
+                            item_id = catalog_mapping[catalog_object_id]
+                        
+                        if not item_id:
+                            # Try to find by name if not in mapping
+                            item = db.query(models.Item).filter(
+                                models.Item.name == name,
+                                models.Item.user_id == user_id
+                            ).first()
+                            
+                            if item:
+                                item_id = item.id
+                            else:
+                                # Create new item if not exists
+                                new_item = models.Item(
+                                    name=name,
+                                    description=f"Imported from Square - {location_name}",
+                                    category="From Square",  # Default category
+                                    current_price=unit_price,
+                                    user_id=user_id,
+                                    pos_id=catalog_object_id  # Store Square ID if available
+                                )
+                                db.add(new_item)
+                                db.flush()  # Get ID
+                                
+                                item_id = new_item.id
+                                if catalog_object_id:
+                                    catalog_mapping[catalog_object_id] = item_id
+                        
+                        # Add to order items list
+                        order_items.append({
+                            "item_id": item_id,
+                            "quantity": quantity,
+                            "unit_price": unit_price
+                        })
+                    
+                    # Create order
+                    new_order = models.Order(
+                        order_date=order_date,
+                        total_amount=total_amount,
+                        user_id=user_id,
+                        pos_id=square_order_id,  # Store Square order ID
+                        created_at=order_date,    # Use Square creation date
+                        updated_at=order_date
+                    )
+                    db.add(new_order)
+                    db.flush()  # Get ID of new order
+                    
+                    # Add order items
+                    for item_data in order_items:
+                        order_item = models.OrderItem(
+                            order_id=new_order.id,
+                            item_id=item_data["item_id"],
+                            quantity=item_data["quantity"],
+                            unit_price=item_data["unit_price"]
+                        )
+                        db.add(order_item)
+                    
+                    orders_created += 1
+                
+                # Get cursor for next page, or None if we're done
+                cursor = next_page_data.get("cursor")
+                if not cursor:
+                    break
         
         # Commit all changes
         db.commit()

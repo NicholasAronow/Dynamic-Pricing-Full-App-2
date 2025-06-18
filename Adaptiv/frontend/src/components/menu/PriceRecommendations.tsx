@@ -26,11 +26,13 @@ import {
   CheckOutlined,
   CloseOutlined,
   EditOutlined,
-  LoadingOutlined
+  LoadingOutlined,
+  SyncOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import pricingService, { PriceRecommendation } from '../../services/pricingService';
 import * as recipeService from '../../services/recipeService';
+import orderService from '../../services/orderService';
 import { RecipeItem } from '../../types/recipe';
 
 const { Title, Text } = Typography;
@@ -46,6 +48,7 @@ const PriceRecommendations: React.FC = () => {
   const [usingMock, setUsingMock] = useState<boolean>(false);
   const [recipes, setRecipes] = useState<RecipeItem[]>([]);
   const [loadingRecipes, setLoadingRecipes] = useState<boolean>(true);
+  const [syncingOrders, setSyncingOrders] = useState<boolean>(false);
   
   // Calculate summary metrics with safety checks
   const totalRevenue = recommendations.reduce((sum, item) => sum + (item.revenue || 0), 0);
@@ -54,6 +57,27 @@ const PriceRecommendations: React.FC = () => {
     (netRevenueImpact / (totalRevenue - netRevenueImpact)) * 100 : 0;
 
   // Fetch recommendations from the API
+  // Function to handle re-syncing Square orders
+  const handleSyncOrders = async () => {
+    setSyncingOrders(true);
+    try {
+      const result = await orderService.syncSquareOrders();
+      if (result.success) {
+        message.success(`${result.message}${result.total_orders ? ` (${result.total_orders} orders)` : ''}`);
+        // Reload recommendations to reflect any newly synced orders
+        const recommendations = await pricingService.getPriceRecommendations(timeFrame);
+        setRecommendations(recommendations);
+      } else {
+        message.error(result.message);
+      }
+    } catch (error) {
+      console.error('Error syncing orders:', error);
+      message.error('Failed to sync orders. Please try again.');
+    } finally {
+      setSyncingOrders(false);
+    }
+  };
+
   // Fetch recipe data for real cost information
   useEffect(() => {
     const fetchRecipes = async () => {
@@ -664,19 +688,34 @@ const PriceRecommendations: React.FC = () => {
                      timeFrame === '6m' ? 'Last 6 months' : 'Last year'}
               valueStyle={{ color: '#1890ff' }}
             />
-            <Radio.Group 
-              value={timeFrame} 
-              onChange={(e: RadioChangeEvent) => handleTimeFrameChange(e.target.value)}
-              buttonStyle="solid"
-              style={{ marginTop: 8 }}
-              size="small"
-            >
-              <Radio.Button value="1d">1D</Radio.Button>
-              <Radio.Button value="7d">7D</Radio.Button>
-              <Radio.Button value="1m">1M</Radio.Button>
-              <Radio.Button value="6m">6M</Radio.Button>
-              <Radio.Button value="1yr">1Y</Radio.Button>
-            </Radio.Group>
+            <div>
+              <Radio.Group 
+                value={timeFrame} 
+                onChange={(e: RadioChangeEvent) => handleTimeFrameChange(e.target.value)}
+                buttonStyle="solid"
+                style={{ marginTop: 8, marginBottom: 8 }}
+                size="small"
+              >
+                <Radio.Button value="1d">1D</Radio.Button>
+                <Radio.Button value="7d">7D</Radio.Button>
+                <Radio.Button value="1m">1M</Radio.Button>
+                <Radio.Button value="6m">6M</Radio.Button>
+                <Radio.Button value="1yr">1Y</Radio.Button>
+              </Radio.Group>
+              <br />
+              <Button 
+                onClick={handleSyncOrders} 
+                disabled={syncingOrders} 
+                type="default" 
+                size="small"
+                icon={syncingOrders ? <LoadingOutlined /> : <SyncOutlined />}
+              >
+                {syncingOrders ? 'Syncing Orders...' : 'Re-sync Orders'}
+              </Button>
+              <Text type="secondary" style={{ fontSize: '12px', marginLeft: 8, display: 'block', marginTop: 4 }}>
+                Refresh order data from Square
+              </Text>
+            </div>
           </Col>
         </Row>
       </Card>
