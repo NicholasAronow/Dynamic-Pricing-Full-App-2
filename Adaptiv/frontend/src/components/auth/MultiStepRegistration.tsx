@@ -157,7 +157,11 @@ const MultiStepRegistration: React.FC = () => {
           )}
           
           {current < steps.length - 1 && (
-            <Button type="primary" onClick={handleNext}>
+            <Button 
+              type="primary" 
+              onClick={handleNext}
+              disabled={current === 2 && !formData.agreedToTerms}
+            >
               Next
             </Button>
           )}
@@ -167,6 +171,7 @@ const MultiStepRegistration: React.FC = () => {
               type="primary" 
               onClick={handleFinish}
               loading={loading}
+              disabled={!formData.agreedToTerms}
             >
               Complete Registration
             </Button>
