@@ -352,16 +352,16 @@ const Costs: React.FC = () => {
   // Quick Setup modal handlers
   const handleQuickSetup = () => {
     setScreenBlurred(true);
+    setQuickSetupLoading(true);
     showQuickSetupModal();
   };
   
   // Function to show the quick setup modal
   const showQuickSetupModal = async () => {
-    setQuickSetupLoading(true);
     try {
       // Fetch existing menu items from itemService
       const items = await itemService.getItems();
-      console.log(items)
+      
       // Convert to our MenuItem format
       const existingMenuItems = items.map(item => ({
         id: item.id.toString(), // Convert number to string for id
@@ -372,18 +372,65 @@ const Costs: React.FC = () => {
       }));
       
       setMenuItems(existingMenuItems);
+      
+      // Process menu items with LLM before showing anything to the user
+      if (existingMenuItems.length > 0) {
+        const response = await generateSuggestionsFromMenu(existingMenuItems);
+        setSuggestions(response);
+        // Start directly at step 2 (review suggestions)
+        setCurrentStep(2);
+      } else {
+        message.error('No menu items found. Please add menu items manually.');
+        // If no menu items found, still show step 1 so user can add them manually
+        setCurrentStep(1);
+      }
 
-      await generateAiSuggestions();
-    } catch (error) {
-      console.error('Error fetching menu items:', error);
-      message.error('Could not load menu items. Starting with empty list.');
+      // Only show the modal after we have the results
+      setQuickSetupVisible(true);
+    } catch (error: any) {
+      console.error('Error in quick setup:', error);
+      message.error(error.message || 'Failed to set up recipes automatically');
+      // Clean up on error
+      setScreenBlurred(false);
       setMenuItems([]);
     } finally {
       setQuickSetupLoading(false);
-      setCurrentStep(2);
-      setQuickSetupVisible(true);
-      setScreenBlurred(true);
     }
+  };
+
+  // Render a loading spinner when screen is blurred and loading is true
+  const renderLoadingSpinner = () => {
+    if (screenBlurred && quickSetupLoading) {
+      return (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1001, // Higher than the blur overlay
+        }}>
+          <div style={{
+            background: 'rgba(255, 255, 255, 0.8)',
+            borderRadius: '8px',
+            padding: '24px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)'
+          }}>
+            <Spin size="large" />
+            <div style={{ marginTop: '16px', fontWeight: 'bold' }}>
+              Analyzing your menu items...
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return null;
   };
 
   const handleQuickSetupCancel = () => {
@@ -545,6 +592,7 @@ const Costs: React.FC = () => {
 
   return (
     <div>
+      {renderLoadingSpinner()}
       <Title level={2}>Costs</Title>
       <Title level={5} type="secondary" style={{ marginTop: 0 }}>
         Track ingredient costs for your menu items to optimize your margin
@@ -682,18 +730,31 @@ const Costs: React.FC = () => {
                 }}
               />
             ) : (
-              <Empty 
-                description="No recipes recorded yet"
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-              >
-                <Button 
-                  type="primary" 
-                  icon={<ThunderboltOutlined />} 
-                  onClick={handleQuickSetup}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 20px' }}>
+                <Empty 
+                  image={<CoffeeOutlined style={{ fontSize: '64px', color: '#9370DB' }} />}
+                  imageStyle={{ height: 80 }}
+                  description={
+                    <div>
+                      <Text style={{ fontSize: '16px', marginBottom: '16px', display: 'block' }}>
+                        Track your recipes and ingredient costs to optimize your menu pricing
+                      </Text>
+                      <Text type="secondary" style={{ display: 'block', marginBottom: '24px' }}>
+                        Our AI assistant can help you set up all your recipes in just a few clicks
+                      </Text>
+                    </div>
+                  }
                 >
-                  Quick Setup
-                </Button>
-              </Empty>
+                  <Button 
+                    type="primary" 
+                    size="large"
+                    onClick={handleQuickSetup}
+                    style={{ borderRadius: '4px', height: 'auto', padding: '8px 16px' }}
+                  >
+                    Quick Setup with AI
+                  </Button>
+                </Empty>
+              </div>
             )}
         </TabPane>
 
@@ -725,18 +786,32 @@ const Costs: React.FC = () => {
                 )}
               />
             ) : (
-              <Empty 
-                description="No ingredients recorded yet"
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-              >
-                <Button 
-                  type="primary" 
-                  icon={<ThunderboltOutlined />} 
-                  onClick={handleQuickSetup}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 20px' }}>
+                <Empty 
+                  image={<DollarOutlined style={{ fontSize: '64px', color: '#9370DB' }} />}
+                  imageStyle={{ height: 80 }}
+                  description={
+                    <div>
+                      <Text style={{ fontSize: '16px', marginBottom: '16px', display: 'block' }}>
+                        Add ingredients to start tracking your food costs
+                      </Text>
+                      <Text type="secondary" style={{ display: 'block', marginBottom: '24px' }}>
+                        Our AI can automatically set up ingredients based on your menu
+                      </Text>
+                    </div>
+                  }
                 >
-                  Quick Setup
-                </Button>
-              </Empty>
+                  <Button 
+                    type="primary" 
+                    size="large"
+                    icon={<ThunderboltOutlined />} 
+                    onClick={handleQuickSetup}
+                    style={{ borderRadius: '4px', height: 'auto', padding: '8px 16px' }}
+                  >
+                    Quick Setup with AI
+                  </Button>
+                </Empty>
+              </div>
             )}
         </TabPane>
       </Tabs>
@@ -1126,93 +1201,9 @@ const Costs: React.FC = () => {
         {currentStep === 3 && suggestions && (
           <>
             <div style={{ marginBottom: 16 }}>
-              <Title level={4}>Ready to Set Up Your Recipes</Title>
-              <Text>We'll create the following in your account:</Text>
+              <Title level={4}>Set Up Your Ingredients</Title>
+              <Text>Set the price, quantity, and unit for each unique ingredient below. These values will be used for cost calculations.</Text>
             </div>
-            
-            <div className="summary-container" style={{ marginBottom: 24 }}>
-              <Card title="Summary" bordered={false} className="summary-card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-                  <div>
-                    <Statistic 
-                      title="Unique Ingredients" 
-                      value={Array.from(
-                        new Set(
-                          suggestions.recipes.flatMap(recipe => 
-                            recipe.ingredients.map(ing => ing.ingredient.toLowerCase())
-                          )
-                        )
-                      ).length} 
-                      suffix="items"
-                    />
-                  </div>
-                  <div>
-                    <Statistic 
-                      title="Recipes" 
-                      value={suggestions.recipes.length} 
-                      suffix="items"
-                    />
-                  </div>
-                </div>
-              </Card>
-            </div>
-
-            <Tabs defaultActiveKey="1" style={{ marginBottom: 24 }}>
-              <TabPane tab="Recipes" key="1">
-                <Table
-                  dataSource={suggestions.recipes.map((recipe, idx) => ({ key: idx, ...recipe }))}
-                  columns={[
-                    {
-                      title: 'Recipe Name',
-                      dataIndex: 'item_name',
-                      key: 'item_name',
-                    },
-                    {
-                      title: 'Ingredients Count',
-                      key: 'ingredients_count',
-                      render: (_, record: RecipeSuggestion) => record.ingredients.length
-                    }
-                  ]}
-                  pagination={false}
-                  size="small"
-                  expandable={{
-                    expandedRowRender: (record: RecipeSuggestion) => (
-                      <Table
-                        dataSource={record.ingredients.map((ing, idx) => ({ key: idx, ...ing }))}
-                        columns={[
-                          {
-                            title: 'Ingredient',
-                            dataIndex: 'ingredient',
-                            key: 'ingredient',
-                          },
-                          {
-                            title: 'Quantity',
-                            dataIndex: 'quantity',
-                            key: 'quantity',
-                          },
-                          {
-                            title: 'Unit',
-                            dataIndex: 'unit',
-                            key: 'unit',
-                          }
-                        ]}
-                        pagination={false}
-                        size="small"
-                      />
-                    ),
-                    rowExpandable: (record) => record.ingredients.length > 0,
-                  }}
-                />
-              </TabPane>
-              <TabPane tab="Ingredients" key="2">
-                <div style={{ marginBottom: 16 }}>
-                  <Alert
-                    message="Ingredient Setup"
-                    description="Set the price, quantity, and unit for each unique ingredient below. These values will be used for cost calculations."
-                    type="info"
-                    showIcon
-                  />
-                </div>
                 <Table
                   dataSource={
                     (() => {
@@ -1372,15 +1363,6 @@ const Costs: React.FC = () => {
                   pagination={false}
                   size="small"
                 />
-              </TabPane>
-            </Tabs>
-            
-            <Alert
-              message="Ready to Proceed"
-              description="Click 'Finish Setup' to create all these items in your account. This process can't be automatically undone, but you can edit or delete any items later."
-              type="info"
-              showIcon
-            />
           </>
         )}
       </Modal>
