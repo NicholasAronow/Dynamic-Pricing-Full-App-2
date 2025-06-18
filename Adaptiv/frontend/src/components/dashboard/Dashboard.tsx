@@ -1796,7 +1796,7 @@ const Dashboard: React.FC = () => {
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'center',
-                zIndex: 10,
+                zIndex: 0,
                 borderRadius: '0 0 8px 8px'
               }}>
                 <div style={{ 
