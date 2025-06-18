@@ -118,7 +118,7 @@ def extract_competitor_data(user_id=None, competitor_name=None, days=None, outpu
                     item_count = competitor_info[1]
                     last_sync = competitor_info[2].strftime('%Y-%m-%d %H:%M') if competitor_info[2] else 'Unknown'
                 
-                print(f"\n## {competitor} ({item_count} items)")
+                print(f"\n## Competitor:{competitor} - ({item_count} items)")
                 print(f"Last sync: {last_sync}")
                 print("-" * 100)
                 
@@ -152,34 +152,6 @@ def extract_competitor_data(user_id=None, competitor_name=None, days=None, outpu
                     if category not in categories:
                         categories[category] = []
                     categories[category].append(item)
-                
-                # Print items by category
-                for category, cat_items in categories.items():
-                    print(f"\n### {category} ({len(cat_items)} items)")
-                    print(f"{'Item Name':<40} {'Price':<10} {'Batch':<20} {'Sync Date':<20}")
-                    print("-" * 100)
-                    
-                    # Show the first 10 items per category
-                    for item in cat_items[:10]:
-                        sync_date = item.sync_timestamp.strftime('%Y-%m-%d %H:%M') if item.sync_timestamp else 'Unknown'
-                        batch_id_display = item.batch_id[:18] if item.batch_id else '-'
-                        
-                        # Ensure values can't be None before display formatting
-                        item_name = item.item_name if item.item_name else ''
-                        
-                        # Handle price display safely
-                        if item.price is not None:
-                            try:
-                                price_display = f"${item.price:<9.2f}"
-                            except (TypeError, ValueError):
-                                price_display = f"${float(item.price):<9.2f}" if item.price else "$-.--"
-                        else:
-                            price_display = "$-.--"
-                            
-                        print(f"{item_name[:38]:<40} {price_display} {batch_id_display:<20} {sync_date:<20}")
-                    
-                    if len(cat_items) > 10:
-                        print(f"... and {len(cat_items) - 10} more items in this category")
         
         elif output_format == 'json':
             result = []
