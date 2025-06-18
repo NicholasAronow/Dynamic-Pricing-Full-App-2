@@ -22,6 +22,7 @@ import {
 import competitorService, { CompetitorItem } from '../../services/competitorService';
 import itemService, { Item } from '../../services/itemService';
 import axios from 'axios';
+import { api } from '../../services/api';
 
 const { Title, Text } = Typography;
 
@@ -285,12 +286,8 @@ const CompetitorDetail: React.FC = () => {
           }
           
           try {
-            // Get menu URL from API
-            const menuResponse = await axios.get(`/api/gemini-competitors/get-stored-menu/${competitorId}`, {
-              headers: {
-                Authorization: `Bearer ${token}`
-              }
-            });
+            // Get menu URL from API using centralized api service
+            const menuResponse = await api.get(`gemini-competitors/get-stored-menu/${competitorId}`);
             
             const responseData = menuResponse.data as CompetitorMenuResponse;
             
