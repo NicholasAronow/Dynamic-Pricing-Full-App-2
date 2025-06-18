@@ -30,6 +30,8 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import pricingService, { PriceRecommendation } from '../../services/pricingService';
+import * as recipeService from '../../services/recipeService';
+import { RecipeItem } from '../../types/recipe';
 
 const { Title, Text } = Typography;
 
@@ -42,6 +44,8 @@ const PriceRecommendations: React.FC = () => {
   const [editPrice, setEditPrice] = useState<number | null>(null);
   const [savingPrice, setSavingPrice] = useState<number | null>(null);
   const [usingMock, setUsingMock] = useState<boolean>(false);
+  const [recipes, setRecipes] = useState<RecipeItem[]>([]);
+  const [loadingRecipes, setLoadingRecipes] = useState<boolean>(true);
   
   // Calculate summary metrics with safety checks
   const totalRevenue = recommendations.reduce((sum, item) => sum + (item.revenue || 0), 0);
@@ -50,6 +54,23 @@ const PriceRecommendations: React.FC = () => {
     (netRevenueImpact / (totalRevenue - netRevenueImpact)) * 100 : 0;
 
   // Fetch recommendations from the API
+  // Fetch recipe data for real cost information
+  useEffect(() => {
+    const fetchRecipes = async () => {
+      setLoadingRecipes(true);
+      try {
+        const recipesData = await recipeService.getRecipes();
+        setRecipes(recipesData);
+      } catch (error) {
+        console.error('Error fetching recipes:', error);
+      } finally {
+        setLoadingRecipes(false);
+      }
+    };
+    
+    fetchRecipes();
+  }, []);
+
   useEffect(() => {
     const fetchRecommendations = async () => {
       setLoading(true);
@@ -447,7 +468,7 @@ const PriceRecommendations: React.FC = () => {
 
     {
       title: (
-        <Tooltip title="Estimated margin based on revenue contribution and product category. This is an approximation due to the nature of COGS data for independent retailers.">
+        <Tooltip title="Margin calculated using real item-level cost data from your recipe ingredients.">
           <span>
             Estimated Margin <InfoCircleOutlined style={{ fontSize: '12px', color: '#9370DB' }} />
           </span>
@@ -458,8 +479,21 @@ const PriceRecommendations: React.FC = () => {
       sorter: (a, b) => (a.profitMargin || 0) - (b.profitMargin || 0),
       sortDirections: ['descend', 'ascend'] as TableColumnType<any>['sortDirections'],
       render: (margin: number, record: any) => {
+        // Find recipe for this item if available
+        const recipe = recipes.find(r => r.item_name === record.name);
+        
+        // If we have a recipe with total_cost, calculate real margin using that
+        // Otherwise fall back to the estimated margin
+        let realMargin = margin;
+        
+        if (recipe && recipe.total_cost && record.currentPrice > 0) {
+          // Calculate real margin using recipe total_cost
+          const cost = recipe.total_cost;
+          realMargin = (record.currentPrice - cost) / record.currentPrice;
+        }
+        
         // Convert decimal margin to percentage and ensure it's a number
-        const marginPercent = typeof margin === 'number' ? margin * 100 : 0;
+        const marginPercent = typeof realMargin === 'number' ? realMargin * 100 : 0;
         const marginColor = marginPercent >= 30 ? '#3f8600' : 
                            marginPercent >= 15 ? '#faad14' : '#cf1322';
         
