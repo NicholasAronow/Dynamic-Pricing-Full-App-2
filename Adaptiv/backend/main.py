@@ -33,6 +33,7 @@ from competitor_settings import competitor_settings_router
 from admin_routes import admin_router
 from routers.recipes import router as recipes_router
 from routers.ai_suggestions import router as ai_suggestions_router
+from routers.other_costs import other_costs_router
 
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
@@ -76,6 +77,7 @@ app.include_router(competitor_settings_router, prefix="/api/competitor-settings"
 app.include_router(admin_router, prefix="/api/admin", tags=["Admin"])
 app.include_router(recipes_router, prefix="/api", tags=["Recipes and Ingredients"])
 app.include_router(ai_suggestions_router, prefix="/api", tags=["AI Suggestions"])
+app.include_router(other_costs_router, prefix="/api/costs/other", tags=["Fixed Costs and Employees"])
 
 @app.get("/")
 async def root():

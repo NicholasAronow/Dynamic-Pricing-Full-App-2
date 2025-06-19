@@ -448,3 +448,32 @@ def delete_recipe(
     db.commit()
     
     return None
+
+@router.get("/{recipe_id}/net-margin")
+def get_recipe_net_margin(
+    recipe_id: int,
+    selling_price: float,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Calculate and return the net margin for a recipe, including ingredient costs
+    and fixed costs (rent, utilities, labor) allocated based on trailing month sales."""
+    # Find the recipe
+    recipe = db.query(Recipe).filter(
+        Recipe.id == recipe_id,
+        Recipe.user_id == current_user.id
+    ).first()
+    
+    if not recipe:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Recipe not found"
+        )
+    
+    # Calculate the net margin using the recipe's method
+    net_margin = recipe.calculate_net_margin(
+        db=db,
+        selling_price=selling_price
+    )
+    
+    return net_margin

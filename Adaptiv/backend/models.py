@@ -311,6 +311,43 @@ class PriceRecommendationAction(Base):
 from recipe_models import Ingredient, Recipe, RecipeIngredient
 
 # =====================================================
+# Fixed Cost and Employee Models
+# =====================================================
+
+class FixedCost(Base):
+    __tablename__ = "fixed_costs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    cost_type = Column(String, index=True)  # 'rent', 'utilities', etc.
+    amount = Column(Float)
+    month = Column(Integer)  # 1-12 for month of the year
+    year = Column(Integer)   # Year of the cost
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationship to User
+    user = relationship("User", backref="fixed_costs")
+
+class Employee(Base):
+    __tablename__ = "employees"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    name = Column(String)
+    pay_type = Column(String, index=True)  # 'salary' or 'hourly'
+    salary = Column(Float, nullable=True)  # Yearly salary if pay_type is 'salary'
+    hourly_rate = Column(Float, nullable=True)  # Hourly rate if pay_type is 'hourly'
+    weekly_hours = Column(Float, nullable=True)  # Weekly hours if pay_type is 'hourly'
+    active = Column(Boolean, default=True)  # Whether the employee is currently active
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationship to User
+    user = relationship("User", backref="employees")
+
+# =====================================================
 # Dynamic Pricing Agent Memory Database Models
 # =====================================================
 

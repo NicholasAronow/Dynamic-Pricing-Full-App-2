@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import './custom-tabs.css';
-import { Card, Table, Typography, Space, Button, Empty, Spin, message, Tabs, Modal, Tooltip, Input, Alert, List, Statistic, AutoComplete, Select } from 'antd';
-import { PlusOutlined, DollarOutlined, CoffeeOutlined, AppstoreOutlined, ExclamationCircleOutlined, ThunderboltOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
+import { Card, Table, Typography, Space, Button, Empty, Spin, message, Tabs, Modal, Tooltip, Input, Alert, List, Statistic, AutoComplete, Select, Form, Radio, InputNumber, Divider, Row, Col } from 'antd';
+import { PlusOutlined, DollarOutlined, CoffeeOutlined, AppstoreOutlined, ExclamationCircleOutlined, ThunderboltOutlined, DeleteOutlined, EditOutlined, TagsOutlined, UserOutlined, SaveOutlined } from '@ant-design/icons';
 import * as recipeService from '../../services/recipeService';
 import { generateSuggestionsFromMenu } from '../../services/recipeService';
 import itemService from '../../services/itemService';
+import * as otherCostsService from '../../services/otherCostsService';
+import { FixedCost, Employee } from '../../services/otherCostsService';
 import { RecipeItem, IngredientItem, RecipeIngredient, RecipeSuggestion, SuggestionIngredient, MenuSuggestionResponse } from '../../types/recipe';
 import { MenuItem } from '../../types/menu';
 import RecipeModal from './RecipeModal';
@@ -58,6 +60,7 @@ const Costs: React.FC = () => {
       'teaspoons': 4.92892,
       'gallon': 3785.41,
       'gallons': 3785.41,
+      'gal': 3785.41,
       'quart': 946.353,
       'quarts': 946.353,
       'pint': 473.176,
@@ -85,6 +88,18 @@ const Costs: React.FC = () => {
   const [ingredientsLoading, setIngredientsLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<string>('1');
   
+  // State for other costs
+  const [rent, setRent] = useState<number | null>(null);
+  const [utilities, setUtilities] = useState<number | null>(null);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [otherCostsLoading, setOtherCostsLoading] = useState<boolean>(true);
+  const [savingAllCosts, setSavingAllCosts] = useState<boolean>(false);
+  
+  // Current date for setting month/year in fixed costs
+  const currentDate = new Date();
+  const currentMonth = currentDate.getMonth() + 1; // JavaScript months are 0-indexed
+  const currentYear = currentDate.getFullYear();
+  
   // Modal state
   const [recipeModalVisible, setRecipeModalVisible] = useState<boolean>(false);
   const [ingredientModalVisible, setIngredientModalVisible] = useState<boolean>(false);
@@ -107,37 +122,154 @@ const Costs: React.FC = () => {
   const [baseIngredients, setBaseIngredients] = useState<Omit<IngredientItem, 'ingredient_id' | 'date_created'>[]>([]);
 
   // Fetch recipe data
-  useEffect(() => {
-    const fetchRecipes = async () => {
-      try {
-        const data = await recipeService.getRecipes();
-        setRecipes(data);
-      } catch (error) {
-        console.error('Failed to fetch recipes:', error);
-        message.error('Failed to load recipes');
-      } finally {
-        setRecipesLoading(false);
-      }
-    };
-    
-    fetchRecipes();
-  }, []);
+  const loadRecipes = async () => {
+    try {
+      setRecipesLoading(true);
+      const data = await recipeService.getRecipes();
+      setRecipes(data);
+    } catch (error) {
+      message.error('Failed to load recipes');
+      console.error(error);
+    } finally {
+      setRecipesLoading(false);
+    }
+  };
 
-  // Fetch ingredient data
-  useEffect(() => {
-    const fetchIngredients = async () => {
-      try {
-        const data = await recipeService.getIngredients();
-        setIngredients(data);
-      } catch (error) {
-        console.error('Failed to fetch ingredients:', error);
-        message.error('Failed to load ingredients');
-      } finally {
-        setIngredientsLoading(false);
+  const loadIngredients = async () => {
+    try {
+      setIngredientsLoading(true);
+      const data = await recipeService.getIngredients();
+      setIngredients(data);
+    } catch (error) {
+      message.error('Failed to load ingredients');
+      console.error(error);
+    } finally {
+      setIngredientsLoading(false);
+    }
+  };
+
+  const loadOtherCosts = async () => {
+    try {
+      setOtherCostsLoading(true);
+      
+      // Load fixed costs (rent and utilities)
+      const fixedCosts = await otherCostsService.getFixedCosts(undefined, currentMonth, currentYear);
+      
+      // Find rent and utilities from the returned fixed costs
+      const rentCost = fixedCosts.find(cost => cost.cost_type === 'rent');
+      const utilitiesCost = fixedCosts.find(cost => cost.cost_type === 'utilities');
+      
+      // Set state for rent and utilities
+      setRent(rentCost ? rentCost.amount : null);
+      setUtilities(utilitiesCost ? utilitiesCost.amount : null);
+      
+      // Load employees
+      const employeeData = await otherCostsService.getEmployees();
+      setEmployees(employeeData);
+      
+    } catch (error) {
+      message.error('Failed to load other costs');
+      console.error(error);
+    } finally {
+      setOtherCostsLoading(false);
+    }
+  };
+
+  const saveAllCosts = async () => {
+    try {
+      setSavingAllCosts(true);
+      
+      // Save fixed costs (rent and utilities)
+      // Check if rent and utilities are not null
+      if (rent !== null || utilities !== null) {
+        // Get existing fixed costs
+        const fixedCosts = await otherCostsService.getFixedCosts(undefined, currentMonth, currentYear);
+        
+        // Find existing rent and utilities costs
+        const rentCost = fixedCosts.find(cost => cost.cost_type === 'rent');
+        const utilitiesCost = fixedCosts.find(cost => cost.cost_type === 'utilities');
+        
+        // Handle rent cost
+        if (rent !== null) {
+          if (rentCost) {
+            // Update existing rent cost
+            await otherCostsService.updateFixedCost(rentCost.id!, { 
+              ...rentCost, 
+              amount: rent
+            });
+          } else {
+            // Create new rent cost
+            await otherCostsService.createFixedCost({
+              cost_type: 'rent',
+              amount: rent,
+              month: currentMonth,
+              year: currentYear
+            });
+          }
+        }
+        
+        // Handle utilities cost
+        if (utilities !== null) {
+          if (utilitiesCost) {
+            // Update existing utilities cost
+            await otherCostsService.updateFixedCost(utilitiesCost.id!, { 
+              ...utilitiesCost, 
+              amount: utilities
+            });
+          } else {
+            // Create new utilities cost
+            await otherCostsService.createFixedCost({
+              cost_type: 'utilities',
+              amount: utilities,
+              month: currentMonth,
+              year: currentYear
+            });
+          }
+        }
       }
-    };
-    
-    fetchIngredients();
+      
+      // Save all employees
+      for (const employee of employees) {
+        try {
+          if (employee.id) {
+            // Update existing employee
+            await otherCostsService.updateEmployee(employee.id, employee);
+          } else {
+            // Create new employee
+            const createdEmployee = await otherCostsService.createEmployee(employee);
+            
+            // Replace the local employee with the created one (to get the ID)
+            setEmployees(prev => 
+              prev.map(emp => 
+                emp === employee ? createdEmployee : emp
+              )
+            );
+          }
+        } catch (empError) {
+          console.error(`Failed to save employee ${employee.name}:`, empError);
+          // Continue with other employees even if one fails
+        }
+      }
+      
+      message.success('All costs saved successfully');
+      
+      // Refresh data after saving
+      await loadOtherCosts();
+      
+    } catch (error) {
+      message.error('Failed to save costs');
+      console.error(error);
+    } finally {
+      setSavingAllCosts(false);
+    }
+  };
+
+
+
+  useEffect(() => {
+    loadRecipes();
+    loadIngredients();
+    loadOtherCosts();
   }, []);
 
   // Columns for recipes table
@@ -590,6 +722,33 @@ const Costs: React.FC = () => {
     }
   };
 
+  // Add employee function
+  const handleAddEmployee = () => {
+    const newEmployee: Employee = {
+      name: '',
+      pay_type: 'hourly',
+      active: true
+    };
+    setEmployees([...employees, newEmployee]);
+  };
+
+  // Delete employee function
+  const handleDeleteEmployee = async (employeeId?: number) => {
+    try {
+      if (employeeId) {
+        await otherCostsService.deleteEmployee(employeeId);
+        setEmployees(employees.filter(e => e.id !== employeeId));
+        message.success('Employee removed successfully');
+      } else {
+        // If no ID, it's a local-only employee that hasn't been saved
+        setEmployees(prevEmployees => prevEmployees.filter(e => e.id !== employeeId));
+      }
+    } catch (error) {
+      message.error('Failed to remove employee');
+      console.error(error);
+    }
+  };
+
   return (
     <div>
       {renderLoadingSpinner()}
@@ -604,7 +763,7 @@ const Costs: React.FC = () => {
         className="custom-tabs"
         type="card"
         tabBarStyle={{
-          background: '#f5f5f5',
+          background: '#fafafa',
           borderBottom: '2px solid #9370DB'
         }}
       >
@@ -814,6 +973,241 @@ const Costs: React.FC = () => {
               </div>
             )}
         </TabPane>
+
+        <TabPane
+          tab={<span><TagsOutlined /> Others</span>}
+          key="3"
+        >
+            <div style={{ padding: '20px' }}>
+              <Card 
+                title="Fixed Monthly Costs" 
+                style={{ marginBottom: '24px' }}
+                extra={
+                  <Button 
+                    type="primary" 
+                    icon={<SaveOutlined />} 
+                    onClick={saveAllCosts} 
+                    loading={savingAllCosts}
+                  >
+                    Save All Costs
+                  </Button>
+                }
+              >
+                <Spin spinning={otherCostsLoading}>
+                  <Form layout="vertical">
+                    <Row gutter={24}>
+                      <Col span={12}>
+                        <Form.Item label="Monthly Rent">
+                          <InputNumber
+                            style={{ width: '100%' }}
+                            prefix="$"
+                            min={0}
+                            value={rent}
+                            onChange={value => setRent(value)}
+                            formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                            parser={value => value ? Number(value.replace(/\$\s?|(,*)/g, '')) : 0}
+                          />
+                        </Form.Item>
+                      </Col>
+                      <Col span={12}>
+                        <Form.Item label="Monthly Utilities">
+                          <InputNumber
+                            style={{ width: '100%' }}
+                            prefix="$"
+                            min={0}
+                            value={utilities}
+                            onChange={value => setUtilities(value)}
+                            formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                            parser={value => value ? Number(value.replace(/\$\s?|(,*)/g, '')) : 0}
+                          />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                  </Form>
+                </Spin>
+              </Card>
+            
+              <Card 
+                title="Employee Costs" 
+                style={{ marginBottom: '24px' }}
+              >
+                <Spin spinning={otherCostsLoading}>
+                  {employees.length === 0 ? (
+                    <Empty
+                      image={<UserOutlined style={{ fontSize: '64px', color: '#9370DB' }} />}
+                      description="No employees added yet"
+                    />
+                  ) : (
+                    employees.map((employee, index) => (
+                    <Card
+                      key={index}
+                      style={{ marginBottom: '16px' }}
+                      title={`Employee ${index + 1}${employee.name ? ': ' + employee.name : ''}`}
+                      extra={
+                        <Button 
+                          type="text" 
+                          danger 
+                          icon={<DeleteOutlined />} 
+                          onClick={() => handleDeleteEmployee(employee.id)}
+                        />
+                      }
+                    >
+                      <Form layout="vertical">
+                        <Form.Item label="Employee Name">
+                          <Input 
+                            placeholder="Enter employee name"
+                            value={employee.name}
+                            onChange={(e) => {
+                              const newEmployees = [...employees];
+                              newEmployees[index] = { ...employee, name: e.target.value };
+                              setEmployees(newEmployees);
+                            }}
+                          />
+                        </Form.Item>
+                        
+                        <Form.Item label="Pay Type">
+                          <Radio.Group 
+                            value={employee.pay_type}
+                            onChange={e => {
+                              const newEmployees = [...employees];
+                              newEmployees[index] = { ...employee, pay_type: e.target.value };
+                              setEmployees(newEmployees);
+                            }}
+                          >
+                            <Radio value="salary">Yearly Salary</Radio>
+                            <Radio value="hourly">Hourly Rate</Radio>
+                          </Radio.Group>
+                        </Form.Item>
+                        
+                        {employee.pay_type === 'salary' ? (
+                          <Form.Item label="Yearly Salary">
+                            <InputNumber
+                              style={{ width: '100%' }}
+                              placeholder="Enter yearly salary"
+                              prefix="$"
+                              min={0}
+                              value={employee.salary}
+                              onChange={value => {
+                                const newEmployees = [...employees];
+                                newEmployees[index] = { ...employee, salary: value as number };
+                                setEmployees(newEmployees);
+                              }}
+                              formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                              parser={value => value ? Number(value.replace(/\$\s?|(,*)/g, '')) : 0}
+                            />
+                          </Form.Item>
+                        ) : (
+                          <Row gutter={16}>
+                            <Col span={12}>
+                              <Form.Item label="Hourly Rate">
+                                <InputNumber
+                                  style={{ width: '100%' }}
+                                  placeholder="Enter hourly rate"
+                                  prefix="$"
+                                  min={0}
+                                  value={employee.hourly_rate}
+                                  onChange={value => {
+                                    const newEmployees = [...employees];
+                                    newEmployees[index] = { ...employee, hourly_rate: value as number };
+                                    setEmployees(newEmployees);
+                                  }}
+                                  formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                                  parser={value => value ? Number(value.replace(/\$\s?|(,*)/g, '')) : 0}
+                                />
+                              </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                              <Form.Item label="Weekly Hours">
+                                <InputNumber
+                                  style={{ width: '100%' }}
+                                  placeholder="Enter weekly hours"
+                                  min={0}
+                                  max={168}
+                                  value={employee.weekly_hours}
+                                  onChange={value => {
+                                    const newEmployees = [...employees];
+                                    newEmployees[index] = { ...employee, weekly_hours: value as number };
+                                    setEmployees(newEmployees);
+                                  }}
+                                />
+                              </Form.Item>
+                            </Col>
+                          </Row>
+                        )}
+                        
+                        {employee.pay_type === 'hourly' && employee.hourly_rate && employee.weekly_hours && (
+                          <Alert
+                            message={
+                              <>
+                                <Text strong>Estimated Monthly Cost: </Text>
+                                <Text>${((employee.hourly_rate * employee.weekly_hours * 52) / 12).toFixed(2)}</Text>
+                              </>
+                            }
+                            type="info"
+                            showIcon
+                          />
+                        )}
+                        
+                        {employee.pay_type === 'salary' && employee.salary && (
+                          <Alert
+                            message={
+                              <>
+                                <Text strong>Monthly Cost: </Text>
+                                <Text>${(employee.salary / 12).toFixed(2)}</Text>
+                              </>
+                            }
+                            type="info"
+                            showIcon
+                          />
+                        )}
+                      </Form>
+                    </Card>
+                  )))
+                  }
+                </Spin>
+                
+                <Card
+                  hoverable
+                  style={{ 
+                    marginTop: '16px', 
+                    borderStyle: 'dashed', 
+                    borderWidth: '2px',
+                    borderColor: '#d9d9d9',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    height: '100px',
+                    cursor: 'pointer'
+                  }}
+                  onClick={handleAddEmployee}
+                >
+                  <Space>
+                    <PlusOutlined style={{ fontSize: '18px' }} />
+                    <span style={{ fontSize: '16px' }}>Add New Employee</span>
+                  </Space>
+                </Card>
+                
+                {employees.length > 0 && (
+                  <div style={{ marginTop: '20px' }}>
+                    <Divider>Summary</Divider>
+                    <Statistic 
+                      title="Total Monthly Employee Costs" 
+                      value={employees.reduce((sum, emp) => {
+                        if (emp.pay_type === 'salary' && emp.salary) {
+                          return sum + (emp.salary / 12);
+                        } else if (emp.pay_type === 'hourly' && emp.hourly_rate && emp.weekly_hours) {
+                          return sum + ((emp.hourly_rate * emp.weekly_hours * 52) / 12);
+                        }
+                        return sum;
+                      }, 0)}
+                      precision={2}
+                      prefix="$"
+                    />
+                  </div>
+                )}
+              </Card>
+            </div>
+          </TabPane>
       </Tabs>
       
       {/* Recipe Modal */}
@@ -839,11 +1233,11 @@ const Costs: React.FC = () => {
       >
         {selectedRecipe && (
           <div>
-            <p><strong>Item Name:</strong> {selectedRecipe.item_name}</p>
-            <p><strong>Date Created:</strong> {selectedRecipe.date_created}</p>
+            <p><strong>Item Name:</strong> {selectedRecipe?.item_name}</p>
+            <p><strong>Date Created:</strong> {selectedRecipe?.date_created}</p>
             <p><strong>Ingredients:</strong></p>
             <ul>
-              {selectedRecipe.ingredients.map(ing => {
+              {selectedRecipe?.ingredients?.map(ing => {
                 const ingredientDetails = ingredients.find(i => i.ingredient_id === ing.ingredient_id);
                 return (
                   <li key={ing.ingredient_id}>

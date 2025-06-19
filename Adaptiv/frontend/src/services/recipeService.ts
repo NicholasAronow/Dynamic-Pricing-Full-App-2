@@ -187,3 +187,18 @@ export const generateSuggestionsFromMenu = async (menuItems: MenuItem[]): Promis
     throw error;
   }
 };
+
+// Fetch net margin data (including ingredient costs and fixed costs allocation)
+export const getRecipeNetMargin = async (recipeId: string, sellingPrice: number): Promise<any> => {
+  try {
+    const response = await api.get(`/api/recipes/${recipeId}/net-margin`, {
+      params: {
+        selling_price: sellingPrice
+      }
+    });
+    return response.data;
+  } catch (error: any) {
+    console.error(`Error fetching net margin for recipe ${recipeId}:`, error.response?.data || error.message);
+    throw error;
+  }
+};

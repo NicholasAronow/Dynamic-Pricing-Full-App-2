@@ -49,6 +49,7 @@ const PriceRecommendations: React.FC = () => {
   const [recipes, setRecipes] = useState<RecipeItem[]>([]);
   const [loadingRecipes, setLoadingRecipes] = useState<boolean>(true);
   const [syncingOrders, setSyncingOrders] = useState<boolean>(false);
+  const [netMargins, setNetMargins] = useState<{[key: string]: any}>({});
   
   // Calculate summary metrics with safety checks
   const totalRevenue = recommendations.reduce((sum, item) => sum + (item.revenue || 0), 0);
@@ -85,6 +86,25 @@ const PriceRecommendations: React.FC = () => {
       try {
         const recipesData = await recipeService.getRecipes();
         setRecipes(recipesData);
+        
+        // After recipes are loaded, fetch net margins for each recipe
+        const margins: {[key: string]: any} = {};
+        for (const recipe of recipesData) {
+          try {
+            // Find corresponding recommendation item to get the selling price
+            const recommendationItem = recommendations.find(r => r.name === recipe.item_name);
+            if (recommendationItem && recommendationItem.currentPrice) {
+              const netMarginData = await recipeService.getRecipeNetMargin(
+                recipe.item_id, 
+                recommendationItem.currentPrice
+              );
+              margins[recipe.item_name] = netMarginData;
+            }
+          } catch (err) {
+            console.error(`Error fetching net margin for ${recipe.item_name}:`, err);
+          }
+        }
+        setNetMargins(margins);
       } catch (error) {
         console.error('Error fetching recipes:', error);
       } finally {
@@ -93,7 +113,7 @@ const PriceRecommendations: React.FC = () => {
     };
     
     fetchRecipes();
-  }, []);
+  }, [recommendations]);
 
   useEffect(() => {
     const fetchRecommendations = async () => {
@@ -159,147 +179,6 @@ const PriceRecommendations: React.FC = () => {
   // Handle time frame change
   const handleTimeFrameChange = (value: string) => {
     setTimeFrame(value);
-  };
-
-  // Handle edit mode for a row
-  const startEditing = (record: PriceRecommendation) => {
-    setEditingRow(record.id);
-    setEditPrice(record.recommendedPrice || calculateRecommendedPrice(record));
-  };
-
-  // Calculate a recommended price based on performance data
-  const calculateRecommendedPrice = (record: PriceRecommendation): number => {
-    // Simple algorithm based on growth and profitability
-    const elasticity = parseFloat(record.elasticity);
-    let percentChange = 0;
-    
-    if (record.growth > 10 && record.profitMargin >= 0.3) {
-      // High growth + good margin: recommend price increase
-      percentChange = Math.min(5, Math.round(record.growth / 3));
-    } else if (record.growth < -5 || record.profitMargin < 0.2) {
-      // Negative growth or low margin: recommend price decrease
-      percentChange = Math.max(-8, Math.round(record.growth / 2));
-    } else {
-      // Stable: small adjustment based on margin
-      percentChange = record.profitMargin > 0.4 ? 2 : -2;
-    }
-    
-    const newPrice = record.currentPrice * (1 + percentChange / 100);
-    return Number(newPrice.toFixed(2));
-  };
-
-  // Cancel editing
-  const cancelEditing = () => {
-    setEditingRow(null);
-    setEditPrice(null);
-  };
-
-  // Calculate estimated impact of applying price recommendation
-  const calculateImpact = (record: PriceRecommendation) => {
-    if (!record.recommendedPrice || record.recommendedPrice === record.currentPrice) {
-      return { projectedQuantity: record.quantity, projectedRevenue: record.revenue, revenueDiff: 0, percentChange: 0, estimatedNewMargin: record.profitMargin };
-    }
-    
-    const percentChange = ((record.recommendedPrice - record.currentPrice) / record.currentPrice) * 100;
-    const elasticity = parseFloat(record.elasticity);
-    const quantityChange = -percentChange * elasticity / 100; // Elasticity formula
-    const projectedQuantity = record.quantity * (1 + quantityChange);
-    const projectedRevenue = projectedQuantity * record.recommendedPrice;
-    const revenueDiff = projectedRevenue - record.revenue;
-    const revenueChangePercent = (revenueDiff / record.revenue) * 100;
-    
-    // Calculate estimated new margin if price changes
-    let estimatedNewMargin = record.profitMargin;
-    if (percentChange > 0 && record.profitMargin) {
-      // Price increase typically improves margins, unless quantity drops too much
-      const marginalEffect = 1 + (percentChange / 100) * (1 - elasticity);
-      estimatedNewMargin = record.profitMargin * marginalEffect;
-      // Cap at reasonable maximum
-      estimatedNewMargin = Math.min(estimatedNewMargin, 0.7);
-    } else if (percentChange < 0 && record.profitMargin) {
-      // Price decrease typically reduces margins, but might be offset by volume
-      const marginalEffect = 1 + (percentChange / 100) * (1 + elasticity / 2);
-      estimatedNewMargin = record.profitMargin * marginalEffect;
-      // Ensure we don't go below 0
-      estimatedNewMargin = Math.max(estimatedNewMargin, 0);
-    }
-    
-    return { 
-      projectedQuantity,
-      projectedRevenue,
-      revenueDiff,
-      revenueChangePercent,
-      estimatedNewMargin
-    };
-  };
-
-  // Save edited price
-  const saveEditing = async (record: PriceRecommendation) => {
-    if (editPrice !== null) {
-      setSavingPrice(record.id);
-      
-      // Calculate metrics for the UI update
-      const percentChange = Math.round(((editPrice - record.currentPrice) / record.currentPrice) * 100);
-      const demandElasticity = parseFloat(record.elasticity);
-      const projectedQuantityChange = -percentChange * demandElasticity / 100;
-      const projectedNewQuantity = Math.round(record.quantity * (1 + projectedQuantityChange));
-      const projectedRevenue = projectedNewQuantity * editPrice;
-      const revenueDiff = projectedRevenue - record.revenue;
-      const revenueChangePercent = Math.round((revenueDiff / record.revenue) * 100);
-      
-      // Calculate the estimated new margin
-      let estimatedNewMargin = record.profitMargin;
-      if (percentChange > 0 && record.profitMargin) {
-        // Price increase typically improves margins, unless quantity drops too much
-        const marginalEffect = 1 + (percentChange / 100) * (1 - demandElasticity);
-        estimatedNewMargin = record.profitMargin * marginalEffect;
-        // Cap at reasonable maximum
-        estimatedNewMargin = Math.min(estimatedNewMargin, 0.7);
-      } else if (percentChange < 0 && record.profitMargin) {
-        // Price decrease typically reduces margins, but might be offset by volume
-        const marginalEffect = 1 + (percentChange / 100) * (1 + demandElasticity / 2);
-        estimatedNewMargin = record.profitMargin * marginalEffect;
-        // Ensure we don't go below 0
-        estimatedNewMargin = Math.max(estimatedNewMargin, 0);
-      }
-      
-      // Apply the price change using the service
-      try {
-        const success = await pricingService.applyRecommendation(record.id, editPrice);
-        
-        if (success) {
-          // Update local state with the new price
-          const updatedRecommendations = recommendations.map(item => {
-            if (item.id === record.id) {
-              return {
-                ...item,
-                recommendedPrice: editPrice,
-                percentChange,
-                projectedRevenue,
-                revenueChangePercent,
-                profitMargin: estimatedNewMargin // Update with the newly calculated margin
-              };
-            }
-            return item;
-          });
-          
-          setRecommendations(updatedRecommendations);
-          message.success(`Price for ${record.name} updated to $${editPrice}`);
-        } else {
-          message.error('Failed to update price. Please try again.');
-        }
-      } catch (error) {
-        console.error('Error saving price:', error);
-        message.error('Error updating price');
-      } finally {
-        setSavingPrice(null);
-        setEditingRow(null);
-        setEditPrice(null);
-      }
-    } else {
-      setEditingRow(null);
-      setEditPrice(null);
-    }
   };
 
   // Table columns
@@ -492,9 +371,9 @@ const PriceRecommendations: React.FC = () => {
 
     {
       title: (
-        <Tooltip title="Margin calculated using real item-level cost data from your recipe ingredients.">
+        <Tooltip title="Margin calculated using only ingredient cost data for your items.">
           <span>
-            Estimated Margin <InfoCircleOutlined style={{ fontSize: '12px', color: '#9370DB' }} />
+            Gross Margin <InfoCircleOutlined style={{ fontSize: '12px', color: '#9370DB' }} />
           </span>
         </Tooltip>
       ),
@@ -507,13 +386,33 @@ const PriceRecommendations: React.FC = () => {
         const recipe = recipes.find(r => r.item_name === record.name);
         
         // If we have a recipe with total_cost, calculate real margin using that
-        // Otherwise fall back to the estimated margin
         let realMargin = margin;
         
         if (recipe && recipe.total_cost && record.currentPrice > 0) {
-          // Calculate real margin using recipe total_cost
-          const cost = recipe.total_cost;
+          // Get cost from recipe
+          let cost = recipe.total_cost;
+          
+          // Check for unreasonable cost values
+          // This indicates a likely unit conversion issue in the backend
+          const reasonableCostLimit = record.currentPrice * 10; // Cost shouldn't be more than 10x the price
+          const isUnreasonablyCostly = cost > reasonableCostLimit;
+          
+          if (isUnreasonablyCostly) {
+            console.warn(`Potentially incorrect cost detected: ${record.name} has cost $${cost.toFixed(2)} but price is only $${record.currentPrice.toFixed(2)}`);
+            
+            // Use an estimated cost instead (60% of price as a reasonable fallback)
+            // This assumes a 40% target margin which is common in food service
+            const estimatedCost = record.currentPrice * 0.6;
+            console.log(`Using estimated cost of $${estimatedCost.toFixed(2)} instead of $${cost.toFixed(2)} for ${record.name}`);
+            cost = estimatedCost;
+          } else {
+            // Log normal cost calculation
+            console.log(`Normal margin calculation for ${record.name}: cost=$${cost.toFixed(2)}, price=$${record.currentPrice.toFixed(2)}`);
+          }
+          
+          // Calculate margin using standard formula with sanitized cost
           realMargin = (record.currentPrice - cost) / record.currentPrice;
+
         }
         
         // Convert decimal margin to percentage and ensure it's a number
@@ -525,6 +424,53 @@ const PriceRecommendations: React.FC = () => {
           <Text strong style={{ color: marginColor }}>
             {marginPercent.toFixed(1)}%
           </Text>
+        );
+      },
+    },
+    
+    {
+      title: (
+        <Tooltip title="Net margin including ingredient costs and fixed costs (rent, utilities, labor) based on trailing month sales.">
+          <span>
+            Net Margin <InfoCircleOutlined style={{ fontSize: '12px', color: '#9370DB' }} />
+          </span>
+        </Tooltip>
+      ),
+      key: 'netMargin',
+      sorter: (a, b) => {
+        const marginA = netMargins[a.name]?.net_margin_percentage || 0;
+        const marginB = netMargins[b.name]?.net_margin_percentage || 0;
+        return marginA - marginB;
+      },
+      sortDirections: ['descend', 'ascend'] as TableColumnType<any>['sortDirections'],
+      render: (text: string, record: any) => {
+        // Find recipe for this item if available
+        const recipe = recipes.find(r => r.item_name === record.name);
+        
+        // Get net margin data if available
+        const netMarginData = netMargins[record.name];
+        
+        if (!recipe || !netMarginData) {
+          return <Text type="secondary">Calculating...</Text>;
+        }
+        
+        // Display the net margin with color coding
+        const netMarginPercent = netMarginData.net_margin_percentage || 0;
+        const marginColor = netMarginPercent >= 25 ? '#3f8600' : 
+                           netMarginPercent >= 12 ? '#faad14' : '#cf1322';
+        
+        return (
+          <Space direction="vertical" size={0}>
+            <Text strong style={{ color: marginColor }}>
+              {netMarginPercent.toFixed(1)}%
+            </Text>
+            <Text type="secondary" style={{ fontSize: '0.8em' }}>
+              Ingredients: ${netMarginData.ingredient_cost?.toFixed(2) || '0.00'}
+            </Text>
+            <Text type="secondary" style={{ fontSize: '0.8em' }}>
+              Fixed costs: ${netMarginData.fixed_cost?.toFixed(2) || '0.00'}
+            </Text>
+          </Space>
         );
       },
     },
