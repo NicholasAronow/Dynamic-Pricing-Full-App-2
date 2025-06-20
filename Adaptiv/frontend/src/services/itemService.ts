@@ -60,7 +60,8 @@ export const itemService = {
       }
       
       // Add account_id filter to ensure we only get price history for items the user owns
-      const response = await api.get(`price-history?item_id=${itemId}&account_id=${currentUser.id}`);
+      // Adding trailing slash to prevent 307 redirects
+      const response = await api.get(`price-history/?item_id=${itemId}&account_id=${currentUser.id}`);
       return response.data;
     } catch (error) {
       console.error(`Error fetching price history for item ${itemId}:`, error);
