@@ -5,8 +5,28 @@ import models
 from database import SessionLocal
 import json
 import asyncio
+import os
+import logging
+import re
+from openai import OpenAI
+from dotenv import load_dotenv
 # Import datetime at the module level since it's used in multiple places
 from datetime import datetime, timedelta
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# Load environment variables
+load_dotenv()
+
+# Configure OpenAI
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+clients = {}
+if OPENAI_API_KEY:
+    try:
+        clients['openai'] = OpenAI(api_key=OPENAI_API_KEY)
+    except Exception as e:
+        logger.error(f"Failed to initialize OpenAI client in tasks.py: {e}")
 
 # Helper function to run async functions in synchronous code
 def run_async(coroutine):
@@ -544,6 +564,248 @@ def run_dynamic_pricing_analysis_task(user_id: int, parameters: Dict[str, Any] =
             "success": False,
             "error": str(e),
             "status": "failed"
+        }
+
+
+@celery_app.task(name="generate_menu_suggestions_task")
+def generate_menu_suggestions_task(menu_items: List[Dict[str, Any]], user_id: int) -> Dict[str, Any]:
+    """
+    Celery task to generate menu suggestions using OpenAI API
+    
+    This offloads the potentially long-running API call to a background worker
+    to avoid web worker timeouts in the FastAPI application.
+    
+    Args:
+        menu_items: List of menu items with name, description, and category
+        user_id: ID of the user making the request
+    
+    Returns:
+        Dictionary containing the recipe suggestions or error information
+    """
+    try:
+        # Check if OpenAI API key is configured
+        if not OPENAI_API_KEY:
+            return {
+                "success": False,
+                "error": "OpenAI API is not configured. Please add your API key to the environment variables.",
+                "status": "failed"
+            }
+        
+        # Check if OpenAI client is initialized
+        if 'openai' not in clients:
+            return {
+                "success": False,
+                "error": "OpenAI client failed to initialize. Please check the API key.",
+                "status": "failed"
+            }
+        
+        # Format menu items for the prompt
+        menu_items_text = "\n".join([
+            f"- {item['name']}: {item.get('description', 'No description')} (Category: {item.get('category', 'Unknown')})"
+            for item in menu_items
+        ])
+        
+        # Create the prompt for OpenAI
+        prompt = f"""
+        Given the following menu items from a food service business:
+        
+        {menu_items_text}
+        
+        Please suggest:
+        1. Recipes for each menu item using those ingredients
+        
+        Format your response as a valid JSON object with the following structure:
+        {{
+            "recipes": [
+                {{
+                    "item_name": "Menu item name",
+                    "ingredients": [
+                        {{
+                            "ingredient": ingredient name,
+                            "quantity": quantity needed for this recipe as number,
+                            "unit": "unit of measurement"
+                        }}
+                    ]
+                }}
+            ]
+        }}
+        
+        Be realistic with ingredient quantities and prices. Use common units of measurement. Be as granular as possible (i.e. for an americano, use grams of beans, not shots of espresso). Do not give any extra details about the ingredient, just return the base ingredient (i.e. frothed milk is just whole milk)
+        """
+        
+        # Create a database session to update task status (if needed)
+        db = SessionLocal()
+        
+        # Call OpenAI API
+        try:
+            logger.info(f"Celery task: Calling OpenAI API with menu items: {[item['name'] for item in menu_items]}")
+            response = clients['openai'].chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant with expertise in food service and recipe identification."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            
+            # Extract and parse the response
+            suggestion_text = response.choices[0].message.content
+            logger.info(f"Celery task: Received response from OpenAI API")
+        except Exception as e:
+            logger.error(f"Celery task: OpenAI API call failed: {str(e)}")
+            db.close()
+            return {
+                "success": False,
+                "error": f"OpenAI API call failed: {str(e)}",
+                "status": "failed"
+            }
+        
+        # Find the JSON part of the response
+        suggestion_json = None
+        try:
+            # Try to find a JSON object in the response
+            json_match = re.search(r'({[\s\S]*})', suggestion_text)
+            if json_match:
+                suggestion_json = json.loads(json_match.group(1))
+            else:
+                # If no JSON found, try to parse the whole response
+                suggestion_json = json.loads(suggestion_text)
+                
+            logger.info(f"Celery task: Successfully parsed JSON response")
+        except json.JSONDecodeError as e:
+            logger.error(f"Celery task: Failed to parse JSON from OpenAI response: {e}")
+            db.close()
+            return {
+                "success": False,
+                "error": f"Failed to parse AI response as JSON: {str(e)}",
+                "status": "failed"
+            }
+        
+        if not suggestion_json or not isinstance(suggestion_json, dict):
+            db.close()
+            return {
+                "success": False,
+                "error": "Invalid response format from AI service",
+                "status": "failed"
+            }
+        
+        # Process the recipes to ensure they match our expected format
+        recipes = suggestion_json.get("recipes", [])
+        for recipe in recipes:
+            # Ensure each recipe has ingredients list
+            if "ingredients" not in recipe:
+                recipe["ingredients"] = []
+        
+        # Close the database session
+        db.close()
+        
+        # Return the successful result
+        return {
+            "success": True,
+            "status": "completed",
+            "recipes": recipes
+        }
+        
+    except Exception as e:
+        logger.exception("Celery task: Unexpected error in generate_menu_suggestions_task")
+        
+        # Close database session if opened
+        if 'db' in locals():
+            db.close()
+            
+        return {
+            "success": False,
+            "error": str(e),
+            "status": "failed"
+        }
+
+
+@celery_app.task(name="get_menu_suggestions_task_status")
+def get_menu_suggestions_task_status(task_id: str, user_id: int) -> Dict[str, Any]:
+    """
+    Check the status of a menu suggestions generation task
+    
+    Args:
+        task_id: The Celery task ID to check
+        user_id: ID of the user making the request
+        
+    Returns:
+        Dictionary with task status information
+    """
+    try:
+        # Get the AsyncResult for the task
+        from celery.result import AsyncResult
+        task_result = AsyncResult(task_id)
+        
+        # Get the task status
+        task_status = task_result.status
+        
+        if task_status == "PENDING":
+            status_message = "Menu suggestions task is queued for processing"
+            return {
+                "success": True,
+                "task_status": task_status,
+                "status_message": status_message,
+                "completed": False
+            }
+        elif task_status == "STARTED":
+            status_message = "Menu suggestions generation is in progress"
+            return {
+                "success": True,
+                "task_status": task_status,
+                "status_message": status_message,
+                "completed": False
+            }
+        elif task_status == "SUCCESS":
+            status_message = "Menu suggestions completed successfully"
+            
+            # Get the results
+            result = task_result.result
+            
+            # Check if the result contains an error
+            if result and isinstance(result, dict) and not result.get("success", True):
+                return {
+                    "success": False,
+                    "task_status": task_status,
+                    "status_message": f"Task completed but operation failed: {result.get('error', 'Unknown error')}",
+                    "error": result.get("error"),
+                    "completed": True
+                }
+            
+            return {
+                "success": True,
+                "task_status": task_status,
+                "status_message": status_message,
+                "result": result,
+                "completed": True
+            }
+        elif task_status == "FAILURE":
+            status_message = "Menu suggestions generation failed"
+            error_msg = str(task_result.result) if task_result.result else "Unknown error"
+            
+            return {
+                "success": False,
+                "task_status": task_status,
+                "status_message": status_message,
+                "error": error_msg,
+                "completed": True
+            }
+        else:
+            status_message = f"Unknown task status: {task_status}"
+            return {
+                "success": True,
+                "task_status": task_status,
+                "status_message": status_message,
+                "completed": False
+            }
+        
+    except Exception as e:
+        logger.exception(f"Error checking menu suggestions task status: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "task_status": "ERROR",
+            "status_message": "Error checking task status",
+            "completed": False
         }
 
 

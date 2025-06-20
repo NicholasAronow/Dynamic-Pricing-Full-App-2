@@ -179,18 +179,100 @@ export const deleteIngredient = async (id: string): Promise<void> => {
   await api.delete(`/api/recipes/ingredients/${id}`);
 };
 
-// AI-powered suggestion generation
+// Types for the task status and response
+export interface MenuSuggestionTaskResponse {
+  task_id: string;
+  status: string;
+  message: string;
+}
+
+export interface MenuSuggestionTaskStatusResponse {
+  status: string;
+  message: string;
+  completed: boolean;
+  recipes?: any[];
+  error?: string;
+}
+
+// AI-powered suggestion generation with asynchronous task processing
 export const generateSuggestionsFromMenu = async (menuItems: MenuItem[]): Promise<MenuSuggestionResponse> => {
   try {
-    const response = await api.post('/api/ai-suggestions/menu-suggestions', {
+    // Step 1: Start the asynchronous task
+    console.log('Starting menu suggestion generation task');
+    const startResponse = await api.post('/api/ai-suggestions/menu-suggestions', {
       menu_items: menuItems
     });
     
-    return response.data;
+    const taskResponse: MenuSuggestionTaskResponse = startResponse.data;
+    const taskId = taskResponse.task_id;
+    
+    if (!taskId) {
+      throw new Error('No task ID returned from server');
+    }
+    
+    console.log(`Menu suggestion task started with ID: ${taskId}`);
+    
+    // Step 2: Poll for task completion
+    return await pollTaskUntilComplete(taskId);
   } catch (error: any) {
     console.error('Error generating menu suggestions:', error.response?.data || error.message);
     throw error;
   }
+};
+
+// Poll the task status endpoint until the task is complete
+async function pollTaskUntilComplete(taskId: string): Promise<MenuSuggestionResponse> {
+  const maxAttempts = 30; // Maximum number of polling attempts
+  const pollingInterval = 2000; // Poll every 2 seconds
+  
+  let attempts = 0;
+  
+  // Create a promise that resolves when the polling is complete
+  return new Promise((resolve, reject) => {
+    // Define the polling function
+    const checkTaskStatus = async () => {
+      try {
+        // Check the status of the task
+        const statusResponse = await api.get(`/api/ai-suggestions/menu-suggestions/status/${taskId}`);
+        const statusData: MenuSuggestionTaskStatusResponse = statusResponse.data;
+        
+        // Log the current status
+        console.log(`Task ${taskId} status: ${statusData.status} - ${statusData.message}`);
+        
+        // If the task is completed
+        if (statusData.completed) {
+          // Check if it was successful and has recipes
+          if (statusData.recipes && statusData.recipes.length > 0) {
+            console.log(`Task completed successfully with ${statusData.recipes.length} recipes`);
+            resolve({ recipes: statusData.recipes });
+            return;
+          } else if (statusData.error) {
+            // Task completed but with an error
+            reject(new Error(`Task failed: ${statusData.error}`));
+            return;
+          }
+        }
+        
+        // Increment attempts counter
+        attempts++;
+        
+        // If we've reached the maximum attempts, reject with timeout error
+        if (attempts >= maxAttempts) {
+          reject(new Error(`Task timed out after ${maxAttempts} polling attempts`));
+          return;
+        }
+        
+        // Schedule the next poll
+        setTimeout(checkTaskStatus, pollingInterval);
+      } catch (error: any) {
+        console.error('Error polling task status:', error);
+        reject(error);
+      }
+    };
+    
+    // Start polling
+    checkTaskStatus();
+  });
 };
 
 // Fetch net margin data (including ingredient costs and fixed costs allocation)
