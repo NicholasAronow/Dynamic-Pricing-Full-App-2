@@ -10,18 +10,30 @@ price_history_router = APIRouter()
 @price_history_router.get("/", response_model=List[schemas.PriceHistory])
 def get_price_histories(
     item_id: Optional[int] = None,
+    account_id: Optional[int] = None,  # Added account_id parameter
     skip: int = 0, 
     limit: int = 100, 
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Get price histories, with optional item_id filter
+    Get price histories, with optional item_id and account_id filter
     """
     query = db.query(models.PriceHistory)
     
     if item_id:
-        query = query.filter(models.PriceHistory.item_id == item_id)
+        # Join with items table to filter by item_id
+        query = query.join(models.Item, models.PriceHistory.item_id == models.Item.id)
+        query = query.filter(models.Item.id == item_id)
+        
+        # If account_id is provided, ensure we only return price history for items owned by that account
+        if account_id:
+            query = query.filter(models.Item.account_id == account_id)
+        
+    # Filter by the current user's account if no specific account_id is provided
+    elif not account_id and hasattr(current_user, 'account_id'):
+        query = query.join(models.Item, models.PriceHistory.item_id == models.Item.id)
+        query = query.filter(models.Item.account_id == current_user.account_id)
         
     return query.order_by(models.PriceHistory.changed_at.desc()).offset(skip).limit(limit).all()
 

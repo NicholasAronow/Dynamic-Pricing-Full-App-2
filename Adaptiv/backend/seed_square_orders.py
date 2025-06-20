@@ -11,24 +11,129 @@ from dotenv import load_dotenv
 # Load environment variables from .env file if available
 load_dotenv()
 
-# Get Square API credentials from environment variables
-SQUARE_ACCESS_TOKEN = os.getenv("SQUARE_ACCESS_TOKEN", "EAAAl8SCkmgz697PfPEbBwNY8N6Q_7k5ToHXtiSjerNBWbboUwm-ytpjbb-0SQqK")
-SQUARE_LOCATION_ID = os.getenv("SQUARE_LOCATION_ID", "LP7SQ6NZH2A8M")
-SQUARE_ENV = os.getenv("SQUARE_ENV", "sandbox")  # 'sandbox' or 'production'
+# Square API credentials
+SQUARE_ACCESS_TOKEN = "EAAAl8SCkmgz697PfPEbBwNY8N6Q_7k5ToHXtiSjerNBWbboUwm-ytpjbb-0SQqK"
+SQUARE_LOCATION_ID = "LP7SQ6NZH2A8M"
+SQUARE_ENV = "production"
 
+# Validate credentials
 if not SQUARE_ACCESS_TOKEN or not SQUARE_LOCATION_ID:
     print("Error: Square API credentials not found.")
     print("Please set SQUARE_ACCESS_TOKEN and SQUARE_LOCATION_ID environment variables.")
     exit(1)
+
+# Check if token looks valid (basic format check)
+if SQUARE_ACCESS_TOKEN.startswith("EAAAl"):
+    print("✓ Token appears to be a production token")
+    if SQUARE_ENV != "production":
+        print("⚠️  Warning: You're using a production token but SQUARE_ENV is set to", SQUARE_ENV)
+        SQUARE_ENV = "production"
+elif SQUARE_ACCESS_TOKEN.startswith("EAAAE"):
+    print("✓ Token appears to be a sandbox token") 
+    if SQUARE_ENV != "sandbox":
+        print("⚠️  Warning: You're using a sandbox token but SQUARE_ENV is set to", SQUARE_ENV)
+        SQUARE_ENV = "sandbox"
+else:
+    print("⚠️  Warning: Token format not recognized. Please verify your access token.")
 
 # Square API base URL based on environment
 SQUARE_API_BASE = "https://connect.squareupsandbox.com" if SQUARE_ENV == "sandbox" else "https://connect.squareup.com"
 
 print(f"Using Square {SQUARE_ENV} environment")
 print(f"API Base URL: {SQUARE_API_BASE}")
+print(f"Location ID: {SQUARE_LOCATION_ID}")
+
+# Test credentials first by calling locations API
+def test_credentials():
+    print("\n" + "="*50)
+    print("TESTING CREDENTIALS")
+    print("="*50)
+    
+    test_response = requests.get(
+        f"{SQUARE_API_BASE}/v2/locations",
+        headers={
+            "Authorization": f"Bearer {SQUARE_ACCESS_TOKEN}",
+            "Square-Version": "2024-01-18"
+        }
+    )
+    
+    if test_response.status_code == 200:
+        locations = test_response.json().get('locations', [])
+        print(f"✓ Credentials valid! Found {len(locations)} location(s)")
+        
+        # Check if our location ID exists
+        location_found = False
+        for loc in locations:
+            print(f"  - Location: {loc.get('name', 'Unknown')} (ID: {loc.get('id')})")
+            if loc.get('id') == SQUARE_LOCATION_ID:
+                location_found = True
+                print(f"    ✓ This matches your configured location ID")
+        
+        if not location_found:
+            print(f"  ⚠️  Warning: Your configured location ID ({SQUARE_LOCATION_ID}) was not found in the account")
+            print("  Please update SQUARE_LOCATION_ID to one of the IDs listed above")
+            return False
+            
+        return True
+    elif test_response.status_code == 401:
+        error_data = test_response.json()
+        print(f"✗ Authentication failed: {error_data}")
+        print("\nPossible issues:")
+        print("1. Access token is invalid, expired, or revoked")
+        print("2. Token is for wrong environment (sandbox vs production)")
+        print("3. Token format is incorrect (check for extra characters)")
+        return False
+    elif test_response.status_code == 403:
+        error_data = test_response.json()
+        print(f"✗ Insufficient permissions: {error_data}")
+        print("\nYour access token needs the following permissions:")
+        print("- MERCHANT_PROFILE_READ (for locations)")
+        print("- ITEMS_READ (for reading catalog)")
+        print("- ITEMS_WRITE (for creating catalog items)")
+        print("- ORDERS_WRITE (for creating orders)")
+        print("- PAYMENTS_WRITE (for sandbox payments)")
+        return False
+    else:
+        print(f"✗ Unexpected error: {test_response.status_code} - {test_response.text}")
+        return False
+
+# Test permissions for catalog access
+def test_catalog_permissions():
+    print("\n" + "="*30)
+    print("TESTING CATALOG PERMISSIONS")
+    print("="*30)
+    
+    # Test reading catalog
+    catalog_response = requests.get(
+        f"{SQUARE_API_BASE}/v2/catalog/list?types=ITEM&limit=1",
+        headers={
+            "Authorization": f"Bearer {SQUARE_ACCESS_TOKEN}",
+            "Square-Version": "2024-01-18"
+        }
+    )
+    
+    if catalog_response.status_code == 200:
+        print("✓ ITEMS_READ permission confirmed")
+        return True
+    elif catalog_response.status_code == 403:
+        error_data = catalog_response.json()
+        print(f"✗ Missing ITEMS_READ permission: {error_data}")
+        return False
+    else:
+        print(f"✗ Catalog access error: {catalog_response.status_code} - {catalog_response.text}")
+        return False
+
+# Run credential tests
+if not test_credentials():
+    print("\n❌ Credential test failed. Please fix the issues above before proceeding.")
+    exit(1)
+
+if not test_catalog_permissions():
+    print("\n❌ Catalog permission test failed. Please ensure your access token has ITEMS_READ and ITEMS_WRITE permissions.")
+    exit(1)
 
 # Connect to your local database to get items
-conn = sqlite3.connect('./Adaptiv/backend/adaptiv.db')
+conn = sqlite3.connect('./adaptiv.db')
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()
 
@@ -37,7 +142,7 @@ start_date = datetime(2025, 5, 15)
 end_date = datetime(2025, 6, 19)
 days = (end_date - start_date).days + 1
 
-print(f"Preparing to seed order data to Square from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+print(f"\nPreparing to seed order data to Square from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
 
 # Get items for user_id 1
 cursor.execute('SELECT id, name, current_price, category FROM items WHERE user_id = 1')
@@ -50,7 +155,9 @@ if not local_items:
 print(f"Found {len(local_items)} items in local database")
 
 # First, create items in Square if they don't exist
-print("\nSyncing items with Square catalog...")
+print("\n" + "="*50)
+print("SYNCING ITEMS WITH SQUARE CATALOG")
+print("="*50)
 square_item_map = {}
 
 for item in local_items:
@@ -86,6 +193,11 @@ for item in local_items:
             if obj.get("type") == "ITEM" and obj.get("item_data", {}).get("name") == item['name']:
                 found_item = obj
                 break
+    elif search_response.status_code == 403:
+        print(f"  ✗ Permission error searching for item: {search_response.json()}")
+        continue
+    else:
+        print(f"  ⚠️  Search failed: {search_response.status_code} - {search_response.text}")
     
     if found_item:
         # Item exists, get its variation
@@ -99,7 +211,7 @@ for item in local_items:
             }
             print(f"  ✓ Found existing item: {item['name']} (ID: {variation.get('id')})")
         else:
-            print(f"  ⚠ Warning: Item {item['name']} has no variations")
+            print(f"  ⚠️  Warning: Item {item['name']} has no variations")
     else:
         # Create the item
         print(f"  → Creating new item: {item['name']}")
@@ -108,8 +220,8 @@ for item in local_items:
         price_in_cents = int(float(item['current_price']) * 100)
         
         # Generate temporary IDs for the create request
-        temp_item_id = f"#ITEM_{item['name'].upper().replace(' ', '_')}"
-        temp_variation_id = f"#VAR_{item['name'].upper().replace(' ', '_')}"
+        temp_item_id = f"#ITEM_{item['name'].upper().replace(' ', '_').replace('-', '_')[:20]}"
+        temp_variation_id = f"#VAR_{item['name'].upper().replace(' ', '_').replace('-', '_')[:20]}"
         
         create_body = {
             "idempotency_key": str(uuid.uuid4()),
@@ -158,8 +270,19 @@ for item in local_items:
                     'variation_id': variations[0].get('id')
                 }
                 print(f"  ✓ Successfully created item: {item['name']}")
+            else:
+                print(f"  ⚠️  Created item but no variations found: {item['name']}")
+        elif create_response.status_code == 403:
+            error_data = create_response.json()
+            print(f"  ✗ Permission error creating item {item['name']}: {error_data}")
+            print("  Make sure your access token has ITEMS_WRITE permission")
+        elif create_response.status_code == 401:
+            error_data = create_response.json()
+            print(f"  ✗ Authentication error creating item {item['name']}: {error_data}")
+            print("  Your access token may be invalid or expired")
         else:
-            print(f"  ✗ Failed to create item {item['name']}: {create_response.json()}")
+            error_data = create_response.json() if create_response.headers.get('content-type', '').startswith('application/json') else create_response.text
+            print(f"  ✗ Failed to create item {item['name']}: {error_data}")
 
 # Map local items to Square items
 for item in local_items:
@@ -167,7 +290,7 @@ for item in local_items:
         item['square_variation_id'] = square_item_map[item['name']]['variation_id']
     else:
         item['square_variation_id'] = None
-        print(f"  ⚠ Warning: Could not map item '{item['name']}' to Square")
+        print(f"  ⚠️  Warning: Could not map item '{item['name']}' to Square")
 
 # Group items by category for more realistic ordering patterns
 items_by_category = {}
@@ -179,7 +302,7 @@ for item in local_items:
         items_by_category[category].append(item)
 
 if not any(items_by_category.values()):
-    print("\nNo items could be mapped to Square items.")
+    print("\nNo items could be mapped to Square items. Please check the error messages above.")
     exit(1)
 
 print(f"\nSuccessfully mapped {sum(len(items) for items in items_by_category.values())} items to Square catalog")
@@ -271,7 +394,7 @@ def get_item_combination(current_date):
     
     return items_in_order
 
-# Function to create a Square order
+# Function to create a Square order with fulfillment and payment
 def create_square_order(order_items, order_datetime):
     try:
         line_items = []
@@ -285,11 +408,8 @@ def create_square_order(order_items, order_datetime):
                 
             line_item = {
                 'catalog_object_id': item['square_variation_id'],
-                'quantity': str(quantity),
-                'base_price_money': {
-                    'amount': int(float(item['current_price']) * 100),  # Convert to cents
-                    'currency': 'USD'
-                }
+                'quantity': str(quantity)
+                # Remove base_price_money - let Square use catalog pricing
             }
             line_items.append(line_item)
         
@@ -300,12 +420,52 @@ def create_square_order(order_items, order_datetime):
         # Create a unique idempotency key
         idempotency_key = str(uuid.uuid4())
         
-        # Format the request
+        # Parse the order datetime for fulfillment
+        # Convert order_datetime from "2025-05-15T9:05:00Z" to proper datetime
+        order_dt = datetime.strptime(order_datetime.replace('Z', ''), '%Y-%m-%dT%H:%M:%S')
+        
+        # For historical orders, set fulfillment times relative to NOW (not the order date)
+        # This prevents "expires_at cannot be in the past" errors
+        current_time = datetime.utcnow()
+        pickup_time = current_time + timedelta(minutes=15)  # Pickup 15 minutes from now
+        expires_time = current_time + timedelta(hours=2)    # Expires in 2 hours from now
+        
+        # Format times properly for Square API (RFC3339)
+        pickup_time_str = pickup_time.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        expires_time_str = expires_time.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        
+        # Generate customer names for more realistic data
+        customer_names = [
+            "Alex Johnson", "Sarah Miller", "Mike Davis", "Emma Wilson", "Chris Brown",
+            "Jessica Garcia", "David Martinez", "Ashley Rodriguez", "Jason Lee", "Amanda Taylor",
+            "Kevin Anderson", "Lisa Thompson", "Ryan White", "Nicole Harris", "Brandon Clark",
+            "Stephanie Lewis", "Tyler Robinson", "Michelle Walker", "Andrew Hall", "Samantha Allen"
+        ]
+        customer_name = random.choice(customer_names)
+        
+        # Format the request following Square API documentation
         request_body = {
             'idempotency_key': idempotency_key,
             'order': {
                 'location_id': SQUARE_LOCATION_ID,
-                'line_items': line_items
+                'line_items': line_items,
+                'state': 'OPEN',  # Make order ready for fulfillment and payment
+                'fulfillments': [
+                    {
+                        'type': 'PICKUP',
+                        'state': 'PROPOSED',
+                        'pickup_details': {
+                            'recipient': {
+                                'display_name': customer_name
+                            },
+                            'expires_at': expires_time_str,
+                            'auto_complete_duration': 'P0DT1H0S',  # Auto-complete in 1 hour
+                            'schedule_type': 'SCHEDULED',
+                            'pickup_at': pickup_time_str,
+                            'note': f'Coffee shop order from {order_dt.strftime("%B %d")}'
+                        }
+                    }
+                ]
             }
         }
         
@@ -315,26 +475,38 @@ def create_square_order(order_items, order_datetime):
             headers={
                 "Authorization": f"Bearer {SQUARE_ACCESS_TOKEN}",
                 "Content-Type": "application/json",
-                "Square-Version": "2024-01-18"
+                "Square-Version": "2025-06-18"  # Use latest API version
             },
             json=request_body
         )
         
         if result.status_code in [200, 201]:
             result_data = result.json()
-            
-            # Pay for the order using cash payment (for sandbox testing)
             order = result_data.get('order', {})
             order_id = order.get('id')
+            total_money = order.get('total_money', {})
             
-            if order_id and SQUARE_ENV == 'sandbox':
-                # In sandbox, we can create a cash payment
+            # Now pay for the order to make it visible in Dashboard
+            if order_id and total_money:
+                # For cash payments, we need exact change (no change back)
+                # Get the total amount from the order
+                amount = total_money.get('amount', 0)
+                currency = total_money.get('currency', 'USD')
+                
                 payment_body = {
                     'idempotency_key': str(uuid.uuid4()),
-                    'source_id': 'CASH',
-                    'amount_money': order.get('total_money'),
+                    'source_id': 'CASH',  # Cash payment
+                    'amount_money': total_money,
                     'order_id': order_id,
-                    'location_id': SQUARE_LOCATION_ID
+                    'location_id': SQUARE_LOCATION_ID,
+                    'note': f'Payment for order by {customer_name}',
+                    'cash_details': {
+                        'buyer_supplied_money': {
+                            'amount': amount,
+                            'currency': currency
+                        }
+                        # change_back_money is calculated by Square
+                    }
                 }
                 
                 payment_result = requests.post(
@@ -342,17 +514,60 @@ def create_square_order(order_items, order_datetime):
                     headers={
                         "Authorization": f"Bearer {SQUARE_ACCESS_TOKEN}",
                         "Content-Type": "application/json",
-                        "Square-Version": "2024-01-18"
+                        "Square-Version": "2025-06-18"
                     },
                     json=payment_body
                 )
                 
-                if payment_result.status_code not in [200, 201]:
-                    print(f"Order created but payment failed: {payment_result.json()}")
-            
-            return result_data
+                if payment_result.status_code in [200, 201]:
+                    # Payment successful - order should now be visible in Dashboard
+                    payment_data = payment_result.json()
+                    payment_id = payment_data.get('payment', {}).get('id', 'unknown')
+                    
+                    # Update fulfillment to PREPARED (ready for pickup)
+                    fulfillments = order.get('fulfillments', [])
+                    if fulfillments:
+                        fulfillment_uid = fulfillments[0].get('uid')
+                        if fulfillment_uid:
+                            update_fulfillment_body = {
+                                'order': {
+                                    'version': order.get('version'),
+                                    'fulfillments': [
+                                        {
+                                            'uid': fulfillment_uid,
+                                            'type': 'PICKUP',
+                                            'state': 'PREPARED'  # Mark as ready for pickup
+                                        }
+                                    ]
+                                }
+                            }
+                            
+                            # Update the fulfillment state
+                            update_result = requests.put(
+                                f"{SQUARE_API_BASE}/v2/orders/{order_id}",
+                                headers={
+                                    "Authorization": f"Bearer {SQUARE_ACCESS_TOKEN}",
+                                    "Content-Type": "application/json",
+                                    "Square-Version": "2025-06-18"
+                                },
+                                json=update_fulfillment_body
+                            )
+                    
+                    return {
+                        'order': order,
+                        'payment_id': payment_id,
+                        'customer_name': customer_name
+                    }
+                else:
+                    error_data = payment_result.json() if payment_result.headers.get('content-type', '').startswith('application/json') else payment_result.text
+                    print(f"    ⚠️  Order created but payment failed: {error_data}")
+                    return result_data
+            else:
+                print(f"    ⚠️  Order created but missing order_id or total_money")
+                return result_data
         else:
-            print(f"Error creating Square order: {result.json()}")
+            error_data = result.json() if result.headers.get('content-type', '').startswith('application/json') else result.text
+            print(f"Error creating Square order: {error_data}")
             return None
             
     except Exception as e:
@@ -407,9 +622,15 @@ while current_date <= end_date:
         result = create_square_order(order_items, order_datetime)
         
         if result:
-            order_id = result.get('order', {}).get('id', 'unknown')
+            order_data = result.get('order', {})
+            order_id = order_data.get('id', 'unknown')
+            customer_name = result.get('customer_name', 'Unknown')
+            payment_id = result.get('payment_id', 'No payment')
+            total_money = order_data.get('total_money', {})
+            amount = total_money.get('amount', 0) / 100 if total_money.get('amount') else order_total
+            
             items_summary = ', '.join([f"{item.get('quantity', 1)}x {item['name']}" for item in order_items])
-            print(f"  Order {order_num + 1}: ✓ ${order_total:.2f} - {items_summary}")
+            print(f"  Order {order_num + 1}: ✓ ${amount:.2f} - {customer_name} - {items_summary}")
             successful_orders += 1
             daily_orders_created += 1
         else:
