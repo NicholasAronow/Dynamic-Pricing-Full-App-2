@@ -587,7 +587,8 @@ async def _handle_missing_catalog_item(item, integration, price_amount, user_id,
 @square_router.get("/orders")
 async def get_square_orders(
     current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    force_refresh: bool = False
 ):
     """Get orders from Square"""
     try:
@@ -680,6 +681,14 @@ async def get_square_orders(
         # Get orders for this location
         logger.info("Square API: Fetching orders")
         try:
+            # Check if we should try to fetch all orders regardless of date
+            if force_refresh:
+                logger.info("Force refresh requested - retrieving all orders without pagination limit")
+                max_results = 1000
+            else:
+                max_results = 200
+                
+            # Initial request without cursor
             orders_response = requests.post(
                 f"{SQUARE_API_BASE}/v2/orders/search",
                 headers={
@@ -691,10 +700,15 @@ async def get_square_orders(
                     "query": {
                         "filter": {
                             "state_filter": {"states": ["COMPLETED"]}
+                        },
+                        "sort": {
+                            "sort_field": "CREATED_AT",
+                            "sort_order": "DESC"  # Get newest orders first
                         }
-                    }
+                    },
+                    "limit": 100
                 },
-                timeout=15  # Add timeout to prevent hanging requests
+                timeout=30  # Increase timeout for potentially larger response
             )
             
             # Try to parse the JSON response
@@ -743,16 +757,30 @@ async def get_square_orders(
                     "cursor": cursor
                 }
                 
-                # Fetch additional pages until no more cursor is returned (max 10 pages to prevent infinite loops)
+                # Fetch additional pages until no more cursor is returned or we hit our result limit
                 page_count = 1
-                max_pages = 100
+                max_pages = 10
+                total_results = len(all_orders)
                 
-                while cursor and page_count < max_pages:
+                while cursor and page_count < max_pages and total_results < max_results:
                     try:
                         logger.info(f"Fetching page {page_count + 1} of orders with cursor")
                         
-                        # Update request with cursor
-                        request_json["cursor"] = cursor
+                        # Update request with cursor - explicitly create a new request to avoid reference issues
+                        request_json = {
+                            "location_ids": [location_id],
+                            "query": {
+                                "filter": {
+                                    "state_filter": {"states": ["COMPLETED"]}
+                                },
+                                "sort": {
+                                    "sort_field": "CREATED_AT",
+                                    "sort_order": "ASC"
+                                }
+                            },
+                            "limit": 100,
+                            "cursor": cursor
+                        }
                         
                         # Fetch next page
                         page_response = requests.post(
@@ -775,6 +803,12 @@ async def get_square_orders(
                         # Add this page's orders to our collection
                         all_orders.extend(page_orders)
                         logger.info(f"Added {len(page_orders)} orders from page {page_count + 1}")
+                        total_results += len(page_orders)
+                        
+                        # Check if we have hit our result limit
+                        if total_results >= max_results and not force_refresh:
+                            logger.info(f"Reached max results limit of {max_results}. Add force_refresh=true to get more.")
+                            break
                         
                         # Get cursor for next page
                         cursor = page_data.get("cursor")
@@ -999,27 +1033,8 @@ async def sync_initial_data(user_id: int, db: Session):
         orders_failed = 0
         last_sync_time = None
         
-        # Calculate date filter for orders
-        # For today's orders, start with beginning of today in UTC
-        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        today_start_utc = today_start.isoformat() + "Z"
-        
-        # For historical orders, use last sync time or default lookback
-        if integration.last_sync_at:
-            # Check if last sync was today
-            if integration.last_sync_at.date() == datetime.now().date():
-                # If sync was already done today, start from beginning of today to catch all today's orders
-                last_sync_time = today_start_utc
-                logger.info(f"Last sync was today, using start of today: {last_sync_time}")
-            else:
-                # Otherwise use the last sync time
-                last_sync_time = integration.last_sync_at.replace(microsecond=0).isoformat() + "Z"
-                logger.info(f"Using last sync time filter: {last_sync_time}")
-        else:
-            # Default to 90 days if no previous sync
-            start_date = (datetime.now() - timedelta(days=90)).replace(microsecond=0)
-            last_sync_time = start_date.isoformat() + "Z"
-            logger.info(f"No previous sync, using 90 day lookback: {last_sync_time}")
+        # We're no longer applying a date filter to ensure we get all historical orders
+        logger.info("Retrieving all historical orders without date filtering")
         
         # Process each location
         for location in locations:
@@ -1028,26 +1043,14 @@ async def sync_initial_data(user_id: int, db: Session):
             
             logger.info(f"Syncing orders from location: {location_name} ({location_id})")
             
-            # Check if we should use a different date filter for this location
-            # For today's orders, we want to make sure we get everything
-            use_start_time = last_sync_time
+            # Log that we're fetching all orders
+            logger.info(f"Fetching all completed orders for location {location_name}")
             
-            # Current time in ISO format for possible end_at filter
-            now_utc = datetime.now().replace(microsecond=0).isoformat() + "Z"
-            
-            # Log the date filter being used
-            logger.info(f"Fetching orders from {use_start_time} to now for location {location_name}")
-            
-            # Build request JSON with proper filters
+            # Build request JSON with only state filter (no date filter)
             request_json = {
                 "location_ids": [location_id],
                 "query": {
                     "filter": {
-                        "date_time_filter": {
-                            "created_at": {
-                                "start_at": use_start_time
-                            }
-                        },
                         "state_filter": {"states": ["COMPLETED"]}
                     },
                     "sort": {
@@ -1184,7 +1187,12 @@ async def sync_initial_data(user_id: int, db: Session):
             
             # Handle pagination to fetch all orders
             cursor = orders_data.get("cursor")
-            while cursor:
+            page_count = 1
+            max_pages = 100  # Increased max pages to ensure we get all orders
+            
+            logger.info(f"Initial page has {len(orders)} orders, cursor present: {cursor is not None}")
+            
+            while cursor and page_count < max_pages:
                 logger.info(f"Fetching additional orders with cursor for location {location_name}")
                 
                 # Update request JSON with cursor for next page
@@ -1198,17 +1206,33 @@ async def sync_initial_data(user_id: int, db: Session):
                         "Content-Type": "application/json"
                     },
                     json=request_json,
-                    timeout=15  # Longer timeout for orders
+                    timeout=30  # Increased timeout for orders
                 )
+                
+                logger.info(f"Pagination request for page {page_count+1} status: {next_page_response.status_code}")
                 
                 if next_page_response.status_code != 200:
                     logger.error(f"Failed to get paginated orders from location {location_name}: {next_page_response.json().get('errors', [])}")
                     break
                 
-                next_page_data = next_page_response.json()
-                next_page_orders = next_page_data.get("orders", [])
-                
-                logger.info(f"Found {len(next_page_orders)} additional orders in location {location_name}")
+                try:
+                    next_page_data = next_page_response.json()
+                    next_page_orders = next_page_data.get("orders", [])
+                    
+                    logger.info(f"Found {len(next_page_orders)} additional orders in location {location_name} (page {page_count+1})")
+                    
+                    # Debug cursor information
+                    new_cursor = next_page_data.get("cursor")
+                    logger.info(f"New cursor received: {new_cursor is not None}")
+                    
+                    if cursor == new_cursor:
+                        logger.error(f"Cursor did not change! Breaking pagination loop to avoid infinite loop")
+                        break
+                        
+                    cursor = new_cursor
+                except Exception as e:
+                    logger.exception(f"Error parsing pagination response: {str(e)}")
+                    break
                 
                 # Process each order in the next page
                 for order in next_page_orders:
@@ -1313,9 +1337,11 @@ async def sync_initial_data(user_id: int, db: Session):
                     
                     orders_created += 1
                 
-                # Get cursor for next page, or None if we're done
-                cursor = next_page_data.get("cursor")
+                # Increment page counter
+                page_count += 1
+                
                 if not cursor:
+                    logger.info("No more cursor returned. Pagination complete.")
                     break
         
         # Commit all changes
