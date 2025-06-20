@@ -4,7 +4,8 @@ import { MenuItem } from '../types/menu';
 
 // Recipe service
 export const getRecipes = async (): Promise<RecipeItem[]> => {
-  const response = await api.get('/api/recipes');
+  // Removed redundant /api/ prefix and added trailing slash
+  const response = await api.get('recipes/');
   return response.data.map((recipe: any) => ({
     item_id: recipe.id.toString(),
     item_name: recipe.name,
@@ -21,7 +22,8 @@ export const getRecipes = async (): Promise<RecipeItem[]> => {
 };
 
 export const getRecipe = async (id: string): Promise<RecipeItem> => {
-  const response = await api.get(`/api/recipes/${id}`);
+  // Removed redundant /api/ prefix
+  const response = await api.get(`recipes/${id}/`);
   const recipe = response.data;
   return {
     item_id: recipe.id.toString(),
@@ -48,7 +50,8 @@ export const createRecipe = async (recipe: Omit<RecipeItem, 'item_id' | 'date_cr
     }))
   };
   
-  const response = await api.post('/api/recipes', payload);
+  // Removed redundant /api/ prefix and added trailing slash
+  const response = await api.post('recipes/', payload);
   const newRecipe = response.data;
   
   return {
@@ -76,7 +79,8 @@ export const updateRecipe = async (recipe: Omit<RecipeItem, 'date_created' | 'to
     }))
   };
   
-  const response = await api.put(`/api/recipes/${recipe.item_id}`, payload);
+  // Removed redundant /api/ prefix and added trailing slash
+  const response = await api.put(`recipes/${recipe.item_id}/`, payload);
   const updatedRecipe = response.data;
   
   return {
@@ -95,7 +99,8 @@ export const updateRecipe = async (recipe: Omit<RecipeItem, 'date_created' | 'to
 };
 
 export const deleteRecipe = async (id: string): Promise<void> => {
-  await api.delete(`/api/recipes/${id}`);
+  // Removed redundant /api/ prefix and added trailing slash
+  await api.delete(`recipes/${id}/`);
 };
 
 // Ingredient service

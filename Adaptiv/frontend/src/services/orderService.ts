@@ -60,9 +60,17 @@ export const orderService = {
         return false;
       }
       
-      // Call a lightweight endpoint to check if user has any orders
-      const response = await api.get(`/orders/has-orders?account_id=${currentUser.id}`);
-      return response.data.has_orders === true;
+      try {
+        // First try with user_id which seems to be expected in production
+        const response = await api.get(`/orders/has-orders?user_id=${currentUser.id}`);
+        return response.data.has_orders === true;
+      } catch (userIdError) {
+        console.error(`Error with user_id parameter, trying fallback with account_id:`, userIdError);
+        
+        // Call a lightweight endpoint to check if user has any orders with account_id
+        const response = await api.get(`/orders/has-orders?account_id=${currentUser.id}`);
+        return response.data.has_orders === true;
+      }
     } catch (error) {
       console.error('Error checking if user has orders:', error);
       // For test accounts, fail gracefully and assume they have orders
@@ -82,6 +90,21 @@ export const orderService = {
     return response.data;
   },
   
+  // Helper method to process sync response (defined first so we can use it in syncSquareOrders)
+  processOrderSyncResponse: (response: any): {success: boolean, message: string, total_orders?: number} => {
+    // Extract order count if available in response
+    const totalOrders = response.data?.total_orders || 
+                      response.data?.orders_count || 
+                      (response.data?.orders ? response.data.orders.length : undefined) ||
+                      undefined;
+                      
+    return { 
+      success: true, 
+      message: response.data?.message || 'Orders synchronized successfully',
+      total_orders: totalOrders
+    };
+  },
+
   // Sync Square orders with pagination support
   syncSquareOrders: async (): Promise<{success: boolean, message: string, total_orders?: number}> => {
     try {
@@ -91,26 +114,27 @@ export const orderService = {
         return { success: false, message: 'User not authenticated' };
       }
       
-      // Call the backend endpoint that triggers the Square order sync with pagination
-      // This will use the enhanced get_square_orders function with pagination
-      const response = await api.post('/integrations/square/sync', {
-        account_id: currentUser.id
-      });
-      
-      // Extract order count if available in response
-      const totalOrders = response.data?.total_orders || 
-                         (response.data?.orders ? response.data.orders.length : undefined);
-      
-      return { 
-        success: true, 
-        message: 'Orders synchronized successfully', 
-        total_orders: totalOrders 
-      };
+      try {
+        // First try with user_id which seems to be expected in production
+        // Call the backend endpoint that triggers the Square order sync with pagination
+        const response = await api.post('/integrations/square/sync', {
+          user_id: currentUser.id
+        });
+        return orderService.processOrderSyncResponse(response);
+      } catch (userIdError) {
+        console.error(`Error with user_id parameter, trying fallback with account_id:`, userIdError);
+        
+        // Try again with account_id as fallback
+        const response = await api.post('/integrations/square/sync', {
+          account_id: currentUser.id
+        });
+        return orderService.processOrderSyncResponse(response);
+      }
     } catch (error: any) {
       console.error('Error syncing Square orders:', error);
       return { 
         success: false, 
-        message: error.response?.data?.detail || 'Failed to sync orders. Please try again.' 
+        message: error.response?.data?.detail || 'Failed to sync orders. Please try again.'
       };
     }
   }

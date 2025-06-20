@@ -59,10 +59,18 @@ export const itemService = {
         return [];
       }
       
-      // Add account_id filter to ensure we only get price history for items the user owns
-      // Adding trailing slash to prevent 307 redirects
-      const response = await api.get(`price-history/?item_id=${itemId}&account_id=${currentUser.id}`);
-      return response.data;
+      try {
+        // First try with user_id which seems to be expected in production
+        // Adding trailing slash to prevent 307 redirects
+        const response = await api.get(`price-history/?item_id=${itemId}&user_id=${currentUser.id}`);
+        return response.data;
+      } catch (userIdError) {
+        console.error(`Error with user_id parameter, trying fallback with account_id:`, userIdError);
+        
+        // If user_id fails, try with account_id as fallback (for local development)
+        const response = await api.get(`price-history/?item_id=${itemId}&account_id=${currentUser.id}`);
+        return response.data;
+      }
     } catch (error) {
       console.error(`Error fetching price history for item ${itemId}:`, error);
       return [];
