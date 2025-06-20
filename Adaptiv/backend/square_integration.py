@@ -588,7 +588,8 @@ async def _handle_missing_catalog_item(item, integration, price_amount, user_id,
 async def get_square_orders(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    force_refresh: bool = False
+    force_refresh: bool = False,
+    debug: bool = False
 ):
     """Get orders from Square"""
     try:
@@ -710,6 +711,10 @@ async def get_square_orders(
                 },
                 timeout=30  # Increase timeout for potentially larger response
             )
+            
+            # If debug mode, log the actual request being sent
+            if debug:
+                logger.info(f"Square API request: {json.dumps({k: v for k, v in request_json.items()})}")
             
             # Try to parse the JSON response
             try:
@@ -868,11 +873,13 @@ async def get_square_orders(
 @square_router.post("/sync")
 async def sync_square_data(
     current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    force_sync: bool = False  # Add force_sync parameter
 ):
     """Sync menu items and orders from Square to local database"""
     try:
-        return await sync_initial_data(current_user.id, db)
+        logger.info(f"Starting Square sync for user {current_user.id}, force_sync={force_sync}")
+        return await sync_initial_data(current_user.id, db, force_sync=force_sync)
     except Exception as e:
         logger.exception(f"Error syncing Square data: {str(e)}")
         raise HTTPException(
@@ -880,7 +887,7 @@ async def sync_square_data(
             detail=f"Failed to sync data: {str(e)}"
         )
 
-async def sync_initial_data(user_id: int, db: Session):
+async def sync_initial_data(user_id: int, db: Session, force_sync: bool = False):
     """Sync catalog and orders from Square"""
     try:
         # Get integration for user
@@ -1051,7 +1058,7 @@ async def sync_initial_data(user_id: int, db: Session):
                 "location_ids": [location_id],
                 "query": {
                     "filter": {
-                        "state_filter": {"states": ["COMPLETED"]}
+                        "state_filter": {"states": ["COMPLETED", "OPEN"]}
                     },
                     "sort": {
                         "sort_field": "CREATED_AT",
@@ -1079,8 +1086,18 @@ async def sync_initial_data(user_id: int, db: Session):
             
             orders_data = orders_response.json()
             orders = orders_data.get("orders", [])
+            entries = orders_data.get("entries", [])
             
+            # Log detailed order info for debugging
             logger.info(f"Found {len(orders)} orders in location {location_name}")
+            logger.info(f"Response contains {len(entries)} order entries")
+            
+            # Log the raw response structure to debug
+            logger.info(f"Orders response keys: {list(orders_data.keys())}")
+            
+            # Check if there are any errors
+            if "errors" in orders_data:
+                logger.error(f"Square API errors: {orders_data['errors']}")
             
             # Process each order
             for order in orders:
