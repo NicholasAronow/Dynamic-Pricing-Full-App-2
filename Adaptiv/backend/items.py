@@ -12,6 +12,7 @@ def get_items(
     skip: int = 0, 
     limit: int = 100, 
     category: Optional[str] = None,
+    user_id: Optional[int] = None,
     account_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
@@ -21,10 +22,19 @@ def get_items(
     """
     query = db.query(models.Item)
     
-    # Filter by the current user's ID unless specifically requesting another account's data
-    # (would need admin privileges for that in a real app)
-    user_id = account_id if account_id else current_user.id
-    query = query.filter(models.Item.user_id == user_id)
+    # Filter by user ID (prefer explicit user_id parameter, fall back to account_id, finally use current user ID)
+    filter_user_id = None
+    if user_id is not None:
+        filter_user_id = user_id
+        print(f"Filtering items by user_id={user_id}")
+    elif account_id is not None:
+        filter_user_id = account_id
+        print(f"Filtering items by account_id={account_id} (mapped to user_id)")
+    else:
+        filter_user_id = current_user.id
+        print(f"Filtering items by current_user.id={current_user.id}")
+        
+    query = query.filter(models.Item.user_id == filter_user_id)
     
     if category:
         query = query.filter(models.Item.category == category)

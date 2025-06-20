@@ -99,13 +99,27 @@ def create_ingredient(
 
 @router.get("/ingredients", response_model=List[IngredientResponse])
 def get_ingredients(
+    user_id: Optional[int] = None,
+    account_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     skip: int = 0,
     limit: int = 100
 ):
+    # Filter by user ID (prefer explicit user_id parameter, fall back to account_id, finally use current user ID)
+    filter_user_id = None
+    if user_id is not None:
+        filter_user_id = user_id
+        print(f"Filtering ingredients by user_id={user_id}")
+    elif account_id is not None:
+        filter_user_id = account_id
+        print(f"Filtering ingredients by account_id={account_id} (mapped to user_id)")
+    else:
+        filter_user_id = current_user.id
+        print(f"Filtering ingredients by current_user.id={current_user.id}")
+        
     ingredients = db.query(Ingredient).filter(
-        Ingredient.user_id == current_user.id
+        Ingredient.user_id == filter_user_id
     ).offset(skip).limit(limit).all()
     
     # Add calculated unit_price to each ingredient
@@ -274,13 +288,27 @@ def create_recipe(
 
 @router.get("/", response_model=List[RecipeResponse])
 def get_recipes(
+    user_id: Optional[int] = None,
+    account_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     skip: int = 0,
     limit: int = 100
 ):
+    # Filter by user ID (prefer explicit user_id parameter, fall back to account_id, finally use current user ID)
+    filter_user_id = None
+    if user_id is not None:
+        filter_user_id = user_id
+        print(f"Filtering recipes by user_id={user_id}")
+    elif account_id is not None:
+        filter_user_id = account_id
+        print(f"Filtering recipes by account_id={account_id} (mapped to user_id)")
+    else:
+        filter_user_id = current_user.id
+        print(f"Filtering recipes by current_user.id={current_user.id}")
+        
     recipes = db.query(Recipe).filter(
-        Recipe.user_id == current_user.id
+        Recipe.user_id == filter_user_id
     ).offset(skip).limit(limit).all()
     
     response = []

@@ -10,20 +10,44 @@ price_history_router = APIRouter()
 @price_history_router.get("/", response_model=List[schemas.PriceHistory])
 def get_price_histories(
     item_id: Optional[int] = None,
+    user_id: Optional[int] = None,  # Add this parameter
+    account_id: Optional[int] = None,  # Add this parameter for backwards compatibility
     skip: int = 0, 
     limit: int = 100, 
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Get price histories, with optional item_id filter
+    Get price histories, with optional item_id and user filtering
     """
     query = db.query(models.PriceHistory)
     
     if item_id:
         query = query.filter(models.PriceHistory.item_id == item_id)
         
-    return query.order_by(models.PriceHistory.changed_at.desc()).offset(skip).limit(limit).all()
+    # Filter by user ID (prefer explicit user_id parameter, fall back to account_id, finally use current user ID)
+    filter_user_id = None
+    if user_id is not None:
+        filter_user_id = user_id
+        # Log which parameter is being used
+        print(f"Filtering price history by user_id={user_id}")
+    elif account_id is not None:
+        filter_user_id = account_id
+        # Log which parameter is being used
+        print(f"Filtering price history by account_id={account_id} (mapped to user_id)")
+    else:
+        filter_user_id = current_user.id
+        # Log which parameter is being used
+        print(f"Filtering price history by current_user.id={current_user.id}")
+
+    # Apply the user filter
+    query = query.filter(models.PriceHistory.user_id == filter_user_id)
+    
+    # Add debug logging
+    result = query.order_by(models.PriceHistory.changed_at.desc()).offset(skip).limit(limit).all()
+    print(f"Found {len(result)} price history records for user {filter_user_id}")
+    
+    return result
 
 @price_history_router.get("/{price_history_id}", response_model=schemas.PriceHistory)
 def get_price_history(
