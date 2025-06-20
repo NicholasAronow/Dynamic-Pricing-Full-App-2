@@ -242,7 +242,7 @@ def import_square_orders(user_id: int, db: Session, catalog_mapping: Dict[str, i
                                     "start_at": start_date_str
                                 }
                             },
-                            "state_filter": {"states": ["COMPLETED"]}
+                            "state_filter": {"states": ["COMPLETED", "OPEN"]}
                         },
                         "sort": {
                             "sort_field": "CREATED_AT",

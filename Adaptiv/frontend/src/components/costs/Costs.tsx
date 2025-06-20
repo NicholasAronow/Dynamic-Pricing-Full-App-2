@@ -658,13 +658,23 @@ const Costs: React.FC = () => {
         });
       });
       
-      // Create all unique ingredients
-      const createdIngredients = await Promise.all(
-        Array.from(uniqueIngredients.values()).map(async (ingredient) => {
+      // Create all unique ingredients sequentially to avoid overwhelming the server
+      const createdIngredients = [];
+      const uniqueIngredientsArray = Array.from(uniqueIngredients.values());
+      
+      // Show progress information
+      message.info(`Processing ${uniqueIngredientsArray.length} ingredients...`);
+      
+      // Process ingredients one at a time
+      for (const ingredient of uniqueIngredientsArray) {
+        try {
           const response = await recipeService.createIngredient(ingredient);
-          return response;
-        })
-      );
+          createdIngredients.push(response);
+        } catch (err: any) {
+          console.error(`Failed to create ingredient ${ingredient.ingredient_name}:`, err);
+          // Continue with other ingredients even if one fails
+        }
+      }
 
       // Create ingredient map for easy lookup by name
       const ingredientMap = new Map();
@@ -692,15 +702,23 @@ const Costs: React.FC = () => {
         }).filter(Boolean as any) // Remove any null values
       }));
 
-      // Create all recipes
-      const createdRecipes = await Promise.all(
-        recipesToCreate
-          .filter(recipe => recipe.ingredients.length > 0)
-          .map(async (recipe) => {
-            const response = await recipeService.createRecipe(recipe as Omit<RecipeItem, 'date_created' | 'item_id' | 'total_cost'>);
-            return response;
-          })
-      );
+      // Create recipes sequentially to avoid overwhelming the server
+      const validRecipes = recipesToCreate.filter(recipe => recipe.ingredients.length > 0);
+      const createdRecipes = [];
+      
+      // Show progress information
+      message.info(`Processing ${validRecipes.length} recipes...`);
+      
+      // Process recipes one at a time
+      for (const recipe of validRecipes) {
+        try {
+          const response = await recipeService.createRecipe(recipe as Omit<RecipeItem, 'date_created' | 'item_id' | 'total_cost'>);
+          createdRecipes.push(response);
+        } catch (err: any) {
+          console.error(`Failed to create recipe ${recipe.item_name}:`, err);
+          // Continue with other recipes even if one fails
+        }
+      }
 
       // Update state with new data
       setIngredients(createdIngredients);

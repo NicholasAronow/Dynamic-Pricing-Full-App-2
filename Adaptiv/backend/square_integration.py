@@ -700,7 +700,7 @@ async def get_square_orders(
                     "location_ids": [location_id],
                     "query": {
                         "filter": {
-                            "state_filter": {"states": ["COMPLETED"]}
+                            "state_filter": {"states": ["COMPLETED", "OPEN"]}
                         },
                         "sort": {
                             "sort_field": "CREATED_AT",
@@ -756,7 +756,7 @@ async def get_square_orders(
                     "location_ids": [location_id],
                     "query": {
                         "filter": {
-                            "state_filter": {"states": ["COMPLETED"]}
+                            "state_filter": {"states": ["COMPLETED", "OPEN"]}
                         }
                     },
                     "cursor": cursor
@@ -776,7 +776,7 @@ async def get_square_orders(
                             "location_ids": [location_id],
                             "query": {
                                 "filter": {
-                                    "state_filter": {"states": ["COMPLETED"]}
+                                    "state_filter": {"states": ["COMPLETED", "OPEN"]}
                                 },
                                 "sort": {
                                     "sort_field": "CREATED_AT",
