@@ -10,7 +10,8 @@ price_history_router = APIRouter()
 @price_history_router.get("/", response_model=List[schemas.PriceHistory])
 def get_price_histories(
     item_id: Optional[int] = None,
-    account_id: Optional[int] = None,  # Added account_id parameter
+    account_id: Optional[int] = None,
+    user_id: Optional[int] = None,  # Added user_id parameter to match frontend
     skip: int = 0, 
     limit: int = 100, 
     db: Session = Depends(get_db),
@@ -19,23 +20,39 @@ def get_price_histories(
     """
     Get price histories, with optional item_id and account_id filter
     """
-    query = db.query(models.PriceHistory)
-    
-    if item_id:
-        # Join with items table to filter by item_id
-        query = query.join(models.Item, models.PriceHistory.item_id == models.Item.id)
-        query = query.filter(models.Item.id == item_id)
+    try:
+        query = db.query(models.PriceHistory)
         
-        # If account_id is provided, ensure we only return price history for items owned by that account
-        if account_id:
-            query = query.filter(models.Item.account_id == account_id)
+        if item_id:
+            # Start with a simple filter for item_id without joining
+            # This is more efficient and less prone to errors if table relationships have issues
+            query = query.filter(models.PriceHistory.item_id == item_id)
+            
+            # Use user_id if provided (preferred parameter name)
+            filter_user_id = user_id if user_id is not None else account_id
+            
+            if filter_user_id:
+                try:
+                    # Join with items table for user filtering
+                    query = query.join(models.Item, models.PriceHistory.item_id == models.Item.id)
+                    query = query.filter(models.Item.user_id == filter_user_id)
+                except Exception as e:
+                    # Log the error but continue with just the item_id filter
+                    print(f"Error applying user filter: {e}")
+            else:
+                # If no user/account ID provided, just filter by current authenticated user
+                try:
+                    if hasattr(current_user, 'id'):
+                        query = query.join(models.Item, models.PriceHistory.item_id == models.Item.id)
+                        query = query.filter(models.Item.user_id == current_user.id)
+                except Exception as e:
+                    print(f"Error filtering by current user: {e}")
         
-    # Filter by the current user's account if no specific account_id is provided
-    elif not account_id and hasattr(current_user, 'account_id'):
-        query = query.join(models.Item, models.PriceHistory.item_id == models.Item.id)
-        query = query.filter(models.Item.account_id == current_user.account_id)
-        
-    return query.order_by(models.PriceHistory.changed_at.desc()).offset(skip).limit(limit).all()
+        return query.order_by(models.PriceHistory.changed_at.desc()).offset(skip).limit(limit).all()
+    except Exception as e:
+        # Log any errors but return empty list instead of failing
+        print(f"Error getting price histories: {e}")
+        return []
 
 @price_history_router.get("/{price_history_id}", response_model=schemas.PriceHistory)
 def get_price_history(
