@@ -122,21 +122,20 @@ export const pricingService = {
       console.log('Fetched items:', items.length);
       console.log('Fetched performance data:', performanceData.length);
       
-      // Create an array to hold our async operations for fetching price history
-      const priceHistoryPromises = items.map((item: Item) => itemService.getPriceHistory(item.id));
+      // Extract all item IDs for batch fetching
+      const itemIds = items.map((item: Item) => item.id);
       
-      // Fetch all orders for price analysis
-      const orders = await orderService.getOrders();
+      // Create a single request for all price histories using the batch API
+      console.log(`Using batch API to fetch price history for ${itemIds.length} items at once`);
+      
+      // Fetch all orders for price analysis in parallel with price history
+      const [priceHistoryByItemId, orders] = await Promise.all([
+        itemService.getPriceHistoryBatch(itemIds),
+        orderService.getOrders()
+      ]);
+      
       console.log('Fetched orders:', orders.length);
-      
-      // Wait for all price history requests to complete
-      const allPriceHistories = await Promise.all(priceHistoryPromises);
-      
-      // Organize price histories by item ID for easier lookup
-      const priceHistoryByItemId: {[itemId: number]: PriceHistory[]} = {};
-      items.forEach((item: Item, index: number) => {
-        priceHistoryByItemId[item.id] = allPriceHistories[index];
-      });
+      console.log('Fetched price history for', Object.keys(priceHistoryByItemId).length, 'items');
 
       // Build recommendations using detailed price history data
       _usingMock = false;

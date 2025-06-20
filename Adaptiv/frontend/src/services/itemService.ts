@@ -77,6 +77,68 @@ export const itemService = {
     }
   },
 
+  getPriceHistoryBatch: async (itemIds: number[]): Promise<{[itemId: number]: any[]}> => {
+    if (!itemIds.length) return {};
+    
+    try {
+      // Join item IDs with commas for the request
+      const itemIdsParam = itemIds.join(',');
+      console.log(`Fetching price history in batch for ${itemIds.length} items`);
+      
+      // First try with user_id
+      try {
+        const response = await api.get(`price-history/?item_ids=${itemIdsParam}&user_id=${authService.getCurrentUser()?.id}`);
+        
+        // Group results by item_id
+        const grouped = response.data.reduce((acc: {[key: number]: any[]}, item: any) => {
+          if (!acc[item.item_id]) {
+            acc[item.item_id] = [];
+          }
+          acc[item.item_id].push(item);
+          return acc;
+        }, {});
+        
+        // Add empty arrays for any items that didn't have price history
+        itemIds.forEach(id => {
+          if (!grouped[id]) {
+            grouped[id] = [];
+          }
+        });
+        
+        return grouped;
+      } catch (error) {
+        console.log('Error with user_id batch request, trying with account_id', error);
+        // Fall back to account_id
+        const response = await api.get(`price-history/?item_ids=${itemIdsParam}&account_id=${authService.getCurrentUser()?.id}`);
+        
+        // Group results by item_id
+        const grouped = response.data.reduce((acc: {[key: number]: any[]}, item: any) => {
+          if (!acc[item.item_id]) {
+            acc[item.item_id] = [];
+          }
+          acc[item.item_id].push(item);
+          return acc;
+        }, {});
+        
+        // Add empty arrays for any items that didn't have price history
+        itemIds.forEach(id => {
+          if (!grouped[id]) {
+            grouped[id] = [];
+          }
+        });
+        
+        return grouped;
+      }
+    } catch (error) {
+      console.error('Failed to fetch batch price history:', error);
+      // Return empty arrays for each item ID
+      return itemIds.reduce((acc: {[key: number]: any[]}, id) => {
+        acc[id] = [];
+        return acc;
+      }, {});
+    }
+  },
+
   getItem: async (id: number): Promise<Item> => {
     try {
       const currentUser = authService.getCurrentUser();
