@@ -59,36 +59,9 @@ export const itemService = {
         return [];
       }
       
-      // Try to get price history with user_id parameter (backend uses user_id, not account_id)
-      try {
-        // Add user_id filter to ensure we only get price history for items the user owns
-        const response = await api.get(`price-history?item_id=${itemId}&user_id=${currentUser.id}`);
-        if (response.data && response.data.length > 0) {
-          return response.data;
-        }
-      } catch (apiError) {
-        console.warn(`Error with user_id parameter, trying fallback with account_id: ${apiError}`);
-        // Try with account_id as fallback (for backward compatibility)
-        try {
-          const accountResponse = await api.get(`price-history?item_id=${itemId}&account_id=${currentUser.id}`);
-          if (accountResponse.data && accountResponse.data.length > 0) {
-            return accountResponse.data;
-          }
-        } catch (accountError) {
-          console.warn(`Account_id fallback failed, trying without parameters: ${accountError}`);
-          // Final fallback - try without any user/account parameter
-          try {
-            const fallbackResponse = await api.get(`price-history?item_id=${itemId}`);
-            return fallbackResponse.data;
-          } catch (fallbackError) {
-            console.error(`All API attempts failed: ${fallbackError}`);
-            // All attempts failed
-          }
-        }
-      }
-      
-      // Return an empty array or fallback data when both API calls fail
-      return [];
+      // Add account_id filter to ensure we only get price history for items the user owns
+      const response = await api.get(`price-history?item_id=${itemId}&account_id=${currentUser.id}`);
+      return response.data;
     } catch (error) {
       console.error(`Error fetching price history for item ${itemId}:`, error);
       return [];
