@@ -14,16 +14,22 @@ const { TabPane } = Tabs;
 interface Competitor {
   report_id: string;
   name: string;
-  category: string;
   address: string;
+  category?: string;
+  score?: number;
+  phone?: string;
+  website?: string;
   distance_km?: number;
+  latitude?: number;
+  longitude?: number;
   menu_url?: string;
   last_sync?: string;
   menu_items_count?: number;
-  menu_items_in_common?: number; // Added for counting common menu items
+  menu_items_in_common?: number; // For counting common menu items
   selected?: boolean; // For selection in the setup modal
-  is_selected?: boolean; // Required by the backend API (duplicate of selected for backend compatibility)
-  created_at?: string; // When the competitor was added to the system
+  is_selected?: boolean; // Required by the backend API
+  created_at?: string;
+  latest_batch_timestamp?: string;  // Added for latest batch date display
   batch?: {
     batch_id: string;
     sync_timestamp: string;
@@ -369,7 +375,32 @@ const Competitors: React.FC = () => {
       if (response.data.success && response.data.competitors) {
         const competitors = response.data.competitors;
         console.log(`Found ${competitors.length} competitors`);
-        setCompetitors(competitors);
+        
+        // For each competitor, try to fetch their latest batch timestamp
+        const competitorsWithBatchData = [...competitors];
+        
+        // Process sequentially to avoid overwhelming the server
+        for (const competitor of competitorsWithBatchData) {
+          if (!competitor.report_id) continue;
+          
+          try {
+            const batchResponse = await api.get(`gemini-competitors/get-menu-batches/${competitor.report_id}`);
+            
+            if (batchResponse.data.success && batchResponse.data.batches && batchResponse.data.batches.length > 0) {
+              // Sort batches by timestamp (newest first)
+              const sortedBatches = [...batchResponse.data.batches].sort(
+                (a, b) => new Date(b.sync_timestamp).getTime() - new Date(a.sync_timestamp).getTime()
+              );
+              
+              // Add latest batch timestamp to the competitor object
+              competitor.latest_batch_timestamp = sortedBatches[0].sync_timestamp;
+            }
+          } catch (error) {
+            console.error(`Error fetching batches for ${competitor.name}:`, error);
+          }
+        }
+        
+        setCompetitors(competitorsWithBatchData);
         
         // Ensure we're in the competitors tab
         setActiveTab('1');
@@ -475,12 +506,15 @@ const Competitors: React.FC = () => {
       title: 'Last Updated',
       dataIndex: 'last_sync',
       key: 'last_sync',
-      render: (text: string, record: Competitor) => {
+      render: (_: string, record: Competitor) => {
         // Check for sync date in multiple possible locations
         let syncDate = null;
         let isCreationDate = false;
         
-        if (record.last_sync) {
+        if (record.latest_batch_timestamp) {
+          // Use the latest batch timestamp if we have it (will be added during data loading)
+          syncDate = record.latest_batch_timestamp;
+        } else if (record.last_sync) {
           syncDate = record.last_sync;
         } else if (record.batch && record.batch.sync_timestamp) {
           syncDate = record.batch.sync_timestamp;
@@ -493,7 +527,7 @@ const Competitors: React.FC = () => {
         return syncDate ? (
           <Tooltip title={isCreationDate 
             ? `Competitor added on ${moment(syncDate).format('MMMM D, YYYY h:mm A')} (menu sync date unavailable)`
-            : `Menu synced on ${moment(syncDate).format('MMMM D, YYYY h:mm A')}`}>
+            : `Menu last synced on ${moment(syncDate).format('MMMM D, YYYY h:mm A')}`}>
             {isCreationDate 
               ? <span>{moment(syncDate).format('MMM D, YYYY')} <small>(added date)</small></span>
               : moment(syncDate).format('MMM D, YYYY')}
