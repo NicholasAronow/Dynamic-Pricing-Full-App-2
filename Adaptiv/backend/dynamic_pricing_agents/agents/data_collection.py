@@ -235,6 +235,24 @@ class DataCollectionAgent(BaseAgent):
                 } for oi in order_items]
             })
         
+        self.logger.info({
+            "orders": order_data,
+            "items": [{
+                "id": item.id,
+                "name": item.name,
+                "category": item.category,
+                "current_price": float(item.current_price),
+                "cost": float(item.cost) if item.cost else None
+            } for item in items],
+            "summary": {
+                "total_orders": len(recent_orders),
+                "date_range": {
+                    "start": (datetime.now(timezone.utc) - timedelta(days=90)).isoformat(),
+                    "end": datetime.now(timezone.utc).isoformat()
+                }
+            }
+        })
+
         return {
             "orders": order_data,
             "items": [{
