@@ -262,18 +262,7 @@ class DataCollectionAgent(BaseAgent):
                 "current_price": float(item.current_price),
                 "cost": float(cost) if cost is not None else None
             })
-        
-        self.logger.info({
-            "orders": order_data,
-            "items": items_data,
-            "summary": {
-                "total_orders": len(recent_orders),
-                "date_range": {
-                    "start": (datetime.now(timezone.utc) - timedelta(days=90)).isoformat(),
-                    "end": datetime.now(timezone.utc).isoformat()
-                }
-            }
-        })
+
 
         return {
             "orders": order_data,

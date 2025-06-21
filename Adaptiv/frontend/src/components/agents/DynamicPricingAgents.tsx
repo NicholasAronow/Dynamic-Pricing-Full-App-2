@@ -72,7 +72,12 @@ const DynamicPricingAgents: React.FC = () => {
 
   // Load recommendations and previous analysis results on component mount
   useEffect(() => {
-    // Load recommendations from localStorage
+    console.log('DynamicPricingAgents component mounted');
+    
+    // Always fetch available batches first, as it may trigger recommendation fetch
+    fetchAvailableBatches();
+    
+    // Load recommendations from localStorage only if we don't have a selected batch yet
     const savedRecommendations = localStorage.getItem('adaptiv_pricing_recommendations');
     const savedTimestamp = localStorage.getItem('adaptiv_recommendations_timestamp');
     
@@ -85,6 +90,7 @@ const DynamicPricingAgents: React.FC = () => {
         const isRecent = (Date.now() - timestamp) < 24 * 60 * 60 * 1000;
         
         if (isRecent && recommendations.length > 0) {
+          console.log(`Loaded ${recommendations.length} saved recommendations from localStorage`);
           setRecommendations(recommendations);
           setLastFetchTime(timestamp);
           
@@ -95,35 +101,49 @@ const DynamicPricingAgents: React.FC = () => {
           setPendingRecommendations(pending);
           setCompletedRecommendations(completed);
           
-          console.log(`Loaded ${recommendations.length} saved recommendations from localStorage`);
+          // Check if we have a batch ID from localStorage
+          if (recommendations[0] && recommendations[0].batch_id) {
+            console.log(`Setting selected batch ID from localStorage: ${recommendations[0].batch_id}`);
+            setSelectedBatchId(recommendations[0].batch_id);
+          }
         } else {
-          // Data is too old or empty, fetch fresh data
-          fetchAgentRecommendations();
+          console.log('Saved recommendations expired or empty, will fetch fresh data after batches are loaded');
         }
       } catch (e) {
         console.error('Error parsing saved recommendations:', e);
-        fetchAgentRecommendations();
       }
     } else {
-      // No saved data, fetch fresh data
-      fetchAgentRecommendations();
+      console.log('No saved recommendations found in localStorage');
     }
-    
-    // Load available batches
-    fetchAvailableBatches();
     
     // Load previous analysis results
     fetchLatestAnalysisResults();
   }, []);
   
+  // Effect to fetch recommendations when selectedBatchId changes
+  useEffect(() => {
+    if (selectedBatchId) {
+      console.log(`Selected batch ID changed to: ${selectedBatchId}, fetching recommendations`);
+      fetchAgentRecommendations(selectedBatchId);
+    }
+  }, [selectedBatchId]);
+  
   // Fetch available recommendation batches
   const fetchAvailableBatches = async () => {
     try {
       setLoadingBatches(true);
+      console.log('Fetching available batches from API...');
+      
+      // Get current user info for debugging
+      const userData = localStorage.getItem('user');
+      const currentUser = userData ? JSON.parse(userData) : {};
+      console.log('Current user when fetching batches:', { id: currentUser.id, email: currentUser.email });
+      
       const batchesResponse = await pricingService.getAvailableBatches();
+      console.log('Raw batches API response:', batchesResponse);
       
       if (batchesResponse && batchesResponse.length > 0) {
-        console.log('Available batches:', batchesResponse);
+        console.log(`Found ${batchesResponse.length} recommendation batches!`);
         
         // Type assertion to handle potential shape differences in the API response
         type ApiResponse = {
@@ -139,12 +159,19 @@ const DynamicPricingAgents: React.FC = () => {
           count: typeof batch.count === 'number' ? batch.count : 0 // Default to 0 if count is missing
         }));
         
+        console.log('Processed batches:', validBatches);
         setAvailableBatches(validBatches);
         
         // Select the most recent batch by default (already sorted by date)
         if (!selectedBatchId && validBatches.length > 0) {
+          console.log(`Setting selected batch to most recent: ${validBatches[0].batch_id}`);
           setSelectedBatchId(validBatches[0].batch_id);
+          
+          // Force fetch recommendations for this batch
+          fetchAgentRecommendations(validBatches[0].batch_id);
         }
+      } else {
+        console.log('No recommendation batches found');
       }
     } catch (error) {
       console.error('Error fetching recommendation batches:', error);
@@ -291,16 +318,28 @@ const DynamicPricingAgents: React.FC = () => {
   const fetchAgentRecommendations = async (batchId?: string) => {
     try {
       setLoadingRecommendations(true);
+      console.log('Fetching agent recommendations with params:', { 
+        batchId: batchId || selectedBatchId || 'undefined',
+        status: undefined
+      });
+      
+      // Get current user info for debugging
+      const userData = localStorage.getItem('user');
+      const currentUser = userData ? JSON.parse(userData) : {};
+      console.log('Current user when fetching recommendations:', { id: currentUser.id, email: currentUser.email });
       
       // Fetch recommendations, optionally filtered by batch_id
       const data = await pricingService.getAgentRecommendations(undefined, batchId || selectedBatchId || undefined);
       
       // Debug log the received data
-      console.log('Pricing recommendations received:', data);
+      console.log(`Pricing recommendations received: ${data ? data.length : 0} recommendations`);
       if (data && data.length > 0) {
+        console.log('First recommendation sample:', data[0]);
         data.forEach((rec: AgentPricingRecommendation) => {
           console.log(`${rec.item_name}: Current: $${rec.current_price}, Recommended: $${rec.recommended_price}, Change %: ${rec.price_change_percent}, Batch: ${rec.batch_id}`);
         });
+      } else {
+        console.log('No recommendations found in response');
       }
       
       // Save to state and localStorage
@@ -312,6 +351,7 @@ const DynamicPricingAgents: React.FC = () => {
       // Organize recommendations by status
       const pending = data.filter((rec: AgentPricingRecommendation) => !rec.user_action);
       const completed = data.filter((rec: AgentPricingRecommendation) => rec.user_action);
+      console.log(`Sorted recommendations: ${pending.length} pending, ${completed.length} completed`);
       
       setPendingRecommendations(pending);
       setCompletedRecommendations(completed);
