@@ -1876,7 +1876,7 @@ const Competitors: React.FC = () => {
                       .sort((a, b) => new Date(b.sync_timestamp).getTime() - new Date(a.sync_timestamp).getTime())
                       .map((batch) => {
                         const date = new Date(batch.sync_timestamp);
-                        const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+                        const formattedDate = date.toLocaleDateString();
                         return (
                           <Select.Option key={batch.batch_id} value={batch.batch_id}>
                             {formattedDate} ({batch.item_count} items)
