@@ -28,6 +28,111 @@ if OPENAI_API_KEY:
     except Exception as e:
         logger.error(f"Failed to initialize OpenAI client in tasks.py: {e}")
 
+# Explicitly register task with a unique name
+@celery_app.task(name="adaptiv.tasks.extract_menu_data_task", bind=True)
+def extract_menu_data_task(self, menu_content: str) -> Dict[str, Any]:
+    """
+    Celery task to extract restaurant details and menu items from menu content
+    using OpenAI LLM. Returns structured data for restaurant info and menu items.
+    
+    Args:
+        menu_content: Raw text content from a restaurant menu
+        
+    Returns:
+        Dictionary with restaurant_info and menu_items
+    """
+    try:
+        logger.info(f"Starting menu extraction task {self.request.id}")
+        
+        # Check if OpenAI client is available
+        if 'openai' not in clients:
+            raise ValueError("OpenAI client not properly initialized")
+            
+        client = clients['openai']
+        
+        # Create prompt for extraction
+        prompt = f"""TASK: Extract restaurant information and ALL menu items from the following menu content.
+
+MENU CONTENT:
+{menu_content}
+
+RETURN DATA AS JSON with two parts:
+
+1. Restaurant information:
+{{
+  "restaurant_name": "Name of the restaurant",
+  "category": "Main category like restaurant, cafe, bakery, etc.",
+  "address": "Full address if found in the content"  
+}}
+
+2. Menu items as an array:
+[
+  {{
+    "item_name": "Exact menu item name",
+    "category": "appetizer|main_course|dessert|beverage|side|special",
+    "description": "Item description or null if none",
+    "price": 12.99,
+    "price_currency": "USD"
+  }}
+]
+
+RETURN YOUR RESPONSE IN THIS FORMAT:
+{{
+  "restaurant_info": {{ Restaurant info object }},
+  "menu_items": [ Array of menu items ]
+}}
+
+RULES:
+1. Extract ONLY information explicitly found in the menu content
+2. For restaurant_name, if multiple restaurant names appear, choose the most prominent one
+3. For address, concatenate all address components found
+4. Extract as many menu items as possible with their exact prices
+5. Do not fabricate or guess information
+6. If certain information is not available, use null values
+7. Return an empty array for menu_items if none are found
+
+RETURN ONLY THE JSON OBJECT, no explanations."""
+        
+        # Generate response using OpenAI
+        response = client.chat.completions.create(
+            model="gpt-4.1-nano",
+            messages=[
+                {"role": "system", "content": "You are a specialized AI assistant that extracts structured data from restaurant menu content. Your outputs should be clean JSON objects only."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"}
+        )
+        
+        # Get the response text
+        response_text = response.choices[0].message.content
+        
+        # Clean the response text in case there are any markdown code blocks
+        if "```json" in response_text:
+            extracted_json = response_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in response_text:
+            extracted_json = response_text.split("```")[1].strip()
+        else:
+            extracted_json = response_text.strip()
+        
+        # Parse the JSON
+        result = json.loads(extracted_json)
+        
+        logger.info(f"Successfully extracted menu data in task {self.request.id}")
+        return {
+            "success": True,
+            "restaurant_info": result.get("restaurant_info", {}),
+            "menu_items": result.get("menu_items", [])
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in menu extraction task {self.request.id}: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "restaurant_info": {},
+            "menu_items": []
+        }
+
 # Helper function to run async functions in synchronous code
 def run_async(coroutine):
     """

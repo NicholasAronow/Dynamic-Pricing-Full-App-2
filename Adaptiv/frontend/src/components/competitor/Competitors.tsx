@@ -1283,6 +1283,7 @@ const Competitors: React.FC = () => {
           // Create proper request body with the menu content
           const requestData = { "menu_content": values.menu_url };
           
+          // Start the extraction task (async version)
           const extractResponse = await api.post('gemini-competitors/extract-from-menu-content', 
             requestData,
             {
@@ -1292,45 +1293,90 @@ const Competitors: React.FC = () => {
             }
           );
           
-          console.log('Extraction response:', extractResponse.data);
+          console.log('Extraction task started:', extractResponse.data);
           
-          if (extractResponse.data.success && extractResponse.data.restaurant_info) {
-            const restaurantInfo = extractResponse.data.restaurant_info;
-            const menuItems = extractResponse.data.menu_items || [];
+          if (extractResponse.data.success && extractResponse.data.task_id) {
+            const taskId = extractResponse.data.task_id;
             
-            // Create updated form values with extracted restaurant data
-            const updatedValues = {
-              ...values,
-              name: restaurantInfo.restaurant_name || values.name || '',
-              category: restaurantInfo.category || values.category || '',
-              address: restaurantInfo.address || '',
-              // Include the menu items directly
-              extractedMenuItems: menuItems
-            };
+            // Poll for task completion
+            let completed = false;
+            let attempts = 0;
+            const maxAttempts = 30; // Maximum polling attempts
             
-            // Update the form UI for the user
-            addForm.setFieldsValue(updatedValues);
+            while (!completed && attempts < maxAttempts) {
+              attempts++;
+              
+              // Wait before polling
+              await new Promise(resolve => setTimeout(resolve, 1500));
+              
+              // Check task status
+              const statusResponse = await api.get(`gemini-competitors/extract-menu-status/${taskId}`, {
+                headers: {
+                  'Authorization': `Bearer ${token}`
+                }
+              });
+              
+              console.log(`Extraction task status (attempt ${attempts}):`, statusResponse.data);
+              
+              // If the task is complete
+              if (statusResponse.data.status === 'completed') {
+                completed = true;
+                
+                const restaurantInfo = statusResponse.data.restaurant_info;
+                const menuItems = statusResponse.data.menu_items || [];
+                
+                // Create updated form values with extracted restaurant data
+                const updatedValues = {
+                  ...values,
+                  name: restaurantInfo.restaurant_name || values.name || '',
+                  category: restaurantInfo.category || values.category || '',
+                  address: restaurantInfo.address || '',
+                  // Include the menu items directly
+                  extractedMenuItems: menuItems
+                };
+                
+                // Update form fields
+                addForm.setFieldsValue(updatedValues);
+                
+                // Store the extracted data
+                setExtractedMenuData({
+                  restaurant_info: restaurantInfo,
+                  menu_items: menuItems
+                });
+                
+                // Show temporary message about extraction before submission
+                message.success(`Successfully extracted ${menuItems.length} menu items. Submitting...`);
+                
+                // Automatically submit the competitor with the extracted data
+                await submitCompetitorWithExtractedData(updatedValues);
+                return;
+              }
+              
+              // If the task failed
+              if (statusResponse.data.status === 'failed') {
+                message.error(`Menu extraction failed: ${statusResponse.data.error || 'Unknown error'}`);
+                setProcessing(false);
+                setExtractingMenuData(false);
+                return;
+              }
+            }
             
-            // Store the extracted data
-            setExtractedMenuData(extractResponse.data);
-            
-            // Show temporary message about extraction before submission
-            message.loading(
-              `Successfully extracted information for ${restaurantInfo.restaurant_name || 'restaurant'} with ${menuItems.length} menu items. Submitting...`,
-              2
-            );
-            
-            // Automatically submit the competitor with the extracted data
-            await submitCompetitorWithExtractedData(updatedValues);
+            // If we reach here, polling timed out
+            if (!completed) {
+              message.warning('Menu extraction is taking longer than expected. Please try again later.');
+              setProcessing(false);
+              setExtractingMenuData(false);
+            }
           } else {
-            message.error('Failed to extract menu data: ' + (extractResponse.data.error || 'Unknown error'));
+            message.error('Failed to start menu extraction task');
+            setProcessing(false);
+            setExtractingMenuData(false);
           }
         } catch (error) {
           console.error('Error during extraction:', error);
           message.error('Failed to extract menu data from content');
-        } finally {
-          setExtractingMenuData(false);
           setProcessing(false);
+          setExtractingMenuData(false);
         }
       } else {
         // No menu content to extract, proceed with basic competitor addition
@@ -1340,6 +1386,7 @@ const Competitors: React.FC = () => {
       console.error('Error in handleAddCompetitor:', error);
       message.error('An error occurred while processing your request');
       setProcessing(false);
+      setExtractingMenuData(false);
     }
   };
   

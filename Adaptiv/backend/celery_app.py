@@ -13,7 +13,7 @@ celery_app = Celery(
     "adaptiv",
     broker=redis_url,
     backend=redis_url,
-    include=["tasks"]
+    include=["tasks"] # This tells Celery to import the tasks module
 )
 
 # Configure Celery

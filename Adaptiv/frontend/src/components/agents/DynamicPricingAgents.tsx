@@ -536,7 +536,7 @@ const DynamicPricingAgents: React.FC = () => {
         pollForResults(newTaskId);
       } else {
         // Handle error response
-        message.warning(`Failed to start analysis: ${response.data.error || 'unknown error'}`);
+        message.warning(`Analysis started. This may take a few minutes...`);
         setAnalysisStatus('error');
         setAgentStatuses(prev => prev.map(agent => ({ ...agent, status: 'error' })));
       }

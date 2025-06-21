@@ -141,92 +141,96 @@ async def extract_from_menu_content(
     request: MenuContentRequest
 ):
     """
-    Extract restaurant details and menu items from pasted menu content
+    Extract restaurant details and menu items from pasted menu content using Celery task
     """
     try:
-        # Create OpenAI client
-        client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
+        # Import the specific task using the fully qualified name
+        from tasks import extract_menu_data_task
         
-        # Extract restaurant information and menu items from pasted content
-        prompt = f"""TASK: Extract restaurant information and ALL menu items from the following menu content.
-
-MENU CONTENT:
-{request.menu_content}
-
-RETURN DATA AS JSON with two parts:
-
-1. Restaurant information:
-{{
-  "restaurant_name": "Name of the restaurant",
-  "category": "Main category like restaurant, cafe, bakery, etc.",
-  "address": "Full address if found in the content"  
-}}
-
-2. Menu items as an array:
-[
-  {{
-    "item_name": "Exact menu item name",
-    "category": "appetizer|main_course|dessert|beverage|side|special",
-    "description": "Item description or null if none",
-    "price": 12.99,
-    "price_currency": "USD"
-  }}
-]
-
-RETURN YOUR RESPONSE IN THIS FORMAT:
-{{
-  "restaurant_info": {{ Restaurant info object }},
-  "menu_items": [ Array of menu items ]
-}}
-
-RULES:
-1. Extract ONLY information explicitly found in the menu content
-2. For restaurant_name, if multiple restaurant names appear, choose the most prominent one
-3. For address, concatenate all address components found
-4. Extract as many menu items as possible with their exact prices
-5. Do not fabricate or guess information
-6. If certain information is not available, use null values
-7. Return an empty array for menu_items if none are found
-
-RETURN ONLY THE JSON OBJECT, no explanations."""
+        # Submit the task to Celery and get the task ID
+        # Use apply_async to ensure task name is explicitly used
+        task = extract_menu_data_task.apply_async(args=[request.menu_content])
         
-        # Generate response using OpenAI GPT-4o
-        response = client.chat.completions.create(
-            model="gpt-4.1-nano",
-            messages=[
-                {"role": "system", "content": "You are a specialized AI assistant that extracts structured data from restaurant menu content. Your outputs should be clean JSON objects only."},
-                {"role": "user", "content": prompt}
-            ],
-            response_format={"type": "json_object"}
-        )
+        # Return the task ID for the frontend to poll
+        return {
+            "success": True,
+            "task_id": task.id,
+            "status": "pending",
+            "message": "Menu extraction task submitted successfully. Check the task status endpoint for results."
+        }
+            
+    except Exception as e:
+        print(f"Error submitting menu extraction task: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "status": "failed"
+        }
+
+@gemini_competitor_router.get("/extract-menu-status/{task_id}")
+async def get_menu_extraction_status(task_id: str):
+    """
+    Check the status of a menu extraction task and retrieve results if complete
+    """
+    try:
+        from tasks import extract_menu_data_task
+        from celery.result import AsyncResult
         
-        # Get the response text
-        response_text = response.choices[0].message.content
+        # Get the task result
+        task_result = AsyncResult(task_id)
         
-        # Clean the response text in case there are any markdown code blocks
-        if "```json" in response_text:
-            extracted_json = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            extracted_json = response_text.split("```")[1].strip()
-        else:
-            extracted_json = response_text.strip()
-        
-        try:
-            result = json.loads(extracted_json)
+        # If the task is still pending
+        if task_result.status == 'PENDING':
             return {
                 "success": True,
-                "restaurant_info": result.get("restaurant_info", {}),
-                "menu_items": result.get("menu_items", [])
+                "status": "pending",
+                "message": "Menu extraction is still in progress."
             }
-        except json.JSONDecodeError:
+        
+        # If the task failed
+        elif task_result.status == 'FAILURE':
             return {
                 "success": False,
-                "error": "Failed to parse data from Gemini response",
-                "raw_response": response_text
+                "status": "failed",
+                "error": str(task_result.result),
+                "message": "Menu extraction task failed."
+            }
+        
+        # If the task succeeded
+        elif task_result.status == 'SUCCESS':
+            result = task_result.result
+            
+            # Check if the task itself reported success
+            if result.get("success", False):
+                return {
+                    "success": True,
+                    "status": "completed",
+                    "restaurant_info": result.get("restaurant_info", {}),
+                    "menu_items": result.get("menu_items", [])
+                }
+            else:
+                return {
+                    "success": False,
+                    "status": "failed",
+                    "error": result.get("error", "Unknown error in extraction task"),
+                    "message": "Menu extraction task reported failure."
+                }
+                
+        # Any other status
+        else:
+            return {
+                "success": False,
+                "status": task_result.status.lower(),
+                "message": f"Task is in {task_result.status} state."
             }
             
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error extracting data from menu content: {str(e)}")
+        print(f"Error checking menu extraction task status: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "status": "error"
+        }
 
 
 @gemini_competitor_router.post("/extract-menu-from-url")
