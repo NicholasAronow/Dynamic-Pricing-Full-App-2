@@ -1774,24 +1774,13 @@ const Competitors: React.FC = () => {
           />
           <div style={{ textAlign: 'center', padding: '30px 0' }}>
             <Space>
-            <Button 
-              type="primary" 
-              size="large"
-              icon={<FileSearchOutlined />}
-              onClick={() => {
-                setSetupModalVisible(true);
-                fetchBusinessProfile();
-              }}
-            >
-              Set up competitor tracking
-            </Button>
-
             <Button
-                  type="default"
-                  icon={<EditOutlined />}
+                  type="primary"
+                  size="large"
+                  icon={<FileSearchOutlined />}
                   onClick={() => setAddModalVisible(true)}
                 >
-                  Manual Setup
+                  Set up competitor tracking
                 </Button>
             </Space>            
           </div>
@@ -2248,13 +2237,28 @@ const Competitors: React.FC = () => {
           layout="vertical"
           onFinish={handleAddCompetitor}
         >
-          <Alert
-            type="info"
-            showIcon
+          <Paragraph
             style={{ marginBottom: 16 }}
-            message="Just paste menu content - we'll extract everything"
-            description="Paste the full content from a restaurant menu page, including the restaurant name, location, and menu items. Our AI will automatically extract all the necessary information."
-          />
+          >
+            Paste the full content from a restaurant menu page, including the restaurant name, location, and menu items. Our AI will automatically extract all the necessary information.
+          </Paragraph>
+
+          {!extractedMenuData && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message="How to copy a menu from a website:"
+              description={
+                <ol style={{ paddingLeft: 16, margin: 0 }}>
+                  <li>Go to the restaurant's menu page</li>
+                  <li>Press Ctrl+A (Windows/Linux) or Cmd+A (Mac) to select all content</li>
+                  <li>Press Ctrl+C (Windows/Linux) or Cmd+C (Mac) to copy</li>
+                  <li>Paste the content into the text area above</li>
+                </ol>
+              }
+            />
+          )}
           
           <Form.Item
             label="Menu Content"
@@ -2337,23 +2341,6 @@ const Competitors: React.FC = () => {
                     )}
                   </ul>
                 </div>
-              }
-            />
-          )}
-          
-          {!extractedMenuData && (
-            <Alert
-              type="info"
-              showIcon
-              style={{ marginBottom: 16 }}
-              message="How to copy a menu from a website:"
-              description={
-                <ol style={{ paddingLeft: 16, margin: 0 }}>
-                  <li>Go to the restaurant's menu page</li>
-                  <li>Press Ctrl+A (Windows/Linux) or Cmd+A (Mac) to select all content</li>
-                  <li>Press Ctrl+C (Windows/Linux) or Cmd+C (Mac) to copy</li>
-                  <li>Paste the content into the text area above</li>
-                </ol>
               }
             />
           )}

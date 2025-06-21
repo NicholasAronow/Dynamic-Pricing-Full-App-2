@@ -27,18 +27,40 @@ import {
   CloseOutlined,
   EditOutlined,
   LoadingOutlined,
-  SyncOutlined
+  SyncOutlined,
+  ShoppingOutlined
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
+import { integrationService } from '../../services/integrationService';
 import pricingService, { PriceRecommendation } from '../../services/pricingService';
 import * as recipeService from '../../services/recipeService';
 import orderService from '../../services/orderService';
 import { RecipeItem } from '../../types/recipe';
 
-const { Title, Text } = Typography;
+const { Title, Text, Paragraph } = Typography;
+
+// Function to handle Square integration
+const handleSquareIntegration = async () => {
+  try {
+    console.log('Initiating Square integration from Price Recommendations');
+    // Use the integrationService to get the auth URL
+    const authUrl = await integrationService.getSquareAuthUrl();
+    
+    console.log('Received Square auth URL:', authUrl);
+    if (authUrl) {
+      // Redirect to Square's authorization page
+      window.location.href = authUrl;
+    }
+  } catch (error) {
+    message.error('Failed to start Square integration. Please try again.');
+    console.error('Square integration error:', error);
+  }
+};
 
 const PriceRecommendations: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [timeFrame, setTimeFrame] = useState<string>('7d');
   const [loading, setLoading] = useState<boolean>(true);
   const [recommendations, setRecommendations] = useState<PriceRecommendation[]>([]);
@@ -46,6 +68,8 @@ const PriceRecommendations: React.FC = () => {
   const [editPrice, setEditPrice] = useState<number | null>(null);
   const [savingPrice, setSavingPrice] = useState<number | null>(null);
   const [usingMock, setUsingMock] = useState<boolean>(false);
+  // Use pos_connected field from the user object
+  const isPosConnected = user?.pos_connected ?? false;
   const [recipes, setRecipes] = useState<RecipeItem[]>([]);
   const [loadingRecipes, setLoadingRecipes] = useState<boolean>(true);
   const [syncingOrders, setSyncingOrders] = useState<boolean>(false);
@@ -503,11 +527,50 @@ const PriceRecommendations: React.FC = () => {
   }, []);
 
   return (
-    <div>
+    <div style={{ position: 'relative' }}>
       <Title level={2}>Your Items</Title>
       <Title level={5} type="secondary" style={{ marginTop: 0 }}>
         Optimize your product pricing strategy with AI-driven insights
       </Title>
+      
+      {/* Single conditional blur overlay for the entire component */}
+      {!isPosConnected && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          backdropFilter: 'blur(5px)',
+          backgroundColor: 'rgba(255, 255, 255, 0.85)',
+          zIndex: 10,
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          textAlign: 'center',
+          padding: '40px',
+          borderRadius: '8px'
+        }}>
+          <Title level={3}>Connect Your POS System</Title>
+          <Paragraph style={{ fontSize: '16px', maxWidth: '600px', margin: '20px 0' }}>
+            To access your product data, please connect your Square account.
+            This will allow us to import your sales data and menu items for personalized insights.
+          </Paragraph>
+          <Button 
+            type="primary" 
+            icon={<ShoppingOutlined />}
+            onClick={handleSquareIntegration}
+            size="large"
+            style={{ marginTop: '20px' }}
+          >
+            Connect Square Account
+          </Button>
+          <Paragraph style={{ marginTop: '20px', fontSize: '14px', opacity: 0.7 }}>
+            <Text type="secondary">After connecting, you'll have access to all price recommendation features</Text>
+          </Paragraph>
+        </div>
+      )}
       <Button 
         onClick={handleSyncOrders} 
         disabled={syncingOrders} 
