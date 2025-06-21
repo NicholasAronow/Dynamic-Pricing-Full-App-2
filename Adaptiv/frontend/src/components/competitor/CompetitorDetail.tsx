@@ -751,61 +751,6 @@ const CompetitorDetail: React.FC = () => {
                   zIndex: 2
                 }}
               />
-              
-              {/* Market average dot with hover effect */}
-              <div style={{ position: 'relative' }}>
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: `${(marketPositionData?.marketAverage ? (marketPositionData.marketAverage - 1) / 9 * 100 : 50)}%`,
-                    top: 5,
-                    width: 12,
-                    height: 12,
-                    backgroundColor: '#faad14',
-                    borderRadius: '50%',
-                    transform: 'translate(-50%, -50%)',
-                    border: '2px solid white',
-                    zIndex: 2,
-                    cursor: 'pointer'
-                  }}
-                  onMouseOver={(e) => {
-                    // Find the tooltip element
-                    const tooltip = e.currentTarget.nextElementSibling as HTMLElement;
-                    if (tooltip) {
-                      tooltip.style.display = 'block';
-                    }
-                  }}
-                  onMouseOut={(e) => {
-                    // Find the tooltip element
-                    const tooltip = e.currentTarget.nextElementSibling as HTMLElement;
-                    if (tooltip) {
-                      tooltip.style.display = 'none';
-                    }
-                  }}
-                />
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: `${(marketPositionData?.marketAverage ? (marketPositionData.marketAverage - 1) / 9 * 100 : 50)}%`,
-                    top: -50,
-                    transform: 'translateX(-50%)',
-                    backgroundColor: '#fff8e6',
-                    border: '1px solid #ffe58f',
-                    borderRadius: '4px',
-                    padding: '4px 8px',
-                    zIndex: 3,
-                    display: 'none',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
-                    whiteSpace: 'nowrap',
-                    textAlign: 'center',
-                    color: '#5c3c00',
-                    fontSize: '14px',
-                    fontWeight: 'bold'
-                  }}
-                >
-                  Market Average: {marketPositionData?.marketAverage ? marketPositionData.marketAverage.toFixed(1) : '0.0'}
-                </div>
-              </div>
               {/* Scale markings */}
               {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(mark => {
                 // Calculate position - distributing marks from 0% to 100%
