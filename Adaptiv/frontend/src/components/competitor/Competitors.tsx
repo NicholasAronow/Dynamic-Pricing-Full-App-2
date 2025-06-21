@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Card, Button, Table, Space, Tag, message, Spin, Empty, Tooltip, Alert, Modal, Form, Input, Checkbox, List, InputNumber, Tabs, Select } from 'antd';
-import { PlusOutlined, DeleteOutlined, EditOutlined, LinkOutlined, QuestionOutlined, SearchOutlined, CloseCircleOutlined, EyeOutlined, FileSearchOutlined, ReloadOutlined, SyncOutlined, BarChartOutlined } from '@ant-design/icons';
+import { Typography, Card, Button, Table, Tag, message, Spin, Empty, Tooltip, Alert, Modal, Form, Input, Checkbox, List, InputNumber, Tabs, Select, Space } from 'antd';
+import { PlusOutlined, SearchOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, LinkOutlined, DeleteFilled } from '@ant-design/icons';
 import axios from 'axios';
 import { api } from '../../services/api';
 import { useNavigate } from 'react-router-dom';
@@ -355,6 +355,8 @@ const Competitors: React.FC = () => {
         return;
       }
       
+      console.log('Loading competitors...');
+      
       // First, fetch competitors
       const response = await api.get('gemini-competitors/competitors', {
         headers: {
@@ -362,9 +364,15 @@ const Competitors: React.FC = () => {
         }
       });
       
+      console.log('Competitors API response:', response.data);
+      
       if (response.data.success && response.data.competitors) {
         const competitors = response.data.competitors;
+        console.log(`Found ${competitors.length} competitors`);
         setCompetitors(competitors);
+        
+        // Ensure we're in the competitors tab
+        setActiveTab('1');
         
         // Try to fetch our own menu items
         try {
@@ -505,13 +513,7 @@ const Competitors: React.FC = () => {
             onClick={() => handleEditCompetitor(record)}
             size="small"
           />
-          <Button 
-            type="text" 
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => handleDeleteCompetitor(record)}
-            size="small"
-          />
+          
         </Space>
       ),
     },
@@ -1120,11 +1122,15 @@ const Competitors: React.FC = () => {
   // Function to load a competitor's menu items with specific batch selection
   const loadCompetitorMenuWithBatch = async (reportId: string, batchId?: string | null) => {
     try {
+      console.log(`DEBUG - loadCompetitorMenuWithBatch: Loading menu for report_id=${reportId}, batch_id=${batchId || 'latest'}`);
       setCompetitorMenuLoading(true);
       setCompetitorMenuItems([]);
       
       const token = localStorage.getItem('token');
-      if (!token) return;
+      if (!token) {
+        console.log('DEBUG - loadCompetitorMenuWithBatch: No token found, aborting');
+        return;
+      }
       
       // Set up query parameters for the API call
       const params: any = {};
@@ -1133,21 +1139,61 @@ const Competitors: React.FC = () => {
       }
       
       // Use the configured api service instead of direct axios
-      const response = await api.get(`gemini-competitors/get-stored-menu/${reportId}`, { params: params });
+      console.log(`DEBUG - loadCompetitorMenuWithBatch: Calling API endpoint with params:`, params);
+      const response = await api.get(`gemini-competitors/get-stored-menu/${reportId}`, { 
+        params: params,
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      console.log('DEBUG - loadCompetitorMenuWithBatch: Response received:', response.data);
       
       if (response.data.success) {
-        setCompetitorMenuItems(response.data.menu_items);
+        let menuItems = response.data.menu_items || [];
+        console.log(`DEBUG - loadCompetitorMenuWithBatch: Got ${menuItems.length} menu items`);
+        
+        // Deduplicate menu items based on item name and price to prevent doubles
+        if (menuItems.length > 0) {
+          // Define interface for menu item structure
+          interface MenuItem {
+            item_name: string;
+            price: number;
+            [key: string]: any; // For other properties
+          }
+          
+          const uniqueMap = new Map<string, MenuItem>();
+          menuItems.forEach((item: MenuItem) => {
+            const key = `${item.item_name}-${item.price}`;
+            uniqueMap.set(key, item);
+          });
+          
+          const uniqueItems = Array.from(uniqueMap.values());
+          console.log(`DEBUG - loadCompetitorMenuWithBatch: Deduplicated from ${menuItems.length} to ${uniqueItems.length} items`);
+          menuItems = uniqueItems;
+        }
+        
+        if (menuItems.length === 0) {
+          console.log('DEBUG - loadCompetitorMenuWithBatch: No menu items returned despite success=true');
+          message.warning("No menu items found for this competitor.");
+        }
+        
+        setCompetitorMenuItems(menuItems);
         
         // Update selected batch from response if not explicitly provided
         if (!batchId && response.data.batch) {
           setSelectedBatchId(response.data.batch.batch_id);
+          console.log(`DEBUG - loadCompetitorMenuWithBatch: Updated selected batch to ${response.data.batch.batch_id}`);
         }
 
         if (response.data.batch && response.data.batch.sync_timestamp) {
           const date = new Date(response.data.batch.sync_timestamp);
-          message.info(`Showing menu from ${date.toLocaleDateString()} ${date.toLocaleTimeString()}`);
+          const dateStr = `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+          console.log(`DEBUG - loadCompetitorMenuWithBatch: Menu timestamp is ${dateStr}`);
+          message.info(`Showing menu from ${dateStr}`);
         }
       } else {
+        console.log('DEBUG - loadCompetitorMenuWithBatch: API response has success=false');
         message.warning("No menu data available for this competitor");
       }
     } catch (error) {
@@ -1159,172 +1205,211 @@ const Competitors: React.FC = () => {
   };
 
   // Handle adding a new manual competitor
+  // State for storing extracted data from menu content
+  const [extractingMenuData, setExtractingMenuData] = useState<boolean>(false);
+  const [extractedMenuData, setExtractedMenuData] = useState<any>(null);
+
   const handleAddCompetitor = async (values: any) => {
     try {
+      console.log('Form submitted with values:', values);
       setProcessing(true);
       const token = localStorage.getItem('token');
       if (!token) {
         message.error('Authentication required');
+        setProcessing(false);
         return;
       }
       
-      // Generate temporary ID (will be replaced by backend)
-      const tempId = `manual-${Date.now()}`;
+      // If we already have extracted data, proceed to submission
+      if (extractedMenuData) {
+        // Make sure we're using the latest form values after extraction
+        const currentFormValues = addForm.getFieldsValue();
+        await submitCompetitorWithExtractedData(currentFormValues);
+        return;
+      }
       
-      // Create a competitor object with the form values
-      const competitor: Competitor = {
-        report_id: tempId,
+      // Otherwise, extract data from menu content first
+      if (values.menu_url && values.menu_url.length > 20) {
+        // First extract data from the menu content
+        try {
+          setExtractingMenuData(true);
+          message.loading('Analyzing menu content...', 2);
+          
+          // Log what we're sending for debugging
+          console.log('Sending menu content for extraction:', { menu_content: values.menu_url });
+          
+          // Create proper request body with the menu content
+          const requestData = { "menu_content": values.menu_url };
+          
+          const extractResponse = await api.post('gemini-competitors/extract-from-menu-content', 
+            requestData,
+            {
+              headers: {
+                'Authorization': `Bearer ${token}`
+              }
+            }
+          );
+          
+          console.log('Extraction response:', extractResponse.data);
+          
+          if (extractResponse.data.success && extractResponse.data.restaurant_info) {
+            const restaurantInfo = extractResponse.data.restaurant_info;
+            const menuItems = extractResponse.data.menu_items || [];
+            
+            // Store the extracted data
+            setExtractedMenuData(extractResponse.data);
+            
+            // Create updated form values with extracted restaurant data
+            const updatedValues = {
+              ...values,
+              name: restaurantInfo.restaurant_name || values.name || '',
+              category: restaurantInfo.category || values.category || '',
+              address: restaurantInfo.address || values.address || ''
+            };
+            
+            // Update the form UI for the user
+            addForm.setFieldsValue(updatedValues);
+            
+            // Show success message with extracted information
+            message.success(
+              `Successfully extracted information for ${restaurantInfo.restaurant_name || 'restaurant'} with ${menuItems.length} menu items. Please review and submit.`,
+              3
+            );
+            
+            // Don't submit automatically, let user review the extracted data
+          } else {
+            message.error('Failed to extract menu data: ' + (extractResponse.data.error || 'Unknown error'));
+          }
+        } catch (error) {
+          console.error('Error during extraction:', error);
+          message.error('Failed to extract menu data from content');
+        } finally {
+          setExtractingMenuData(false);
+          setProcessing(false);
+        }
+      } else {
+        // No menu content to extract, proceed with basic competitor addition
+        await submitCompetitorWithExtractedData(values);
+      }
+    } catch (error) {
+      console.error('Error in handleAddCompetitor:', error);
+      message.error('An error occurred while processing your request');
+      setProcessing(false);
+    }
+  };
+  
+  // Helper function to submit competitor with extracted data
+  const submitCompetitorWithExtractedData = async (values: any) => {
+    try {
+      setProcessing(true);
+      const token = localStorage.getItem('token');
+      
+      // Prepare the payload for the backend
+      const competitorData: any = {
         name: values.name,
-        category: values.category,
         address: values.address,
+        category: values.category,
+        distance_km: values.distance_km || 0,
         menu_url: values.menu_url || '',
-        distance_km: undefined,
-        selected: true,
-        is_selected: true // CRITICAL: This is the flag the backend uses
+        is_selected: true
       };
       
-      // Save the competitor to the backend using the manually-add endpoint
-      // This endpoint is used elsewhere in the code for adding manual competitors
-      const response = await api.post('gemini-competitors/manually-add', 
-        competitor,
+      // If we have extracted menu items, include them in the request
+      if (extractedMenuData && extractedMenuData.menu_items) {
+        competitorData.menu_items = extractedMenuData.menu_items;
+        console.log(`Including ${extractedMenuData.menu_items.length} menu items in submission:`, extractedMenuData.menu_items);
+      } else {
+        console.warn('No menu items to include in submission!');
+      }
+      
+      console.log('Submitting competitor data:', competitorData);
+      
+      // Send the data to the backend
+      const response = await api.post(
+        'gemini-competitors/manually-add',
+        competitorData,
         {
           headers: {
-            Authorization: `Bearer ${token}`
+            'Authorization': `Bearer ${token}`
           }
         }
       );
       
+      console.log('Competitor addition response:', response.data);
+      
       if (response.data.success) {
-        message.success('Competitor added successfully');
-        setAddModalVisible(false);
-        addForm.resetFields();
+        const menuItemCount = extractedMenuData?.menu_items?.length || 0;
+        message.success(`Successfully added competitor: ${values.name} with ${menuItemCount} menu items`);
         
-        // If we have a valid response with a report_id and the competitor has a menu URL, 
-        // trigger the background menu fetch process
-        if (response.data.competitor && response.data.competitor.report_id && values.menu_url) {
-          const newReportId = response.data.competitor.report_id;
-          const competitorName = values.name;
-          
-          console.log(`Starting background menu fetch for ${competitorName} (ID: ${newReportId})`);
-          
-          try {
-            // Update status to indicate we're starting
-            setMenuFetchStatus(prev => ({
-              ...prev,
-              [newReportId]: 'starting'
-            }));
-            
-            // Call the fetch-menu endpoint to trigger background task
-            const menuResponse = await api.post(
-              `gemini-competitors/fetch-menu/${newReportId}`
-            );
-            
-            if (menuResponse.data.success) {
-              console.log(`Menu fetch queued for ${competitorName}:`, menuResponse.data);
-              message.info(`Menu fetch started for ${competitorName}. This may take a few minutes.`);
-              
-              // Set up polling to check status
-              const intervalId = setInterval(() => checkMenuFetchStatus(newReportId), 5000);
-              
-              // Store the interval ID
-              setPollingIntervals(prev => ({
-                ...prev,
-                [newReportId]: intervalId
-              }));
-              
-              // Update status
-              setMenuFetchStatus(prev => ({
-                ...prev,
-                [newReportId]: 'queued'
-              }));
-            } else {
-              console.error(`Error starting menu fetch for ${competitorName}:`, menuResponse.data);
-              message.error(`Could not start menu fetch: ${menuResponse.data.error || 'Unknown error'}`);
+        // Reset form and state
+        addForm.resetFields();
+        setAddModalVisible(false);
+        setExtractedMenuData(null);
+        
+        // Enable competitor tracking in the database
+        try {
+          const trackingResponse = await api.put(
+            'competitor-settings/tracking-status', 
+            { enabled: true },
+            {
+              headers: {
+                'Authorization': `Bearer ${token}`
+              }
             }
-          } catch (menuError: any) {
-            console.error(`Error starting menu fetch for ${competitorName}:`, menuError);
-            message.error(`Could not start menu fetch: ${menuError.response?.data?.detail || menuError.message}`);
+          );
+          
+          console.log('Updated tracking status response:', trackingResponse.data);
+          
+          if (trackingResponse.data.success) {
+            // Update local state to match database
+            setTrackingEnabled(true);
+            
+            // Make sure we reload competitors to show newly added one with menu items
+            await loadCompetitors();
+            
+            // If menu items were added, also load the menu items for this competitor
+            if (menuItemCount > 0 && response.data.report_id) {
+              console.log(`Loading menu items for new competitor with report_id: ${response.data.report_id}`);
+              // Use the existing fetchCompetitorMenuItems function
+              const menuItems = await fetchCompetitorMenuItems(response.data.report_id);
+              console.log(`Loaded ${menuItems.length} menu items for new competitor`);
+              
+              // Open the menu modal to show the items
+              if (menuItems.length > 0) {
+                // Find the newly added competitor in the competitors list
+                const newCompetitor = competitors.find(c => c.report_id === response.data.report_id);
+                if (newCompetitor) {
+                  handleViewMenu(newCompetitor);
+                }
+              }
+            }
           }
+        } catch (trackingErr) {
+          console.error('Error enabling competitor tracking:', trackingErr);
         }
         
-        // Refresh competitor list (only reached if menu wasn't fetched)
-        loadCompetitors();
+        // Then refresh competitors list
+        try {
+          await loadCompetitors();
+          
+          // Ensure we're showing the main competitors tab
+          setActiveTab('1');
+        } catch (err) {
+          console.error('Error loading competitors after adding:', err);
+          message.error('Added competitor successfully but failed to refresh competitor list');
+        }
       } else {
-        message.error('Failed to add competitor');
+        message.error('Failed to add competitor: ' + (response.data.error || 'Unknown error'));
       }
-    } catch (err: any) {
-      console.error('Error adding competitor:', err);
-      message.error(err.response?.data?.detail || 'Failed to add competitor');
+    } catch (error) {
+      console.error('Error adding competitor:', error);
+      message.error('Failed to add competitor');
     } finally {
       setProcessing(false);
     }
   };
-
-  // Function to handle delete competitor action
-  const handleDeleteCompetitor = async (competitor: Competitor) => {
-    if (!competitor.report_id) return;
-    
-    Modal.confirm({
-      title: `Delete ${competitor.name}?`,
-      content: 'This will permanently remove this competitor and all associated menu data.',
-      okText: 'Yes, Delete',
-      okType: 'danger',
-      cancelText: 'Cancel',
-      onOk: async () => {
-        try {
-          const token = localStorage.getItem('token');
-          if (!token) {
-            message.error('Authentication required');
-            return;
-          }
-          
-          const response = await api.delete(`gemini-competitors/competitors/${competitor.report_id}`, {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          });
-          
-          if (response.data.success) {
-            message.success(`${competitor.name} deleted successfully`);
-            loadCompetitors(); // Refresh the list
-          } else {
-            message.error('Failed to delete competitor');
-          }
-        } catch (err: any) {
-          console.error('Error deleting competitor:', err);
-          message.error(err.response?.data?.detail || 'Failed to delete competitor');
-        }
-      },
-    });
-  };
-
-  const viewMenu = async (report_id: string) => {
-    try {
-      setMenuLoading(true);
-      setMenuVisible(true);
-      
-      // Find the competitor object
-      const competitor = competitors.find(comp => comp.report_id === report_id);
-      if (competitor) {
-        setSelectedCompetitorForMenu(competitor);
-      }
-      
-      // Use the stored menu endpoint instead of fetching again
-      const response = await api.get(`gemini-competitors/get-stored-menu/${report_id}`);
-      
-      if (response.data.success && response.data.menu_items) {
-        setMenuItems(response.data.menu_items);
-      } else {
-        setMenuItems([]);
-      }
-    } catch (err) {
-      console.error('Error fetching menu:', err);
-      message.error('Failed to fetch menu items');
-      setMenuItems([]);
-    } finally {
-      setMenuLoading(false);
-    }
-  };
+  
+  
 
   // Function to check menu fetch status
   const checkMenuFetchStatus = async (report_id: string) => {
@@ -1570,6 +1655,7 @@ const Competitors: React.FC = () => {
             style={{ marginBottom: 16 }}
           />
           <div style={{ textAlign: 'center', padding: '30px 0' }}>
+            <Space>
             <Button 
               type="primary" 
               size="large"
@@ -1581,6 +1667,15 @@ const Competitors: React.FC = () => {
             >
               Set up competitor tracking
             </Button>
+
+            <Button
+                  type="default"
+                  icon={<EditOutlined />}
+                  onClick={() => setAddModalVisible(true)}
+                >
+                  Manual Setup
+                </Button>
+            </Space>            
           </div>
         </Card>
       ) : (
@@ -1609,13 +1704,13 @@ const Competitors: React.FC = () => {
               description="No competitors found"
               image={Empty.PRESENTED_IMAGE_SIMPLE}
             >
-              <Button 
-                type="primary" 
-                icon={<PlusOutlined />}
-                onClick={() => navigate('/feature')}
-              >
-                Add Your First Competitor
-              </Button>
+                <Button 
+                  type="primary" 
+                  icon={<PlusOutlined />}
+                  onClick={() => navigate('/feature')}
+                >
+                  Add Your First Competitor
+                </Button>
             </Empty>
           )}
         </Card>
@@ -2020,41 +2115,142 @@ const Competitors: React.FC = () => {
           layout="vertical"
           onFinish={handleAddCompetitor}
         >
-          <Form.Item
-            label="Name"
-            name="name"
-            rules={[{ required: true, message: 'Please enter competitor name' }]}
-          >
-            <Input placeholder="Competitor name" />
-          </Form.Item>
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="Just paste menu content - we'll extract everything"
+            description="Paste the full content from a restaurant menu page, including the restaurant name, location, and menu items. Our AI will automatically extract all the necessary information."
+          />
           
           <Form.Item
-            label="Category"
-            name="category"
-            rules={[{ required: true, message: 'Please enter competitor category' }]}
-          >
-            <Input placeholder="e.g., Restaurant, Cafe" />
-          </Form.Item>
-          
-          <Form.Item
-            label="Address"
-            name="address"
-            rules={[{ required: true, message: 'Please enter competitor address' }]}
-          >
-            <Input placeholder="Full address" />
-          </Form.Item>
-          
-          <Form.Item
-            label="Menu URL"
+            label="Menu Content"
             name="menu_url"
+            rules={[{ required: true, message: 'Please paste menu content' }]}
+            help={
+              extractingMenuData 
+                ? "Analyzing menu content... Please wait." 
+                : extractedMenuData 
+                  ? `Successfully extracted information! Found ${extractedMenuData.menu_items?.length || 0} menu items.`
+                  : "Paste the entire menu page content here (including restaurant name, location, and menu items)."
+            }
+            validateStatus={extractingMenuData ? "validating" : extractedMenuData ? "success" : undefined}
           >
-            <Input placeholder="https://..." />
+            <Input.TextArea 
+              placeholder="Paste full menu content here..." 
+              autoSize={{ minRows: 6, maxRows: 14 }}
+              disabled={extractingMenuData}
+            />
           </Form.Item>
+          
+          {/* Hidden required competitor fields with default values */}
+          <Form.Item
+            name="name"
+            initialValue="Extracted Restaurant"
+            hidden={true}
+          >
+            <Input />
+          </Form.Item>
+          
+          <Form.Item
+            name="category"
+            initialValue="Restaurant"
+            hidden={true}
+          >
+            <Input />
+          </Form.Item>
+          
+          <Form.Item
+            name="address"
+            initialValue="Extracted Address"
+            hidden={true}
+          >
+            <Input.TextArea />
+          </Form.Item>
+          
+          {extractedMenuData && extractedMenuData.restaurant_info && (
+            <Alert
+              type="success"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message="Restaurant Information Extracted"
+              description={
+                <ul style={{ paddingLeft: 20, margin: 0 }}>
+                  <li><strong>Name:</strong> {extractedMenuData.restaurant_info.restaurant_name}</li>
+                  <li><strong>Category:</strong> {extractedMenuData.restaurant_info.category}</li>
+                  <li><strong>Address:</strong> {extractedMenuData.restaurant_info.address}</li>
+                </ul>
+              }
+            />
+          )}
+          
+          {extractedMenuData && extractedMenuData.menu_items && extractedMenuData.menu_items.length > 0 && (
+            <Alert
+              type="success"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={`Menu Items Found: ${extractedMenuData.menu_items.length}`}
+              description={
+                <div style={{ maxHeight: '150px', overflowY: 'auto' }}>
+                  <ul style={{ paddingLeft: 20, margin: 0 }}>
+                    {extractedMenuData.menu_items.slice(0, 5).map((item: any, index: number) => (
+                      <li key={index}>
+                        <strong>{item.item_name}</strong>
+                        {item.price ? ` - ${typeof item.price === 'number' ? '$' + item.price.toFixed(2) : item.price}` : ''}
+                      </li>
+                    ))}
+                    {extractedMenuData.menu_items.length > 5 && (
+                      <li><em>...and {extractedMenuData.menu_items.length - 5} more items</em></li>
+                    )}
+                  </ul>
+                </div>
+              }
+            />
+          )}
+          
+          {!extractedMenuData && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message="How to copy a menu from a website:"
+              description={
+                <ol style={{ paddingLeft: 16, margin: 0 }}>
+                  <li>Go to the restaurant's menu page</li>
+                  <li>Press Ctrl+A (Windows/Linux) or Cmd+A (Mac) to select all content</li>
+                  <li>Press Ctrl+C (Windows/Linux) or Cmd+C (Mac) to copy</li>
+                  <li>Paste the content into the text area above</li>
+                </ol>
+              }
+            />
+          )}
           
           <Form.Item>
-            <Button type="primary" htmlType="submit">
-              Add Competitor
+            <Button 
+              type="primary" 
+              htmlType="submit"
+              loading={extractingMenuData || processing}
+              disabled={extractingMenuData}
+              onClick={() => {
+                console.log('Submit button clicked, calling form submit');
+                // Force form validation and submission
+                addForm.submit();
+              }}
+            >
+              {extractingMenuData ? 'Analyzing Menu...' : 
+               extractedMenuData ? 'Add Competitor with Menu Items' : 'Add Competitor'}
             </Button>
+            {extractedMenuData && (
+              <Button 
+                style={{ marginLeft: 8 }} 
+                onClick={() => {
+                  setExtractedMenuData(null);
+                  message.info('Menu data cleared. You can paste new content.');
+                }}
+              >
+                Clear Menu Data
+              </Button>
+            )}
           </Form.Item>
         </Form>
       </Modal>

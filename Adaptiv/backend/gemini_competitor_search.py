@@ -7,10 +7,12 @@ import models, schemas
 from auth import get_current_user
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import google.generativeai as genai
+from openai import OpenAI
 from dotenv import load_dotenv
 from celery.result import AsyncResult
+from pydantic import BaseModel
 # Load environment variables
 load_dotenv()
 
@@ -128,6 +130,103 @@ If you cannot find ANY reliable sources, return: []"""
         raise he
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error finding menu URLs: {str(e)}")
+
+
+# Define a Pydantic model for menu content extraction request
+class MenuContentRequest(BaseModel):
+    menu_content: str
+
+@gemini_competitor_router.post("/extract-from-menu-content")
+async def extract_from_menu_content(
+    request: MenuContentRequest
+):
+    """
+    Extract restaurant details and menu items from pasted menu content
+    """
+    try:
+        # Create OpenAI client
+        client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
+        
+        # Extract restaurant information and menu items from pasted content
+        prompt = f"""TASK: Extract restaurant information and ALL menu items from the following menu content.
+
+MENU CONTENT:
+{request.menu_content}
+
+RETURN DATA AS JSON with two parts:
+
+1. Restaurant information:
+{{
+  "restaurant_name": "Name of the restaurant",
+  "category": "Main category like restaurant, cafe, bakery, etc.",
+  "address": "Full address if found in the content"  
+}}
+
+2. Menu items as an array:
+[
+  {{
+    "item_name": "Exact menu item name",
+    "category": "appetizer|main_course|dessert|beverage|side|special",
+    "description": "Item description or null if none",
+    "price": 12.99,
+    "price_currency": "USD"
+  }}
+]
+
+RETURN YOUR RESPONSE IN THIS FORMAT:
+{{
+  "restaurant_info": {{ Restaurant info object }},
+  "menu_items": [ Array of menu items ]
+}}
+
+RULES:
+1. Extract ONLY information explicitly found in the menu content
+2. For restaurant_name, if multiple restaurant names appear, choose the most prominent one
+3. For address, concatenate all address components found
+4. Extract as many menu items as possible with their exact prices
+5. Do not fabricate or guess information
+6. If certain information is not available, use null values
+7. Return an empty array for menu_items if none are found
+
+RETURN ONLY THE JSON OBJECT, no explanations."""
+        
+        # Generate response using OpenAI GPT-4o
+        response = client.chat.completions.create(
+            model="gpt-4.1-nano",
+            messages=[
+                {"role": "system", "content": "You are a specialized AI assistant that extracts structured data from restaurant menu content. Your outputs should be clean JSON objects only."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"}
+        )
+        
+        # Get the response text
+        response_text = response.choices[0].message.content
+        
+        # Clean the response text in case there are any markdown code blocks
+        if "```json" in response_text:
+            extracted_json = response_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in response_text:
+            extracted_json = response_text.split("```")[1].strip()
+        else:
+            extracted_json = response_text.strip()
+        
+        try:
+            result = json.loads(extracted_json)
+            return {
+                "success": True,
+                "restaurant_info": result.get("restaurant_info", {}),
+                "menu_items": result.get("menu_items", [])
+            }
+        except json.JSONDecodeError:
+            return {
+                "success": False,
+                "error": "Failed to parse data from Gemini response",
+                "raw_response": response_text
+            }
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error extracting data from menu content: {str(e)}")
 
 
 @gemini_competitor_router.post("/extract-menu-from-url")
@@ -293,7 +392,7 @@ RETURN ONLY THE JSON ARRAY, no explanations."""
         
         # Generate a unique batch ID and current timestamp for this menu sync
         import uuid
-        from datetime import datetime
+        from datetime import datetime, timedelta
         batch_id = f"{report_id}_{uuid.uuid4().hex[:8]}_{int(datetime.now().timestamp())}"
         sync_timestamp = datetime.now()
         
@@ -398,6 +497,41 @@ async def get_competitor_menu_batches(
     }
 
 
+@gemini_competitor_router.delete("/delete-menu-item/{item_id}", response_model=dict, tags=["Competitors"])
+async def delete_menu_item(
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Delete a specific menu item by ID"""
+    try:
+        # Find the menu item by ID
+        menu_item = db.query(models.CompetitorItem).filter(models.CompetitorItem.id == item_id).first()
+        
+        if not menu_item:
+            return {"success": False, "error": "Menu item not found"}
+        
+        # Get the competitor name before deleting for the response
+        competitor_name = menu_item.competitor_name
+        item_name = menu_item.item_name
+        
+        # Delete the menu item
+        db.delete(menu_item)
+        db.commit()
+        
+        print(f"DEBUG - delete_menu_item: Deleted menu item {item_id} ({item_name}) from {competitor_name}")
+        
+        return {
+            "success": True, 
+            "message": f"Successfully deleted menu item: {item_name}"
+        }
+        
+    except Exception as e:
+        db.rollback()
+        print(f"ERROR - delete_menu_item: {str(e)}")
+        return {"success": False, "error": f"Failed to delete menu item: {str(e)}"}
+
+
 @gemini_competitor_router.get("/get-stored-menu/{report_id}")
 async def get_stored_competitor_menu(
     report_id: int,
@@ -428,15 +562,42 @@ async def get_stored_competitor_menu(
         if not competitor_name:
             raise HTTPException(status_code=404, detail="Competitor name not found")
             
-        # Create a query for the menu items
-        menu_query = db.query(models.CompetitorItem).filter(
+        # Add debug logs for competitor name being queried
+        print(f"DEBUG - get_stored_menu: Looking for menu items for competitor '{competitor_name}'")
+        
+        # Check if we have any menu items for this competitor at all
+        item_count = db.query(models.CompetitorItem).filter(
             models.CompetitorItem.competitor_name == competitor_name
-        )
+        ).count()
+        
+        print(f"DEBUG - get_stored_menu: Found {item_count} total menu items for '{competitor_name}'")
+        
+        # Check if CompetitorItem has user_id attribute before using it
+        has_user_id = hasattr(models.CompetitorItem, 'user_id')
+        print(f"DEBUG - get_stored_menu: CompetitorItem has user_id attribute: {has_user_id}")
+        
+        # Create a query for the menu items
+        if has_user_id:
+            menu_query = db.query(models.CompetitorItem).filter(
+                models.CompetitorItem.competitor_name == competitor_name,
+                models.CompetitorItem.user_id == current_user.id  # Filter by user_id if it exists
+            )
+            # Also check count with user_id filter
+            item_count_with_user = menu_query.count()
+            print(f"DEBUG - get_stored_menu: Found {item_count_with_user} menu items for '{competitor_name}' with user_id={current_user.id}")
+        else:
+            # If user_id attribute doesn't exist, just filter by competitor name
+            menu_query = db.query(models.CompetitorItem).filter(
+                models.CompetitorItem.competitor_name == competitor_name
+            )
+            print(f"DEBUG - get_stored_menu: No user_id field in model, using only competitor name filter")
+        
         
         # If batch_id is provided, filter by that specific batch
         # Otherwise, get the most recent batch
         selected_batch = None
         if batch_id:
+            print(f"DEBUG - get_stored_menu: Filtering by batch_id={batch_id}")
             menu_query = menu_query.filter(models.CompetitorItem.batch_id == batch_id)
             # Get batch details for response
             batch_info = db.query(models.CompetitorItem.batch_id, models.CompetitorItem.sync_timestamp) \
@@ -448,12 +609,26 @@ async def get_stored_competitor_menu(
                     "batch_id": batch_info[0],
                     "sync_timestamp": batch_info[1].isoformat() if batch_info[1] else None
                 }
+                print(f"DEBUG - get_stored_menu: Found batch details: {selected_batch}")
+            else:
+                print(f"DEBUG - get_stored_menu: No batch info found for batch_id={batch_id}")
         else:
             # No batch_id provided, get the most recent batch
-            latest_batch = db.query(models.CompetitorItem.batch_id, models.CompetitorItem.sync_timestamp) \
-                .filter(models.CompetitorItem.competitor_name == competitor_name) \
-                .order_by(desc(models.CompetitorItem.sync_timestamp)) \
-                .first()
+            print(f"DEBUG - get_stored_menu: No batch_id provided, looking for most recent batch")
+            
+            # Check if user_id can be used in the filter
+            if has_user_id:
+                latest_batch = db.query(models.CompetitorItem.batch_id, models.CompetitorItem.sync_timestamp) \
+                    .filter(models.CompetitorItem.competitor_name == competitor_name, 
+                            models.CompetitorItem.user_id == current_user.id) \
+                    .order_by(desc(models.CompetitorItem.sync_timestamp)) \
+                    .first()
+            else:
+                # If no user_id attribute, just filter by competitor name
+                latest_batch = db.query(models.CompetitorItem.batch_id, models.CompetitorItem.sync_timestamp) \
+                    .filter(models.CompetitorItem.competitor_name == competitor_name) \
+                    .order_by(desc(models.CompetitorItem.sync_timestamp)) \
+                    .first()
             
             if latest_batch:
                 batch_id = latest_batch[0]
@@ -462,9 +637,17 @@ async def get_stored_competitor_menu(
                     "batch_id": latest_batch[0],
                     "sync_timestamp": latest_batch[1].isoformat() if latest_batch[1] else None
                 }
+                print(f"DEBUG - get_stored_menu: Found most recent batch: {selected_batch}")
+            else:
+                print(f"DEBUG - get_stored_menu: No batches found at all for this competitor")
         
         # Execute the query
         menu_items = menu_query.all()
+        print(f"DEBUG - get_stored_menu: Query returned {len(menu_items)} menu items")
+        
+        # We've already done the appropriate filtering in the menu_query building above
+        # No need for fallback query here, as it would lead to duplication
+        print(f"DEBUG - get_stored_menu: Query returned {len(menu_items)} menu items, using these results directly")
         
         # Convert to response format
         menu_item_list = []
@@ -474,11 +657,41 @@ async def get_stored_competitor_menu(
                 "category": item.category,
                 "description": item.description,
                 "price": item.price,
-                "price_currency": "USD",  # Default since CompetitorItem might not have this field
-                "availability": "Available",  # Default since CompetitorItem might not have this field
-                "source_confidence": "medium",  # Default since CompetitorItem might not have this field
-                "source_url": item.url if hasattr(item, 'url') else None
+                "price_currency": item.price_currency if hasattr(item, 'price_currency') and item.price_currency else "USD",
+                "availability": "Available",
+                "source_confidence": "high" if getattr(item, 'source', '') == 'manual' else "medium",
+                "source_url": item.url if hasattr(item, 'url') else None,
+                "item_id": item.id  # Include item ID for reference
             })
+            
+        print(f"DEBUG - get_stored_menu: Returning {len(menu_item_list)} formatted menu items")
+        
+        # Add more diagnostic info if no menu items were found
+        if not menu_items:
+            try:
+                # Do a direct SQL query as a last resort
+                from sqlalchemy import text
+                result = db.execute(text(f"SELECT COUNT(*) FROM competitor_items WHERE competitor_name = '{competitor_name}'"))
+                count = result.scalar()
+                print(f"DEBUG - get_stored_menu: Raw SQL count for competitor '{competitor_name}': {count}")
+                
+                if count > 0:
+                    # If items exist but weren't returned by our query, try a direct fetch
+                    print(f"DEBUG - get_stored_menu: Items exist but weren't returned by our query, checking database schema")
+                    # Try to get column names from table
+                    columns_result = db.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='competitor_items'"))
+                    columns = [row[0] for row in columns_result]
+                    print(f"DEBUG - get_stored_menu: CompetitorItem columns: {columns}")
+                    
+                    # Get a sample item
+                    sample_result = db.execute(text(f"SELECT * FROM competitor_items WHERE competitor_name = '{competitor_name}' LIMIT 1"))
+                    sample = sample_result.first()
+                    if sample:
+                        print(f"DEBUG - get_stored_menu: Sample item keys: {sample.keys()}")
+            except Exception as e:
+                print(f"DEBUG - get_stored_menu: Error checking schema: {str(e)}")
+                # Continue despite errors, don't block the response
+        
         
         return {
             "success": True,
@@ -716,17 +929,51 @@ async def add_competitor_manually(
     Manually add a competitor to the database
     """
     try:
+        print("DEBUG - Received competitor data:", competitor_data)
+        
         # Validate required fields
         name = competitor_data.get("name")
         address = competitor_data.get("address")
         category = competitor_data.get("category")
         distance_km = competitor_data.get("distance_km")
         
+        print(f"DEBUG - Extracted fields: name={name}, address={address}, category={category}")
+        
         if not name or not address or not category:
             raise HTTPException(status_code=400, detail="Name, address, and category are required")
             
         # Extract menu_url from the data if it exists
         menu_url = competitor_data.get("menu_url")
+        
+        # Check if there are menu items from LLM extraction 
+        # Looking for JSON-encoded menu items
+        extracted_menu_items = []
+        metadata = {}
+        
+        if menu_url and ('[' in menu_url and ']' in menu_url):
+            # This might be JSON with menu items from the LLM
+            try:
+                # Try to extract menu items from the menu_url field
+                # The frontend encodes extracted items here when using manual setup
+                first_bracket = menu_url.find('[')
+                last_bracket = menu_url.rfind(']') + 1
+                if first_bracket >= 0 and last_bracket > first_bracket:
+                    json_str = menu_url[first_bracket:last_bracket]
+                    extracted_menu_items = json.loads(json_str)
+                    
+                    # Store original menu content in metadata if we parsed menu items
+                    metadata["extracted_menu_items_count"] = len(extracted_menu_items)
+                    # Set a more appropriate menu_url value
+                    menu_url = f"Manually added with {len(extracted_menu_items)} menu items"
+            except json.JSONDecodeError:
+                # Not valid JSON, probably a regular URL or text
+                pass
+                
+        # Try to get menu items directly if they were passed separately
+        menu_items_data = competitor_data.get("menu_items", [])
+        if isinstance(menu_items_data, list) and len(menu_items_data) > 0:
+            extracted_menu_items = menu_items_data
+            metadata["extracted_menu_items_count"] = len(extracted_menu_items)
         
         # Create a competitor report to store all data
         competitor_report = models.CompetitorReport(
@@ -739,32 +986,176 @@ async def add_competitor_manually(
                 "distance_km": distance_km if distance_km else None,
                 "menu_url": menu_url if menu_url else None
             },
+            metadata=metadata,
             created_at=datetime.utcnow(),
             is_selected=True  # Manually added competitors are automatically selected
         )
         db.add(competitor_report)
         
-        # Also create CompetitorItem entry
-        try:
-            competitor_item = models.CompetitorItem(
-                user_id=current_user.id,
-                competitor_name=name,
-                item_name="General",  # Placeholder
-                category=category,
-                price=0.0,  # Placeholder
-                description=address
-            )
-        except Exception as e:
-            # If user_id field doesn't exist, create without it
-            competitor_item = models.CompetitorItem(
-                competitor_name=name,
-                item_name="General",  # Placeholder
-                category=category,
-                price=0.0,  # Placeholder
-                description=address
-            )
+        # Generate a batch ID for the menu items
+        import uuid
+        batch_id = f"manual_{uuid.uuid4().hex[:8]}_{int(datetime.now().timestamp())}"
+        sync_timestamp = datetime.now()
         
-        db.add(competitor_item)
+        # Process extracted menu items if available
+        print(f"DEBUG - Processing {len(extracted_menu_items)} menu items")
+        if extracted_menu_items:
+            # First, check if we already have menu items for this competitor with this batch_id
+            # to avoid duplicate entries
+            existing_items_count = db.query(models.CompetitorItem).filter(
+                models.CompetitorItem.competitor_name == name
+            ).count()
+            
+            print(f"DEBUG - Found {existing_items_count} existing menu items for competitor '{name}'")
+            
+            if existing_items_count > 0:
+                print("DEBUG - This competitor already has menu items, checking if we should update instead of add")
+                # If there are existing items with the same batch_id or recent timestamp,
+                # we'll just log and skip to avoid duplicates
+                recent_items = db.query(models.CompetitorItem).filter(
+                    models.CompetitorItem.competitor_name == name,
+                    models.CompetitorItem.sync_timestamp >= datetime.now() - timedelta(minutes=10)
+                ).all()
+                
+                if recent_items:
+                    print(f"DEBUG - Found {len(recent_items)} recent items added in the last 10 minutes")
+                    print("DEBUG - Skipping menu item creation to avoid duplicates")
+                    # We'll return success since we already have the items
+                    return {
+                        "success": True,
+                        "competitor": {
+                            "name": name,
+                            "address": address,
+                            "category": category,
+                            "report_id": competitor_report.id
+                        },
+                        "menu_items": [],  # Empty list since we're not creating new ones
+                        "message": "Competitor successfully added. Menu items already exist."
+                    }
+            
+            items_saved = 0
+            # Create a set to track items we've already processed to avoid duplicates
+            processed_items = set()
+            
+            for item in extracted_menu_items:
+                try:
+                    # Log the item we're processing
+                    print(f"DEBUG - Processing menu item: {item}")
+                    
+                    # Create a key for this item to detect duplicates in the same batch
+                    item_name = str(item.get("item_name", "") or "")
+                    if not item_name.strip():
+                        item_name = "Unnamed Item"
+                    
+                    item_price = item.get("price", 0)
+                    item_key = f"{item_name}:{item_price}"
+                    
+                    # Skip if we've seen this item already
+                    if item_key in processed_items:
+                        print(f"DEBUG - Skipping duplicate item: {item_key}")
+                        continue
+                    
+                    # Add to our processed set
+                    processed_items.add(item_key)
+                    
+                    # Handle null prices by converting to 0.0
+                    price = item.get("price")
+                    price_float = 0.0
+                    
+                    if price is not None:
+                        try:
+                            price_float = float(price)
+                        except (ValueError, TypeError):
+                            print(f"Invalid price format: {price}, defaulting to 0.0")
+                    
+                    # Get item name and category with defaults
+                    item_name = str(item.get("item_name", "") or "")
+                    if not item_name.strip():
+                        item_name = "Unnamed Item"
+                    
+                    item_category = str(item.get("category") or category or "other")
+                    
+                    # Check if CompetitorItem has user_id attribute
+                    has_user_id = hasattr(models.CompetitorItem, 'user_id')
+                    print(f"DEBUG - add_competitor_manually: CompetitorItem has user_id field: {has_user_id}")
+                    
+                    try:
+                        # Create based on whether user_id field exists
+                        if has_user_id:
+                            menu_item = models.CompetitorItem(
+                                competitor_name=name,
+                                item_name=item_name,
+                                description=item.get("description", ""),
+                                category=item_category,
+                                price=price_float,
+                                price_currency=item.get("price_currency", "USD"),
+                                url=address,  # Using address as reference
+                                batch_id=batch_id,
+                                sync_timestamp=sync_timestamp,
+                                user_id=current_user.id,  # Link to the current user
+                                source="manual"  # Mark this as manually added
+                            )
+                        else:
+                            menu_item = models.CompetitorItem(
+                                competitor_name=name,
+                                item_name=item_name,
+                                description=item.get("description", ""),
+                                category=item_category,
+                                price=price_float,
+                                price_currency=item.get("price_currency", "USD"), 
+                                url=address,  # Using address as reference
+                                batch_id=batch_id,
+                                sync_timestamp=sync_timestamp,
+                                source="manual"  # Mark this as manually added
+                            )
+                    except Exception as model_error:
+                        # Fallback for any model-related issues
+                        print(f"Error creating menu item: {str(model_error)}")
+                        # Create a minimal version as last resort
+                        menu_item = models.CompetitorItem(
+                            competitor_name=name,
+                            item_name=item_name,
+                            category=item_category,
+                            price=price_float,
+                            batch_id=batch_id,
+                            sync_timestamp=sync_timestamp
+                        )
+                    
+                    db.add(menu_item)
+                    items_saved += 1
+                except Exception as item_error:
+                    print(f"Error processing menu item: {str(item_error)}")
+                    # Continue with the next item even if this one fails
+            
+            print(f"DEBUG - Successfully added {items_saved}/{len(extracted_menu_items)} menu items to database")
+        else:
+            # If no menu items, create a placeholder entry
+            try:
+                competitor_item = models.CompetitorItem(
+                    user_id=current_user.id,
+                    competitor_name=name,
+                    item_name="General",  # Placeholder
+                    category=category,
+                    price=0.0,  # Placeholder
+                    description=address,
+                    batch_id=batch_id,
+                    sync_timestamp=sync_timestamp
+                )
+            except Exception as e:
+                # If user_id field doesn't exist
+                competitor_item = models.CompetitorItem(
+                    competitor_name=name,
+                    item_name="General",  # Placeholder
+                    category=category,
+                    price=0.0,  # Placeholder
+                    description=address,
+                    batch_id=batch_id,
+                    sync_timestamp=sync_timestamp
+                )
+            
+            db.add(competitor_item)
+        
+        # Commit all changes
         db.commit()
         
         # Return the newly created competitor
@@ -776,7 +1167,8 @@ async def add_competitor_manually(
                 "category": category,
                 "distance_km": distance_km,
                 "report_id": competitor_report.id,
-                "created_at": competitor_report.created_at
+                "created_at": competitor_report.created_at,
+                "menu_items_count": len(extracted_menu_items) if extracted_menu_items else 0
             }
         }
     except Exception as e:
