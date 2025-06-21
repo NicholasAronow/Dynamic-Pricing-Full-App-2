@@ -8,6 +8,9 @@ from datetime import datetime
 import asyncio
 import logging
 
+# Import Knock integration
+from knock_integration import knock_client
+
 # Import Celery tasks
 from tasks import run_dynamic_pricing_analysis_task, get_dynamic_pricing_task_status
 
@@ -57,9 +60,13 @@ async def run_full_analysis(
         'started_at': datetime.now().isoformat()
     }
     
+    # Helper function to run the async task in the background
+    async def run_async_task(user_id, task_id, trigger_source):
+        await _run_analysis_task(user_id, task_id, trigger_source)
+        
     # Run analysis in background
     background_tasks.add_task(
-        _run_analysis_task,
+        run_async_task,
         user_id,
         task_id,
         "api_trigger"
@@ -819,7 +826,7 @@ def analyze_openai_agent_output(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # Background task function
-def _run_analysis_task(user_id: int, task_id: str, trigger_source: str):
+async def _run_analysis_task(user_id: int, task_id: str, trigger_source: str):
     """
     Background task to run the full analysis
     """
@@ -848,6 +855,7 @@ def _run_analysis_task(user_id: int, task_id: str, trigger_source: str):
             # Log the actual results structure
             logger.info(f"Analysis results structure: {list(results_data.keys())}")
             
+            # Update task with completed status and results
             running_tasks[user_id].update({
                 'status': 'completed',
                 'completed_at': datetime.now().isoformat(),
@@ -864,6 +872,41 @@ def _run_analysis_task(user_id: int, task_id: str, trigger_source: str):
             logger.info(f"Recommendations length: {len(running_tasks[user_id]['results']['consolidated_recommendations'])}")
             logger.info(f"Next steps length: {len(running_tasks[user_id]['results']['next_steps'])}")
             
+            # Fetch user information to send notifications
+            try:
+                user = db.query(models.User).filter(models.User.id == user_id).first()
+                
+                if user:
+                    # Get the user's email for notification
+                    email_recipients = [user.email]  # Start with the user's email
+                    
+                    # Get any additional recipients from user preferences if available
+                    try:
+                        preferences = db.query(models.UserPreferences).filter(
+                            models.UserPreferences.user_id == user_id
+                        ).first()
+                        
+                        if preferences and preferences.report_notification_emails:
+                            additional_emails = preferences.report_notification_emails.split(",")
+                            for email in additional_emails:
+                                if email.strip():
+                                    email_recipients.append(email.strip())
+                    except Exception as pref_err:
+                        logger.error(f"Error getting notification preferences: {str(pref_err)}")
+                    
+                    # Send the notification with the updated function signature
+                    notification_sent = await knock_client.send_pricing_report_notification(
+                        recipients=email_recipients,
+                        report_data=running_tasks[user_id],
+                        user_id=user_id
+                    )
+                    
+                    if notification_sent:
+                        logger.info(f"Pricing report notification sent to {len(email_recipients)} recipient(s)")
+                    else:
+                        logger.warning("Failed to send pricing report notification")
+            except Exception as notify_err:
+                logger.error(f"Error sending notification: {str(notify_err)}")
             
     except Exception as e:
         logger.error(f"Error in background analysis task: {str(e)}")
