@@ -1298,19 +1298,21 @@ const Competitors: React.FC = () => {
             const restaurantInfo = extractResponse.data.restaurant_info;
             const menuItems = extractResponse.data.menu_items || [];
             
-            // Store the extracted data
-            setExtractedMenuData(extractResponse.data);
-            
             // Create updated form values with extracted restaurant data
             const updatedValues = {
               ...values,
               name: restaurantInfo.restaurant_name || values.name || '',
               category: restaurantInfo.category || values.category || '',
-              address: restaurantInfo.address || values.address || ''
+              address: restaurantInfo.address || '',
+              // Include the menu items directly
+              extractedMenuItems: menuItems
             };
             
             // Update the form UI for the user
             addForm.setFieldsValue(updatedValues);
+            
+            // Store the extracted data
+            setExtractedMenuData(extractResponse.data);
             
             // Show temporary message about extraction before submission
             message.loading(
@@ -1357,10 +1359,15 @@ const Competitors: React.FC = () => {
         is_selected: true
       };
       
-      // If we have extracted menu items, include them in the request
-      if (extractedMenuData && extractedMenuData.menu_items) {
+      // First check if menu items were passed directly in values
+      if (values.extractedMenuItems && values.extractedMenuItems.length > 0) {
+        competitorData.menu_items = values.extractedMenuItems;
+        console.log(`Including ${values.extractedMenuItems.length} menu items passed directly in values:`, values.extractedMenuItems);
+      }
+      // As a fallback, check if we have menu items in the global state
+      else if (extractedMenuData && extractedMenuData.menu_items) {
         competitorData.menu_items = extractedMenuData.menu_items;
-        console.log(`Including ${extractedMenuData.menu_items.length} menu items in submission:`, extractedMenuData.menu_items);
+        console.log(`Including ${extractedMenuData.menu_items.length} menu items from global state:`, extractedMenuData.menu_items);
       } else {
         console.warn('No menu items to include in submission!');
       }
