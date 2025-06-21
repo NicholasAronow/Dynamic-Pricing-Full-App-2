@@ -880,7 +880,7 @@ const DynamicPricingAgents: React.FC = () => {
                           <Option key={batch.batch_id} value={batch.batch_id}>
                             {batch.batch_id.startsWith('legacy_batch_') 
                               ? `Legacy Batch (${new Date(batch.recommendation_date).toLocaleDateString()})` 
-                              : `Batch ${batch.batch_id.substring(0, 8)}... (${new Date(batch.recommendation_date).toLocaleDateString()}) - ${batch.count} items`}
+                              : `${new Date(batch.recommendation_date).toLocaleDateString()} Report - ${batch.count} items`}
                           </Option>
                         ))}
                       </Select>
