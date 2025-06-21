@@ -43,16 +43,16 @@ interface BusinessProfile {
 
 // TypeScript interface for menu item data
 interface MenuItem {
+  item_id: number;  // Field from backend API
   item_name: string;
+  description: string;
   category: string;
-  description?: string | null;
-  price: number | null;
-  price_currency: string;
-  availability?: string;
+  price: number;
+  price_currency?: string;
   source_confidence?: string;
   source_url?: string;
   batch_id?: string;
-  sync_timestamp?: string;
+  competitor_name?: string;
 }
 
 // TypeScript interface for menu batch data
@@ -470,6 +470,7 @@ const Competitors: React.FC = () => {
           '-';
       },
     },
+    
     {
       title: 'Last Updated',
       dataIndex: 'last_sync',
@@ -513,7 +514,14 @@ const Competitors: React.FC = () => {
             onClick={() => handleEditCompetitor(record)}
             size="small"
           />
-          
+          <Button
+          type="text"
+          size="small"
+          danger
+          icon={<DeleteOutlined />}
+          onClick={() => handleDeleteCompetitor(record.report_id, record.name)}
+          title="Delete competitor"
+        />
         </Space>
       ),
     },
@@ -1411,6 +1419,82 @@ const Competitors: React.FC = () => {
   
   
 
+  // Handler for deleting menu items
+  const handleDeleteMenuItem = async (itemId: number, itemName: string) => {
+    Modal.confirm({
+      title: 'Delete Menu Item',
+      content: `Are you sure you want to delete "${itemName}"? This action cannot be undone.`,
+      okText: 'Delete',
+      okType: 'danger',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        try {
+          console.log(`Deleting menu item ${itemId}: ${itemName}`);
+          const response = await api.delete(`gemini-competitors/delete-menu-item/${itemId}`, {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem('token')}`
+            }
+          });
+          
+          if (response.data.success) {
+            message.success(`Successfully deleted "${itemName}"`);
+            
+            // Remove the deleted item from the current menu items state
+            setCompetitorMenuItems(prev => 
+              prev.filter(item => item.item_id !== itemId)
+            );
+          } else {
+            message.error(response.data.error || 'Failed to delete item');
+          }
+        } catch (error) {
+          console.error('Error deleting menu item:', error);
+          message.error('Failed to delete menu item');
+        }
+      }
+    });
+  };
+  
+  // Handler for deleting competitors
+  const handleDeleteCompetitor = async (reportId: string, compName: string) => {
+    Modal.confirm({
+      title: 'Delete Competitor',
+      content: `Are you sure you want to delete "${compName}" and all its menu items? This action cannot be undone.`,
+      okText: 'Delete',
+      okType: 'danger',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        try {
+          console.log(`Deleting competitor ${reportId}: ${compName}`);
+          const response = await api.delete(`gemini-competitors/competitors/${reportId}`, {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem('token')}`
+            }
+          });
+          
+          if (response.data && response.data.success) {
+            message.success(`Successfully deleted competitor "${compName}"`);
+            
+            // Remove the deleted competitor from state
+            setCompetitors(prev => prev.filter(comp => comp.report_id !== reportId));
+            
+            // If this was the selected competitor, clear that selection
+            if (selectedCompetitorId === reportId) {
+              setSelectedCompetitorId(null);
+              setSelectedBatchId(null);
+              setCompetitorMenuItems([]);
+              setMenuBatches([]);
+            }
+          } else {
+            message.error(response.data?.error || 'Failed to delete competitor');
+          }
+        } catch (error) {
+          console.error('Error deleting competitor:', error);
+          message.error('Failed to delete competitor');
+        }
+      }
+    });
+  };
+
   // Function to check menu fetch status
   const checkMenuFetchStatus = async (report_id: string) => {
     try {
@@ -1840,6 +1924,21 @@ const Competitors: React.FC = () => {
                           <LinkOutlined />
                         </a>
                       ) : '-'
+                    },
+                    {
+                      title: 'Action',
+                      key: 'action',
+                      width: 80,
+                      render: (_, record) => (
+                        <Button 
+                          type="text" 
+                          size="small" 
+                          danger
+                          icon={<DeleteOutlined />}
+                          onClick={() => handleDeleteMenuItem(record.item_id, record.item_name)}
+                          title="Delete item"
+                        />
+                      )
                     }
                   ]}
                 />
