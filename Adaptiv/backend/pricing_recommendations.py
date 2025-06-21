@@ -279,7 +279,8 @@ def get_recommendation_batches(
         # Get distinct batch_ids and their most recent dates
         batch_query = db.query(
             PricingRecommendation.batch_id,
-            desc(PricingRecommendation.recommendation_date),
+            # Use MAX to get the most recent date per batch
+            func.max(PricingRecommendation.recommendation_date).label('max_date'),
             # Use func.count to count recommendations per batch
             func.count(PricingRecommendation.id).label('count')
         ).filter(
@@ -288,7 +289,8 @@ def get_recommendation_batches(
         ).group_by(
             PricingRecommendation.batch_id
         ).order_by(
-            desc(PricingRecommendation.recommendation_date)
+            # Order by the max date
+            desc(func.max(PricingRecommendation.recommendation_date))
         )
         
         # Execute the query and format results
