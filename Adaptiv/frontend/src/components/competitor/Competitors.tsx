@@ -1312,13 +1312,14 @@ const Competitors: React.FC = () => {
             // Update the form UI for the user
             addForm.setFieldsValue(updatedValues);
             
-            // Show success message with extracted information
-            message.success(
-              `Successfully extracted information for ${restaurantInfo.restaurant_name || 'restaurant'} with ${menuItems.length} menu items. Please review and submit.`,
-              3
+            // Show temporary message about extraction before submission
+            message.loading(
+              `Successfully extracted information for ${restaurantInfo.restaurant_name || 'restaurant'} with ${menuItems.length} menu items. Submitting...`,
+              2
             );
             
-            // Don't submit automatically, let user review the extracted data
+            // Automatically submit the competitor with the extracted data
+            await submitCompetitorWithExtractedData(updatedValues);
           } else {
             message.error('Failed to extract menu data: ' + (extractResponse.data.error || 'Unknown error'));
           }
@@ -2357,8 +2358,7 @@ const Competitors: React.FC = () => {
                 addForm.submit();
               }}
             >
-              {extractingMenuData ? 'Analyzing Menu...' : 
-               extractedMenuData ? 'Add Competitor with Menu Items' : 'Add Competitor'}
+              {extractingMenuData ? 'Analyzing Menu...' : 'Add Competitor'}
             </Button>
             {extractedMenuData && (
               <Button 
