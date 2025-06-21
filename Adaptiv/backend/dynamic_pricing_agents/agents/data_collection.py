@@ -214,6 +214,7 @@ class DataCollectionAgent(BaseAgent):
             if item.order_id not in order_items_map:
                 order_items_map[item.order_id] = []
             order_items_map[item.order_id].append(item)
+            self.logger.info(f"Cost: {item.cost}, Current Price: {item.current_price}")
         
         # Get items and their sales
         items = db.query(models.Item).filter(models.Item.user_id == user_id).all()
