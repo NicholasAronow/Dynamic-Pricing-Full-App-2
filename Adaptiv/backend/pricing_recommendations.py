@@ -294,11 +294,18 @@ def get_recommendation_batches(
         # Execute the query and format results
         batches = batch_query.all()
         
+        # Debug the batch query results
+        print(f"Found {len(batches)} batches for user {user_id}")
+        for i, batch in enumerate(batches):
+            print(f"Batch {i}: {batch}")
+            
         for batch in batches:
+            # The query returns tuples with (batch_id, date, count)
+            batch_id, rec_date, count = batch
             result.append(BatchInfo(
-                batch_id=batch.batch_id,
-                recommendation_date=batch[1],  # Most recent date for this batch
-                count=batch.count
+                batch_id=batch_id,
+                recommendation_date=rec_date,
+                count=count
             ))
             
         return result
