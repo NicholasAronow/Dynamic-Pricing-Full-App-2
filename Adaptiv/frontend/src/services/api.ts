@@ -8,7 +8,8 @@ let baseUrlFromEnv;
 // Check if we're running in the deployed Vercel environment
 const isVercel = typeof window !== 'undefined' && 
                  (window.location.hostname.includes('vercel.app') || 
-                  window.location.hostname.includes('adaptiv-eight'));
+                  window.location.hostname.includes('adaptiv-eight') ||
+                  window.location.hostname.includes('adaptiv'));
 
 if (isVercel) {
   // Hard-code the Render backend URL for deployed versions

@@ -49,6 +49,7 @@ app.add_middleware(
         "https://*.vercel.app",
         "https://adaptiv-dynamic-pricing.vercel.app",
         "https://adaptiv-eight.vercel.app",
+        "https://www.adaptiv.one",
         "https://adaptiv-l9z8a1e32-nicholasaronows-projects.vercel.app"
     ],
     allow_credentials=True,
