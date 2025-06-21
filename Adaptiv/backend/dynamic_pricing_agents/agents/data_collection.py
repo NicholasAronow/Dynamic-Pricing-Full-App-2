@@ -214,10 +214,26 @@ class DataCollectionAgent(BaseAgent):
             if item.order_id not in order_items_map:
                 order_items_map[item.order_id] = []
             order_items_map[item.order_id].append(item)
-            self.logger.info(f"Cost: {item.cost}, Current Price: {item.current_price}")
         
         # Get items and their sales
         items = db.query(models.Item).filter(models.Item.user_id == user_id).all()
+        
+        # Import Recipe models
+        from recipe_models import Recipe, RecipeIngredient
+        
+        # Get recipes for cost calculation (keyed by recipe name which matches item name)
+        recipes = db.query(Recipe).filter(Recipe.user_id == user_id).all()
+        recipe_map = {recipe.name.lower(): recipe for recipe in recipes}
+        
+        # Function to get item cost either directly or from recipe
+        def get_item_cost(item):
+            if item.cost is not None:
+                return float(item.cost)
+            # Try to find a recipe with matching name
+            recipe = recipe_map.get(item.name.lower())
+            if recipe:
+                return recipe.calculate_cost()
+            return None
         
         # Aggregate sales data
         order_data = []
@@ -235,15 +251,21 @@ class DataCollectionAgent(BaseAgent):
                 } for oi in order_items]
             })
         
-        self.logger.info({
-            "orders": order_data,
-            "items": [{
+        # Prepare items data with costs
+        items_data = []
+        for item in items:
+            cost = get_item_cost(item)
+            items_data.append({
                 "id": item.id,
                 "name": item.name,
                 "category": item.category,
                 "current_price": float(item.current_price),
-                "cost": float(item.cost) if item.cost else None
-            } for item in items],
+                "cost": float(cost) if cost is not None else None
+            })
+        
+        self.logger.info({
+            "orders": order_data,
+            "items": items_data,
             "summary": {
                 "total_orders": len(recent_orders),
                 "date_range": {
@@ -255,13 +277,7 @@ class DataCollectionAgent(BaseAgent):
 
         return {
             "orders": order_data,
-            "items": [{
-                "id": item.id,
-                "name": item.name,
-                "category": item.category,
-                "current_price": float(item.current_price),
-                "cost": float(item.cost) if item.cost else None
-            } for item in items],
+            "items": items_data,
             "summary": {
                 "total_orders": len(recent_orders),
                 "date_range": {
