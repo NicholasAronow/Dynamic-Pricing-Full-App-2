@@ -6,11 +6,13 @@ import asyncio
 import logging
 from typing import Dict, List, Any, Optional
 import json
+from datetime import datetime
 
 from ..base_agent import BaseAgent
 from .data_collection import DataCollectionAgent
 from .test_db_agent import TestDBAgentWrapper
 from .test_web_agent import TestWebAgentWrapper
+from ...knock_integration import KnockClient
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -82,6 +84,9 @@ class AggregatePricingAgent(BaseAgent):
             pricing_recommendations = await self._generate_price_recommendations(aggregated_results)
             logger.info(f"Generated pricing recommendations for {len(pricing_recommendations)} items")
             
+            # Step 6: Send notification email with pricing recommendations
+            await self._send_notification(pricing_recommendations, safe_context)
+            
             return {
                 "success": True,
                 "pricing_recommendations": pricing_recommendations,
@@ -93,6 +98,63 @@ class AggregatePricingAgent(BaseAgent):
                 "success": False,
                 "error": str(e)
             }
+            
+    async def _send_notification(self, pricing_recommendations: List[Dict[str, Any]], context: Dict[str, Any]):
+        """
+        Send a notification with pricing recommendations
+        """
+        try:
+            # Skip if there are no recommendations
+            if not pricing_recommendations or len(pricing_recommendations) == 0:
+                logger.info("No pricing recommendations to send notification for")
+                return
+                
+            # Get user information for notification
+            user_id = context.get('user_id')
+            if not user_id:
+                logger.warning("Cannot send notification: no user_id in context")
+                return
+                
+            # Try to get recipient email from context
+            recipient_email = None
+            if 'user_email' in context:
+                recipient_email = context['user_email']
+            elif 'email' in context:
+                recipient_email = context['email']
+                
+            if not recipient_email:
+                logger.warning("Cannot send notification: no recipient email found in context")
+                return
+                
+            # Create a correctly structured report data object for the notification
+            report_data = {
+                "task_id": context.get('task_id', f"task_{datetime.now().timestamp()}"),
+                "completed_at": datetime.now().isoformat(),
+                "status": "completed",
+                "results": {
+                    "pricing_recommendations": pricing_recommendations
+                }
+            }
+            
+            # Initialize Knock client
+            knock_client = KnockClient()
+            
+            # Send notification
+            logger.info(f"Sending pricing report notification to {recipient_email}")
+            notification_sent = await knock_client.send_pricing_report_notification(
+                report_data=report_data,
+                recipients=[recipient_email],
+                user_id=user_id
+            )
+            
+            if notification_sent:
+                logger.info(f"Pricing report notification sent successfully to {recipient_email}")
+            else:
+                logger.warning(f"Failed to send pricing report notification to {recipient_email}")
+                
+        except Exception as e:
+            logger.error(f"Error sending notification: {str(e)}")
+            # Don't re-raise the exception since this is a non-critical feature
     
     def _aggregate_results(self, data_collection_results: Dict[str, Any], 
                            competitor_results: List[Dict[str, Any]], 

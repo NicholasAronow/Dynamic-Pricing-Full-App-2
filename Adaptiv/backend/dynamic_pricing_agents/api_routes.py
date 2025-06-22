@@ -872,64 +872,10 @@ async def _run_analysis_task(user_id: int, task_id: str, trigger_source: str):
             logger.info(f"Recommendations length: {len(running_tasks[user_id]['results']['consolidated_recommendations'])}")
             logger.info(f"Next steps length: {len(running_tasks[user_id]['results']['next_steps'])}")
             
-            # Fetch user information to send notifications
-            try:
-                user = db.query(models.User).filter(models.User.id == user_id).first()
-                
-                if user:
-                    # Get the user's email for notification
-                    email_recipients = [user.email]  # Start with the user's email
-                    
-                    # Get any additional recipients from user preferences if available
-                    try:
-                        preferences = db.query(models.UserPreferences).filter(
-                            models.UserPreferences.user_id == user_id
-                        ).first()
-                        
-                        if preferences and preferences.report_notification_emails:
-                            additional_emails = preferences.report_notification_emails.split(",")
-                            for email in additional_emails:
-                                if email.strip():
-                                    email_recipients.append(email.strip())
-                    except Exception as pref_err:
-                        logger.error(f"Error getting notification preferences: {str(pref_err)}")
-                    
-                    # Format report data correctly for the notification
-                    # Make sure we include pricing_recommendations in the results
-                    # Check if we have pricing recommendations from the results
-                    pricing_recommendations = []
-                    if results_data.get('pricing_recommendations'):
-                        pricing_recommendations = results_data.get('pricing_recommendations')
-                    elif results_data.get('analysis_results', {}).get('pricing_recommendations'):
-                        pricing_recommendations = results_data.get('analysis_results', {}).get('pricing_recommendations')
-                        
-                    # Create properly formatted report data for notification
-                    report_data_for_notification = {
-                        "task_id": task_id,
-                        "completed_at": running_tasks[user_id].get('completed_at'),
-                        "status": "completed",
-                        "results": {
-                            # Include pricing recommendations for the email template
-                            "pricing_recommendations": pricing_recommendations,
-                            # Include other results data for context
-                            "executive_summary": running_tasks[user_id].get('results', {}).get('executive_summary', {}),
-                            "consolidated_recommendations": running_tasks[user_id].get('results', {}).get('consolidated_recommendations', [])
-                        }
-                    }
-                    
-                    # Send the notification with the updated function signature
-                    notification_sent = await knock_client.send_pricing_report_notification(
-                        recipients=email_recipients,
-                        report_data=report_data_for_notification,
-                        user_id=user_id
-                    )
-                    
-                    if notification_sent:
-                        logger.info(f"Pricing report notification sent to {len(email_recipients)} recipient(s)")
-                    else:
-                        logger.warning("Failed to send pricing report notification")
-            except Exception as notify_err:
-                logger.error(f"Error sending notification: {str(notify_err)}")
+            # Notification is now sent directly from the AggregatePricingAgent
+            # No need to send notifications here
+            logger.info("Pricing report task completed - notification handled by agent")
+            pass
             
     except Exception as e:
         logger.error(f"Error in background analysis task: {str(e)}")
