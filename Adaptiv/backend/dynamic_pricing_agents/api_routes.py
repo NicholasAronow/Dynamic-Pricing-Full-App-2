@@ -894,10 +894,33 @@ async def _run_analysis_task(user_id: int, task_id: str, trigger_source: str):
                     except Exception as pref_err:
                         logger.error(f"Error getting notification preferences: {str(pref_err)}")
                     
+                    # Format report data correctly for the notification
+                    # Make sure we include pricing_recommendations in the results
+                    # Check if we have pricing recommendations from the results
+                    pricing_recommendations = []
+                    if results_data.get('pricing_recommendations'):
+                        pricing_recommendations = results_data.get('pricing_recommendations')
+                    elif results_data.get('analysis_results', {}).get('pricing_recommendations'):
+                        pricing_recommendations = results_data.get('analysis_results', {}).get('pricing_recommendations')
+                        
+                    # Create properly formatted report data for notification
+                    report_data_for_notification = {
+                        "task_id": task_id,
+                        "completed_at": running_tasks[user_id].get('completed_at'),
+                        "status": "completed",
+                        "results": {
+                            # Include pricing recommendations for the email template
+                            "pricing_recommendations": pricing_recommendations,
+                            # Include other results data for context
+                            "executive_summary": running_tasks[user_id].get('results', {}).get('executive_summary', {}),
+                            "consolidated_recommendations": running_tasks[user_id].get('results', {}).get('consolidated_recommendations', [])
+                        }
+                    }
+                    
                     # Send the notification with the updated function signature
                     notification_sent = await knock_client.send_pricing_report_notification(
                         recipients=email_recipients,
-                        report_data=running_tasks[user_id],
+                        report_data=report_data_for_notification,
                         user_id=user_id
                     )
                     

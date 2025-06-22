@@ -50,8 +50,8 @@ const MainLayout: React.FC = () => {
     <Layout style={{ background: '#fff' }}>
       <Sider width={250} style={{ background: '#fff', borderRight: '1px solid #e8e8e8' }}>
         <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-          <div className="logo" style={{ color: '#9370DB' }}>
-            Adaptiv
+          <div className="logo" style={{ color: '#9370DB', padding: '16px 0' }}>
+            <span style={{ fontFamily: '"Poppins", "Montserrat", sans-serif', fontSize: '24px', fontWeight: 700, letterSpacing: '-0.5px' }}>Adaptiv</span>
           </div>
           <Menu theme="light" mode="inline" selectedKeys={[location.pathname]} style={{ flex: '1 0 auto' }}>
           <Menu.Item key="/" icon={<HomeOutlined style={{ fontSize: '18px', color: '#7546C9' }} />}>
