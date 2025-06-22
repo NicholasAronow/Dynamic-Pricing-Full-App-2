@@ -55,9 +55,22 @@ class KnockClient:
             for rec in pricing_recommendations:
                 # Extract price information directly from the recommendation object
                 item_name = rec.get("item_name", "Unknown Item")
-                current_price = rec.get("current_price", 0)
-                recommended_price = rec.get("recommended_price", 0)
-                price_change_percent = rec.get("price_change_percent", 0)
+                
+                # Ensure numeric values are properly converted from strings if needed
+                try:
+                    current_price = float(rec.get("current_price", 0))
+                except (TypeError, ValueError):
+                    current_price = 0.0
+                    
+                try:
+                    recommended_price = float(rec.get("recommended_price", 0))
+                except (TypeError, ValueError):
+                    recommended_price = 0.0
+                    
+                try:
+                    price_change_percent = float(rec.get("price_change_percent", 0))
+                except (TypeError, ValueError):
+                    price_change_percent = 0.0
                 
                 # Format price change display
                 change_direction = "increase" if price_change_percent >= 0 else "decrease"
