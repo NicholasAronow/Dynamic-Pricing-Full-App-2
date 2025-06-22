@@ -56,19 +56,41 @@ class KnockClient:
                 # Extract price information directly from the recommendation object
                 item_name = rec.get("item_name", "Unknown Item")
                 
+                # Log the keys in this recommendation for debugging
+                logger.debug(f"Available keys in recommendation: {rec.keys()}")
+                
+                # Use correct field names from agent (_generate_price_recommendations)
+                # Field mapping between agent output and expected fields:
+                # current_price -> current_price
+                # suggested_price -> recommended_price
+                # change_percentage -> price_change_percent
+                
                 # Ensure numeric values are properly converted from strings if needed
                 try:
-                    current_price = float(rec.get("current_price", 0))
+                    # Try current_price directly or strip $ if present
+                    current_price_val = rec.get("current_price", 0)
+                    if isinstance(current_price_val, str) and '$' in current_price_val:
+                        current_price_val = current_price_val.replace('$', '').strip()
+                    current_price = float(current_price_val)
                 except (TypeError, ValueError):
                     current_price = 0.0
                     
                 try:
-                    recommended_price = float(rec.get("recommended_price", 0))
+                    # Try both field names for recommended price
+                    recommended_price_val = rec.get("suggested_price", rec.get("recommended_price", 0))
+                    if isinstance(recommended_price_val, str) and '$' in recommended_price_val:
+                        recommended_price_val = recommended_price_val.replace('$', '').strip()
+                    recommended_price = float(recommended_price_val)
                 except (TypeError, ValueError):
                     recommended_price = 0.0
                     
                 try:
-                    price_change_percent = float(rec.get("price_change_percent", 0))
+                    # Try both field names for price change percentage
+                    change_pct = rec.get("change_percentage", rec.get("price_change_percent", 0))
+                    # Handle case where percentage might be formatted as "+5%" or "-3%"
+                    if isinstance(change_pct, str):
+                        change_pct = change_pct.replace('+', '').replace('%', '').strip()
+                    price_change_percent = float(change_pct)
                 except (TypeError, ValueError):
                     price_change_percent = 0.0
                 
