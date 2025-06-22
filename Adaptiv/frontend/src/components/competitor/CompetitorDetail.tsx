@@ -635,7 +635,7 @@ const CompetitorDetail: React.FC = () => {
           icon={<ArrowLeftOutlined />} 
           onClick={() => {
             // Navigate back to either the new or old component based on where we came from
-            navigate(isReportId ? '/competitors' : '/competitor-analysis');
+            navigate(isReportId ? '/competitors' : '/competitors');
           }} 
           style={{ marginBottom: 16 }}
         >
@@ -694,14 +694,14 @@ const CompetitorDetail: React.FC = () => {
             </Col>
             <Col xs={24} md={8} style={{ textAlign: 'center' }}>
               <Statistic
-                title="Relative Price"
+                title={competitorData?.name + " is"}
                 value={competitorData?.priceDifference}
                 valueStyle={{
                   color: competitorData?.status === 'higher' ? '#cf1322' : '#3f8600'
                 }}
                 prefix={competitorData?.status === 'higher' ? <ArrowUpOutlined /> : <ArrowDownOutlined />}
               />
-              <Text type="secondary">compared to your prices</Text>
+              <Text type="secondary">{competitorData?.status === 'higher' ? 'more expensive' : 'less expensive'} than your prices</Text>
             </Col>
             <Col xs={24} md={8} style={{ textAlign: 'center' }}>
               <Statistic
