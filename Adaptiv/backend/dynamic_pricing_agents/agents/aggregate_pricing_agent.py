@@ -52,6 +52,10 @@ class AggregatePricingAgent(BaseAgent):
             if "business_context" not in safe_context:
                 safe_context["business_context"] = {}
                 
+            # Make sure db is passed in safe_context if available
+            if "db" in context and "db" not in safe_context:
+                safe_context["db"] = context["db"]
+                
             # Step 1: Run DataCollectionAgent
             logger.info("Running DataCollectionAgent")
             data_collection_results = self.data_collection_agent.process(safe_context)
@@ -128,17 +132,23 @@ class AggregatePricingAgent(BaseAgent):
             # Option 2: Try to get from user in database if we have user_id
             if not recipient_email and user_id:
                 try:
-                    # Import models here to avoid circular imports
-                    from models import User, db_session
+                    # Get db from context (same as data_collection.py)
+                    db = context.get("db")
                     
-                    # Create a new session
-                    with db_session() as session:
-                        db_user = session.query(User).filter(User.id == user_id).first()
+                    if db:
+                        # Import User model only
+                        import models
+                        
+                        # Use the existing session from context
+                        db_user = db.query(models.User).filter(models.User.id == user_id).first()
                         if db_user and db_user.email:
                             recipient_email = db_user.email
                             logger.info(f"Found user email from database: {recipient_email}")
+                    else:
+                        logger.warning("No database session available in context")
                 except Exception as db_err:
                     logger.error(f"Error getting user email from database: {str(db_err)}")
+                    logger.exception(db_err)  # More detailed error logging
             
             # Option 3: Try username if it looks like an email
             if not recipient_email and 'username' in context and '@' in context['username']:
