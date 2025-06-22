@@ -51,7 +51,8 @@ def get_active_users() -> List[Dict[str, Any]]:
     db = SessionLocal()
     try:
         users = db.query(models.User).filter(models.User.is_active == True).all()
-        return [{"id": user.id, "email": user.email} for user in users]
+        # Added cutoff to only run for first 3 users
+        return [{"id": user.id, "email": user.email} for user in users[:3]]
     except Exception as e:
         logger.error(f"Error fetching active users: {str(e)}")
         return []
