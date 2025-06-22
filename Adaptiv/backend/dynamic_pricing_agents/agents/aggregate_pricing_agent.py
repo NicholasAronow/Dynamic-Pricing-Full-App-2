@@ -12,7 +12,8 @@ from ..base_agent import BaseAgent
 from .data_collection import DataCollectionAgent
 from .test_db_agent import TestDBAgentWrapper
 from .test_web_agent import TestWebAgentWrapper
-from ...knock_integration import KnockClient
+# Use absolute import instead of relative
+from knock_integration import KnockClient
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -115,13 +116,37 @@ class AggregatePricingAgent(BaseAgent):
                 logger.warning("Cannot send notification: no user_id in context")
                 return
                 
-            # Try to get recipient email from context
+            # Try to get recipient email from context - multiple fallback mechanisms
             recipient_email = None
+            
+            # Option 1: Direct user_email or email in context
             if 'user_email' in context:
                 recipient_email = context['user_email']
             elif 'email' in context:
                 recipient_email = context['email']
-                
+            
+            # Option 2: Try to get from user in database if we have user_id
+            if not recipient_email and user_id:
+                try:
+                    # Import models here to avoid circular imports
+                    from models import User, db_session
+                    
+                    # Create a new session
+                    with db_session() as session:
+                        db_user = session.query(User).filter(User.id == user_id).first()
+                        if db_user and db_user.email:
+                            recipient_email = db_user.email
+                            logger.info(f"Found user email from database: {recipient_email}")
+                except Exception as db_err:
+                    logger.error(f"Error getting user email from database: {str(db_err)}")
+            
+            # Option 3: Try username if it looks like an email
+            if not recipient_email and 'username' in context and '@' in context['username']:
+                potential_email = context['username']
+                if '.' in potential_email.split('@')[1]:  # Basic email format validation
+                    recipient_email = potential_email
+                    logger.info(f"Using username as email: {recipient_email}")
+                    
             if not recipient_email:
                 logger.warning("Cannot send notification: no recipient email found in context")
                 return
