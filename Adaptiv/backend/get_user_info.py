@@ -41,7 +41,7 @@ def get_user_info(user_id: int) -> Optional[Dict[str, Any]]:
         
         # Get business profile if it exists
         business = db.query(models.BusinessProfile).filter(models.BusinessProfile.user_id == user_id).first()
-        business_name = business.name if business else "No business profile"
+        business_name = business.business_name if business else "No business profile"
         
         # Get counts of related data
         item_count = db.query(models.Item).filter(models.Item.user_id == user_id).count()
