@@ -92,6 +92,8 @@ def delete_user_data(db: Session, user_id: int, dry_run: bool = False) -> Dict[s
         {"table": models.CompetitorReport, "user_field": "user_id"},
         # Handle data collection snapshots before deleting the user
         {"table": models.DataCollectionSnapshot, "user_field": "user_id"},
+        # Add POS integration
+        {"table": models.POSIntegration, "user_field": "user_id"},
         {"table": models.User, "user_field": "id"},
         # Add other tables that have user references
     ]
