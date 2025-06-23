@@ -8,6 +8,8 @@ from typing import Dict, List, Any, Optional
 import json
 from datetime import datetime, timedelta, timezone, date
 import models
+import os
+from anthropic import Anthropic
 from ..base_agent import BaseAgent
 from .data_collection import DataCollectionAgent
 from .test_db_agent import TestDBAgentWrapper
@@ -497,9 +499,41 @@ For each item, provide a structured pricing recommendation with:
 Provide your response as a JSON array of recommendation objects. Be precise with your price suggestions.
 """
             
-            # Call the LLM
+            # Call Claude's API directly instead of using self.call_llm
+            # Claude API requires system message to be separate from the messages array
             messages = [{"role": "system", "content": prompt}]
-            response = self.call_llm(messages)
+            try:
+                # Initialize the Anthropic client
+                anthropic_client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
+                
+                # Call Claude's API - note the system parameter is separate from messages
+                claude_response = anthropic_client.messages.create(
+                    model="claude-opus-4-20250514",  # Use appropriate Claude model version
+                    max_tokens=8192,
+                    system=prompt,
+                    messages=[{"role": "user", "content": "{}".format(messages)}]
+                )
+                
+                # Format response to match the expected structure
+                response = {
+                    "content": claude_response.content[0].text,
+                    "usage": {
+                        "prompt_tokens": claude_response.usage.input_tokens,
+                        "completion_tokens": claude_response.usage.output_tokens,
+                        "total_tokens": claude_response.usage.input_tokens + claude_response.usage.output_tokens
+                    }
+                }
+                
+                logger.info(f"Successfully called Claude API for pricing recommendations")
+                logger.info(response)
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Error calling Claude API: {error_msg}")
+                response = {
+                    "content": f"ERROR: Failed to call Claude API - {error_msg}",
+                    "usage": None,
+                    "error": "api_error"
+                }
             
             # Extract recommendations from the response
             recommendations = []
@@ -586,3 +620,4 @@ async def test_aggregate_agent():
 
 if __name__ == "__main__":
     asyncio.run(test_aggregate_agent())
+

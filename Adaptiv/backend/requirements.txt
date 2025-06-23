@@ -39,6 +39,9 @@ scipy>=1.10.0
 openai>=1.1.0
 openai-agents>=0.0.16
 
+# Anthropic (Claude) SDK
+anthropic>=0.15.0
+
 # Google Generative AI
 google-generativeai>=0.3.0
 
