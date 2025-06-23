@@ -477,6 +477,14 @@ def delete_recipe(
     
     return None
 
+class RecipeMarginRequest(BaseModel):
+    recipe_id: int
+    selling_price: float
+
+class BatchMarginResponse(BaseModel):
+    recipe_id: int
+    margin_data: dict
+
 @router.get("/{recipe_id}/net-margin")
 def get_recipe_net_margin(
     recipe_id: int,
@@ -505,3 +513,68 @@ def get_recipe_net_margin(
     )
     
     return net_margin
+
+@router.post("/batch-net-margin")
+def get_batch_net_margin(
+    requests: List[RecipeMarginRequest],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Calculate net margins for multiple recipes in a single request,
+    reusing the fixed cost calculation for efficiency."""
+    # Calculate fixed costs only once
+    fixed_costs = Recipe.calculate_fixed_costs(db, current_user.id)
+    
+    # Get all recipe IDs from the requests
+    recipe_ids = [req.recipe_id for req in requests]
+    
+    # Fetch all recipes at once
+    recipes = db.query(Recipe).filter(
+        Recipe.id.in_(recipe_ids),
+        Recipe.user_id == current_user.id
+    ).all()
+    
+    # Create a lookup dictionary for recipes
+    recipe_map = {recipe.id: recipe for recipe in recipes}
+    
+    # Calculate net margin for each recipe
+    results = []
+    for req in requests:
+        recipe = recipe_map.get(req.recipe_id)
+        if not recipe:
+            # Skip recipes not found
+            continue
+            
+        # Calculate ingredient cost
+        ingredient_cost = recipe.calculate_cost()
+        
+        # Use the pre-calculated fixed cost
+        fixed_cost_per_item = fixed_costs['fixed_cost_per_item']
+        
+        # Calculate total cost
+        total_cost = ingredient_cost + fixed_cost_per_item
+        
+        # Calculate net margin
+        selling_price = req.selling_price
+        if selling_price > 0:
+            net_margin_percentage = ((selling_price - total_cost) / selling_price) * 100
+        else:
+            net_margin_percentage = 0
+            
+        # Create response object
+        margin_data = {
+            'net_margin_percentage': round(net_margin_percentage, 2),
+            'total_cost': round(total_cost, 2),
+            'ingredient_cost': round(ingredient_cost, 2),
+            'fixed_cost': round(fixed_cost_per_item, 2),
+            'total_monthly_fixed_costs': round(fixed_costs['total_monthly_fixed_costs'], 2),
+            'total_items_sold_last_month': fixed_costs['total_items_sold'],
+            'selling_price': selling_price
+        }
+        
+        results.append({
+            'recipe_id': req.recipe_id,
+            'margin_data': margin_data
+        })
+    
+    return results

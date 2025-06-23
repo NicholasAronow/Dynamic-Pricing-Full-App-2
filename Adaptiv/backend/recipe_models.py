@@ -42,25 +42,20 @@ class Recipe(Base):
         """Calculate the total cost of the recipe based on its ingredients."""
         return sum(ingredient.calculate_cost() for ingredient in self.ingredients)
     
-    def calculate_net_margin(self, db, selling_price):
-        """
-        Calculate the net margin of the recipe taking into account:
-        - Ingredient costs
-        - Fixed costs allocation (rent, utilities, and salaries) based on trailing month's sales
+    @classmethod
+    def calculate_fixed_costs(cls, db, user_id):
+        """Calculate fixed costs that can be reused across multiple recipes.
         
         Args:
             db: Database session
-            selling_price: Selling price of the menu item
-        
+            user_id: User ID for filtering costs
+            
         Returns:
-            Dict with net margin percentage, total cost, and breakdown of costs
+            Dict with fixed cost data including fixed cost per item
         """
         from datetime import datetime, timedelta
         from sqlalchemy import func
         from models import FixedCost, Employee, Order, OrderItem
-        
-        # Get ingredient costs (already implemented)
-        ingredient_cost = self.calculate_cost()
         
         # Get trailing month date range (last 30 days)
         end_date = datetime.now()
@@ -70,7 +65,7 @@ class Recipe(Base):
         current_month = datetime.now().month
         current_year = datetime.now().year
         fixed_costs = db.query(FixedCost).filter(
-            FixedCost.user_id == self.user_id,
+            FixedCost.user_id == user_id,
             FixedCost.month <= current_month,
             FixedCost.year <= current_year
         ).order_by(
@@ -94,7 +89,7 @@ class Recipe(Base):
         
         # Get active employees
         employees = db.query(Employee).filter(
-            Employee.user_id == self.user_id,
+            Employee.user_id == user_id,
             Employee.active == True
         ).all()
         
@@ -109,7 +104,7 @@ class Recipe(Base):
         
         # Calculate total items sold in the trailing month from order data
         total_items_sold = db.query(func.sum(OrderItem.quantity)).join(Order).filter(
-            Order.user_id == self.user_id,
+            Order.user_id == user_id,
             Order.order_date >= start_date,
             Order.order_date <= end_date
         ).scalar() or 1  # Default to 1 to avoid division by zero
@@ -119,6 +114,29 @@ class Recipe(Base):
         
         # Calculate fixed cost per item based on actual sales volume
         fixed_cost_per_item = total_monthly_fixed_costs / total_items_sold if total_items_sold > 0 else 0
+        
+        return {
+            'fixed_cost_per_item': fixed_cost_per_item,
+            'total_monthly_fixed_costs': total_monthly_fixed_costs,
+            'total_items_sold': total_items_sold
+        }
+    
+    def calculate_net_margin(self, db, selling_price):
+        """Calculate net margin for a recipe based on ingredient costs and fixed costs.
+        
+        Args:
+            db: Database session
+            selling_price: Selling price of the menu item
+        
+        Returns:
+            Dict with net margin percentage, total cost, and breakdown of costs
+        """
+        # Get ingredient costs (already implemented)
+        ingredient_cost = self.calculate_cost()
+        
+        # Get fixed costs (reusing shared calculation)
+        fixed_costs = self.calculate_fixed_costs(db, self.user_id)
+        fixed_cost_per_item = fixed_costs['fixed_cost_per_item']
         
         # Calculate total cost (ingredient cost + fixed costs)
         total_cost = ingredient_cost + fixed_cost_per_item
@@ -134,8 +152,8 @@ class Recipe(Base):
             'total_cost': round(total_cost, 2),
             'ingredient_cost': round(ingredient_cost, 2),
             'fixed_cost': round(fixed_cost_per_item, 2),
-            'total_monthly_fixed_costs': round(total_monthly_fixed_costs, 2),
-            'total_items_sold_last_month': total_items_sold,
+            'total_monthly_fixed_costs': round(fixed_costs['total_monthly_fixed_costs'], 2),
+            'total_items_sold_last_month': fixed_costs['total_items_sold'],
             'selling_price': selling_price
         }
 
@@ -201,10 +219,7 @@ class RecipeIngredient(Base):
                 'pint': 473.176,
                 'pints': 473.176
             }
-            
-            # Calculate conversion factor
-            conversion_factor = 1.0  # Default: no conversion needed
-            
+                        
             # Check if both units are in the same system
             if recipe_unit in weight_conversions and inventory_unit in weight_conversions:
                 # Convert both to standard unit (grams), then calculate ratio

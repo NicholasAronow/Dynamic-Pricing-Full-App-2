@@ -161,14 +161,6 @@ const PriceRecommendations: React.FC = () => {
             
             return processedItem;
           });
-          
-          console.log('===== UNITS DATA DEBUG =====');
-          data.forEach((item, index) => {
-            console.log(`Item ${index} (${item.name}) - quantity:`, item.quantity, 
-              '- quantitySold:', item.quantity,
-              '- types:', typeof item.quantity, '/', typeof item.quantity);
-          });
-          console.log('========================');
         }
         
         setRecommendations(data);
