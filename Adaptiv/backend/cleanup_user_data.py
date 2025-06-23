@@ -79,11 +79,12 @@ def delete_user_data(db: Session, user_id: int, dry_run: bool = False) -> Dict[s
         {"table": models.PricingRecommendation, "user_field": "user_id"},
         {"table": models.AgentMemory, "user_field": "user_id"},
         {"table": models.CompetitorPriceHistory, "user_field": "user_id"},
-        # Add OrderItem before Order
+        # Handle OrderItem before Order
         {"table": models.OrderItem, "user_field": None, "custom_filter": lambda q, user_id: q.filter(models.OrderItem.order_id.in_(db.query(models.Order.id).filter(models.Order.user_id == user_id)))},
         {"table": models.Order, "user_field": "user_id"},
-        {"table": models.Item, "user_field": "user_id"},
+        # Handle PriceHistory before Item (it has foreign keys to Item)
         {"table": models.PriceHistory, "user_field": "user_id"},
+        {"table": models.Item, "user_field": "user_id"},
         {"table": models.BusinessProfile, "user_field": "user_id"},
         {"table": models.Recipe, "user_field": "user_id"},
         {"table": models.Ingredient, "user_field": "user_id"},
