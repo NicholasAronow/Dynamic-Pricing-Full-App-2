@@ -46,3 +46,18 @@ yarn-error.log*
 # Misc
 .DS_Store
 Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.venv/
+.env/
+*.egg-info/
+.installed.cfg
+*.egg
