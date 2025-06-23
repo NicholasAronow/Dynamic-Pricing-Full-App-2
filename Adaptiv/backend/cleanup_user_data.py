@@ -82,16 +82,16 @@ def delete_user_data(db: Session, user_id: int, dry_run: bool = False) -> Dict[s
         {"table": models.Order, "user_field": "user_id"},
         {"table": models.Item, "user_field": "user_id"},
         {"table": models.PriceHistory, "user_field": "user_id"},
-        {"table": models.OrderItem, "user_field": "user_id"},
         {"table": models.BusinessProfile, "user_field": "user_id"},
         {"table": models.Recipe, "user_field": "user_id"},
-        {"table": models.RecipeIngredient, "user_field": "user_id"},
         {"table": models.Ingredient, "user_field": "user_id"},
         {"table": models.COGS, "user_field": "user_id"},
         {"table": models.Employee, "user_field": "user_id"},
         {"table": models.FixedCost, "user_field": "user_id"},
         # We are using Competitor Report in Competitors
         {"table": models.CompetitorReport, "user_field": "user_id"},
+        # Handle data collection snapshots before deleting the user
+        {"table": models.DataCollectionSnapshot, "user_field": "user_id"},
         {"table": models.User, "user_field": "id"},
         # Add other tables that have user references
     ]
