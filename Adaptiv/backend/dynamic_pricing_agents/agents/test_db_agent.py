@@ -479,13 +479,20 @@ class TestDBAgentWrapper:
             # Check if content is a string containing markdown JSON block
             if isinstance(content, str) and '```json' in content:
                 # Extract the JSON from markdown code block
+                self.logger.info(f"CONTENT: {content}")
                 try:
-                    json_str = content.split('```json\n', 1)[1].split('```', 1)[0].strip()
-                    menu_items_from_json = json.loads(json_str)
-                    if isinstance(menu_items_from_json, list) and len(menu_items_from_json) > 0:
-                        self.logger.info(f"Successfully parsed {len(menu_items_from_json)} items from data collection JSON")
-                        # Store the parsed menu items in the context for later use
-                        context["menu_items"] = menu_items_from_json
+                    # More robust JSON extraction handling various markdown formats
+                    import re
+                    json_match = re.search(r'```json\s*([\s\S]*?)```', content)
+                    if json_match:
+                        json_str = json_match.group(1).strip()
+                        menu_items_from_json = json.loads(json_str)
+                        if isinstance(menu_items_from_json, list) and len(menu_items_from_json) > 0:
+                            self.logger.info(f"Successfully parsed {len(menu_items_from_json)} items from data collection JSON")
+                            # Store the parsed menu items in the context for later use
+                            context["menu_items"] = menu_items_from_json
+                    else:
+                        self.logger.error("No JSON content found between markdown code blocks")
                 except Exception as e:
                     self.logger.error(f"Failed to parse JSON from content: {str(e)}")
         """
@@ -704,14 +711,49 @@ class TestDBAgentWrapper:
         
         result = []
         for item in menu_items:
-            result.append({
+
+            # Extract item details including the most recent reevaluation date
+            item_dict = {
                 "id": item.id,
                 "name": item.name,
                 "category": item.category,
                 "current_price": item.current_price,
                 "cost": item.cost,
                 "description": item.description
-            })
+            }
+            
+            # Get the most recent pricing recommendation for this item
+            latest_recommendation = db.query(models.PricingRecommendation).filter(
+                (models.PricingRecommendation.item_id == item.id) & 
+                (models.PricingRecommendation.implementation_status == "approved")
+            ).order_by(models.PricingRecommendation.created_at.desc()).first()
+
+            item_dict["reevaluation_date"] = latest_recommendation.reevaluation_date
+            
+            # Check if reevaluation date is approaching
+            if item_dict.get("reevaluation_date") and isinstance(item_dict["reevaluation_date"], datetime):
+                if item_dict["reevaluation_date"] < datetime.utcnow():
+                    result.append({
+                        "id": item.id,
+                        "name": item.name,
+                        "category": item.category,
+                        "current_price": item.current_price,
+                        "cost": item.cost,
+                        "description": item.description
+                    })
+            else:
+                result.append({
+                        "id": item.id,
+                        "name": item.name,
+                        "category": item.category,
+                        "current_price": item.current_price,
+                        "cost": item.cost,
+                        "description": item.description
+                    })
+
+            
+            
+            
         
         self.logger.info(f"Retrieved {len(result)} menu items")
         return result

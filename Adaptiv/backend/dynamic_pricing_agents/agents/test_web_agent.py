@@ -6,6 +6,8 @@ import asyncio
 import logging
 import time
 import json
+import models
+from datetime import datetime
 from typing import Dict, Any, List
 from agents import Agent, WebSearchTool, Runner, trace, gen_trace_id
 from agents.model_settings import ModelSettings
@@ -119,6 +121,7 @@ class TestWebAgentWrapper:
         self.agent = market_research_agent
         self.display_name = "Market Research Agent"
         self.description = "Conducts market research and maps insights to menu items"
+        self.logger = logging.getLogger(__name__)
         
     async def process(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -151,14 +154,22 @@ class TestWebAgentWrapper:
             # Check if content is a string containing markdown JSON block
             if isinstance(content, str) and '```json' in content:
                 # Extract the JSON from markdown code block
+                self.logger.info(f"CONTENT: {content}")
                 try:
-                    json_str = content.split('```json\n', 1)[1].split('```', 1)[0].strip()
-                    menu_items_from_json = json.loads(json_str)
-                    if isinstance(menu_items_from_json, list) and len(menu_items_from_json) > 0:
-                        logger.info(f"Successfully parsed {len(menu_items_from_json)} items from data collection JSON")
-                        menu_items = menu_items_from_json
+                    # More robust JSON extraction handling various markdown formats
+                    import re
+                    json_match = re.search(r'```json\s*([\s\S]*?)```', content)
+                    if json_match:
+                        json_str = json_match.group(1).strip()
+                        menu_items_from_json = json.loads(json_str)
+                        if isinstance(menu_items_from_json, list) and len(menu_items_from_json) > 0:
+                            self.logger.info(f"Successfully parsed {len(menu_items_from_json)} items from data collection JSON")
+                            # Store the parsed menu items in the context for later use
+                            context["menu_items"] = menu_items_from_json
+                    else:
+                        self.logger.error("No JSON content found between markdown code blocks")
                 except Exception as e:
-                    logger.error(f"Failed to parse JSON from content: {str(e)}")
+                    self.logger.error(f"Failed to parse JSON from content: {str(e)}")
                     
         # Try the original approach as fallback
         if not menu_items and data_collection_results:
@@ -225,16 +236,37 @@ class TestWebAgentWrapper:
         - Location: {location}
         """
         
-        logger.info(f"Using business context: {business_name} ({industry}) in {location}")
-        
+        self.logger.info(f"Using business context: {business_name} ({industry}) in {location}")
+        db = context.get("db")
         # Build query with all items and business context
         query = base_query + "\n" + business_context + "\n\nMENU ITEMS:\n"
         for item in menu_items:
-            query += f"\n{item['item_name']} ({item['item_id']}):"
-            query += f"\n- {item.get('item_basics', 'No basics')}"
-            query += f"\n- {item.get('competitive_position', 'No position')}"
-            query += f"\n- {item.get('elasticity_indicators', 'No elasticity')}"
-            query += f"\n- {item.get('optimization_signals', 'No signals')}\n"
+            self.logger.info(f"Processing item: {item}")
+
+            # Extract item details including the most recent reevaluation date
+            # Extract item details including the most recent reevaluation date
+            item_id = item.get("item_id")
+            
+            # Get the most recent pricing recommendation for this item
+            latest_recommendation = db.query(models.PricingRecommendation).filter(
+                (models.PricingRecommendation.item_id == item_id) & 
+                (models.PricingRecommendation.implementation_status == "approved")
+            ).order_by(models.PricingRecommendation.created_at.desc()).first()
+            
+            # Check if reevaluation date is approaching
+            if latest_recommendation and latest_recommendation.reevaluation_date and isinstance(latest_recommendation.reevaluation_date, datetime):
+                if latest_recommendation.reevaluation_date < datetime.utcnow():
+                    query += f"\n{item['item_name']} ({item['item_id']}):"
+                    query += f"\n- {item.get('item_basics', 'No basics')}"
+                    query += f"\n- {item.get('competitive_position', 'No position')}"
+                    query += f"\n- {item.get('elasticity_indicators', 'No elasticity')}"
+                    query += f"\n- {item.get('optimization_signals', 'No signals')}\n"
+            else:
+                query += f"\n{item['item_name']} ({item['item_id']}):"
+                query += f"\n- {item.get('item_basics', 'No basics')}"
+                query += f"\n- {item.get('competitive_position', 'No position')}"
+                query += f"\n- {item.get('elasticity_indicators', 'No elasticity')}"
+                query += f"\n- {item.get('optimization_signals', 'No signals')}\n"
         
         query += f"\nLocation: {location}"
         query += "\n\nNow conduct comprehensive market research and map findings to relevant items."
@@ -242,13 +274,13 @@ class TestWebAgentWrapper:
         query += "Find relevant industry trends, local market conditions, and competitor strategies. "
         query += "Return only insights that apply directly to our menu items and business context."
         
-        logger.info(f"Starting market research for {len(menu_items)} items")
+        self.logger.info(f"Starting market research for {len(menu_items)} items")
         start_time = time.time()
         
         # Generate trace ID
         trace_id = gen_trace_id()
         trace_url = f"https://platform.openai.com/traces/trace?trace_id={trace_id}"
-        logger.info(f"Trace URL: {trace_url}")
+        self.logger.info(f"Trace URL: {trace_url}")
         
             # Run the agent
         try:
@@ -270,7 +302,7 @@ class TestWebAgentWrapper:
                             "research_summary": insight.research_summary,
                             "sources": insight.sources
                         })
-                    logger.info(f"Parsed {len(research_results)} insights from MarketSearchResults")
+                    self.logger.info(f"Parsed {len(research_results)} insights from MarketSearchResults")
                 else:
                     # Try to parse as string if it's not the Pydantic model
                     try:
@@ -285,13 +317,13 @@ class TestWebAgentWrapper:
                                         "research_summary": item.get('research_summary', ''),
                                         "sources": item.get('sources', [])
                                     })
-                    except:
-                        logger.error(f"Could not parse final_output: {type(result.final_output)}")
+                    except Exception as e:
+                        self.logger.error(f"Could not parse final_output: {type(result.final_output)}")
             else:
-                logger.warning("No final_output found")
+                self.logger.warning("No final_output found")
                 
         except Exception as e:
-            logger.error(f"Error running market research: {e}", exc_info=True)
+            self.logger.error(f"Error running market research: {e}", exc_info=True)
             return {
                 "success": False,
                 "error": str(e),
@@ -300,11 +332,11 @@ class TestWebAgentWrapper:
             }
             
         execution_time = time.time() - start_time
-        logger.info(f"Research completed in {execution_time:.2f} seconds")
+        self.logger.info(f"Research completed in {execution_time:.2f} seconds")
         
         # Create detailed summary info
         items_with_research = len([r for r in research_results if r.get("research_summary")])
-        logger.info(f"Found insights for {items_with_research} items out of {len(menu_items)} total items")
+        self.logger.info(f"Found insights for {items_with_research} items out of {len(menu_items)} total items")
         
         # Log each research item for debugging
         # Log each research item for debugging
@@ -313,7 +345,7 @@ class TestWebAgentWrapper:
             item_name = item["item_name"]
             summary_len = len(item["research_summary"])
             sources = item["sources"]
-            logger.info(f"Item {item_id} ({item_name}): {summary_len} chars, {len(sources)} sources")
+            self.logger.info(f"Item {item_id} ({item_name}): {summary_len} chars, {len(sources)} sources")
         
         summary = f"Analyzed {len(menu_items)} items, found relevant insights for {items_with_research} items"
         

@@ -6,8 +6,8 @@ import asyncio
 import logging
 from typing import Dict, List, Any, Optional
 import json
-from datetime import datetime
-
+from datetime import datetime, timedelta, timezone, date
+import models
 from ..base_agent import BaseAgent
 from .data_collection import DataCollectionAgent
 from .test_db_agent import TestDBAgentWrapper
@@ -61,9 +61,15 @@ class AggregatePricingAgent(BaseAgent):
             data_collection_results = self.data_collection_agent.process(safe_context)
             logger.info("DataCollectionAgent completed successfully")
             
+            # Filter out items with active price recommendations
+            filtered_data_collection_results = self._filter_active_recommendations(data_collection_results, safe_context)
+            logger.info("Filtered out items with active price recommendations")
+            logger.info(filtered_data_collection_results)
+            
             # Create updated context with data collection results for other agents
+            logger.info("Creating updated context with data collection results")
             updated_context = safe_context.copy()
-            updated_context["data_collection_results"] = data_collection_results
+            updated_context["data_collection_results"] = filtered_data_collection_results
             
             # Step 2: Run TestDBAgent (competitor analysis)
             logger.info("Running TestDBAgent for competitor analysis")
@@ -79,7 +85,8 @@ class AggregatePricingAgent(BaseAgent):
             aggregated_results = self._aggregate_results(
                 data_collection_results, 
                 competitor_results.get("competitor_results", []), 
-                market_research_results.get("research_results", [])
+                market_research_results.get("research_results", []),
+                context
             )
             
             logger.info(f"Successfully aggregated results for {len(aggregated_results)} items")
@@ -191,9 +198,94 @@ class AggregatePricingAgent(BaseAgent):
             logger.error(f"Error sending notification: {str(e)}")
             # Don't re-raise the exception since this is a non-critical feature
     
+    def _filter_active_recommendations(self, data_collection_results: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Filter out items that have active price recommendations (implementation status = 'implemented'
+        and current date is before reevaluation_date)
+        
+        Args:
+            data_collection_results: Results from DataCollectionAgent
+            context: Processing context with db session
+            
+        Returns:
+            Filtered data collection results with excluded items removed
+        """
+        # Make a copy of the results to modify
+        filtered_results = data_collection_results.copy()
+        
+        # Check if we have a database session
+        db = context.get("db")
+        user_id = context.get("user_id")
+        
+        if not db or not user_id:
+            logger.warning("No database session or user_id available. Cannot filter active recommendations.")
+            return data_collection_results
+            
+        try:
+            # Import the PricingRecommendation model
+            from models import PricingRecommendation
+            
+            # Get all active pricing recommendations for this user where today < reevaluation_date
+            today = datetime.now().date()
+            
+            active_recommendations = db.query(PricingRecommendation).filter(
+                PricingRecommendation.user_id == user_id,
+                PricingRecommendation.implementation_status == 'approved',  # Match status used when user accepts a recommendation
+                PricingRecommendation.reevaluation_date > today
+            ).all()
+            
+            # If no active recommendations, return original results
+            if not active_recommendations:
+                logger.info("No active pricing recommendations found to exclude")
+                return data_collection_results
+                
+            # Create a set of item IDs to exclude
+            exclude_item_ids = {str(rec.item_id) for rec in active_recommendations}
+            logger.info(f"Found {len(exclude_item_ids)} items with active pricing recommendations")
+            
+            # Process the data collection results to remove excluded items
+            if isinstance(filtered_results, dict) and 'content' in filtered_results:
+                content = filtered_results['content']
+                
+                # Extract JSON content if wrapped in markdown code blocks
+                if '```json' in content and '```' in content:
+                    json_start = content.find('```json') + 7
+                    json_end = content.rfind('```')
+                    
+                    if json_start > 6 and json_end > json_start:
+                        json_content = content[json_start:json_end].strip()
+                        
+                        # Parse the JSON string into a list of items
+                        try:
+                            items = json.loads(json_content)
+                            # Filter out items with active recommendations
+                            filtered_items = [item for item in items if str(item.get("item_id")) not in exclude_item_ids]
+                            
+                            # Update the content with filtered items
+                            filtered_json = json.dumps(filtered_items, indent=2)
+                            filtered_results['content'] = content[:json_start] + filtered_json + content[json_end:]
+                            
+                            logger.info(f"Filtered out {len(items) - len(filtered_items)} items with active recommendations")
+                        except json.JSONDecodeError as e:
+                            logger.error(f"Failed to parse data collection JSON: {str(e)}")
+            # Fallback to old approach
+            elif isinstance(filtered_results, dict) and 'items' in filtered_results:
+                items = filtered_results.get('items', [])
+                filtered_results['items'] = [item for item in items if str(item.get("item_id")) not in exclude_item_ids]
+                logger.info(f"Filtered out {len(items) - len(filtered_results['items'])} items with active recommendations")
+                
+            return filtered_results
+            
+        except Exception as e:
+            logger.error(f"Error filtering active recommendations: {str(e)}")
+            logger.exception(e)  # More detailed error logging
+            # Return original results in case of error
+            return data_collection_results
+    
     def _aggregate_results(self, data_collection_results: Dict[str, Any], 
                            competitor_results: List[Dict[str, Any]], 
-                           market_research_results: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+                           market_research_results: List[Dict[str, Any]],
+                           context: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         """
         Aggregate all results by item ID
         
@@ -209,6 +301,7 @@ class AggregatePricingAgent(BaseAgent):
         
         # Step 1: Process data collection results
         try:
+            db = context.get("db")
             # Data collection results come as a dict with 'status' and 'content' keys
             # The content is a JSON string wrapped in markdown code blocks
             if isinstance(data_collection_results, dict) and 'content' in data_collection_results:
@@ -230,14 +323,38 @@ class AggregatePricingAgent(BaseAgent):
                             # Initialize aggregated data with items from data collection
                             for item in items:
                                 item_id = str(item.get("item_id"))
-                                aggregated_data[item_id] = {
-                                    "name": item.get("item_name"),
-                                    "basic_info": item
-                                }
+                
+                                # Get the most recent pricing recommendation for this item
+                                latest_recommendation = db.query(models.PricingRecommendation).filter(
+                                    (models.PricingRecommendation.item_id == item_id) & 
+                                    (models.PricingRecommendation.implementation_status == "approved")
+                                ).order_by(models.PricingRecommendation.created_at.desc()).first()
+                                if latest_recommendation:
+                                    self.logger.info(f"Latest recommendation for item {item_id}: {latest_recommendation.reevaluation_date}")
+                                # Check if reevaluation date is approaching
+                                if latest_recommendation and latest_recommendation.reevaluation_date and isinstance(latest_recommendation.reevaluation_date, datetime):
+                                    # Use naive datetime objects for both sides of comparison
+                                    if latest_recommendation.reevaluation_date < datetime.utcnow():
+                                        self.logger.info("Adding item to aggregated data")
+                                        self.logger.warning(item.get("item_name"))
+                                        self.logger.info(latest_recommendation.reevaluation_date)
+                                        self.logger.info(datetime.utcnow())
+                                        aggregated_data[item_id] = {
+                                            "name": item.get("item_name"),
+                                            "basic_info": item
+                                        }
+                                else:
+                                    self.logger.info("Adding item to aggregated data")
+                                    aggregated_data[item_id] = {
+                                        "name": item.get("item_name"),
+                                        "basic_info": item
+                                    }
+                            self.logger.info(f"Aggregated {len(aggregated_data)} items")
                         except json.JSONDecodeError as e:
                             logger.error(f"Failed to parse data collection JSON: {str(e)}")
             # Fallback to old approach
             elif isinstance(data_collection_results, dict) and 'items' in data_collection_results:
+                self.logger.info("Fallback to old approach")
                 for item in data_collection_results.get('items', []):
                     item_id = str(item.get("item_id"))
                     aggregated_data[item_id] = {
@@ -259,6 +376,7 @@ class AggregatePricingAgent(BaseAgent):
             logger.error(f"Data collection results type: {type(data_collection_results)}")
             logger.error(f"Data collection results keys: {data_collection_results.keys() if isinstance(data_collection_results, dict) else 'Not a dict'}") 
         # Step 2: Process competitor results
+        self.logger.warning(aggregated_data)
         try:
             for comp_item in competitor_results:
                 item_id = str(comp_item.get("item_id"))
