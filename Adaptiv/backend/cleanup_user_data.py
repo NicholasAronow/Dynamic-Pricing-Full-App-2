@@ -79,6 +79,8 @@ def delete_user_data(db: Session, user_id: int, dry_run: bool = False) -> Dict[s
         {"table": models.PricingRecommendation, "user_field": "user_id"},
         {"table": models.AgentMemory, "user_field": "user_id"},
         {"table": models.CompetitorPriceHistory, "user_field": "user_id"},
+        # Add OrderItem before Order
+        {"table": models.OrderItem, "user_field": None, "custom_filter": lambda q, user_id: q.filter(models.OrderItem.order_id.in_(db.query(models.Order.id).filter(models.Order.user_id == user_id)))},
         {"table": models.Order, "user_field": "user_id"},
         {"table": models.Item, "user_field": "user_id"},
         {"table": models.PriceHistory, "user_field": "user_id"},
@@ -102,10 +104,16 @@ def delete_user_data(db: Session, user_id: int, dry_run: bool = False) -> Dict[s
     for table_info in tables_to_clean:
         table = table_info["table"]
         user_field = table_info["user_field"]
+        custom_filter = table_info.get("custom_filter")
         
         table_name = table.__tablename__
         try:
-            query = db.query(table).filter(getattr(table, user_field) == user_id)
+            if user_field:
+                query = db.query(table).filter(getattr(table, user_field) == user_id)
+            else:
+                # Use custom filter for tables without direct user_id relationship
+                query = custom_filter(db.query(table), user_id)
+            
             count = query.count()
             
             if count > 0:
@@ -114,10 +122,13 @@ def delete_user_data(db: Session, user_id: int, dry_run: bool = False) -> Dict[s
                 
                 if not dry_run:
                     query.delete(synchronize_session=False)
+                    db.commit()  # Commit after each successful deletion
             
         except Exception as e:
+            if not dry_run:
+                db.rollback()  # Rollback transaction on error
             logger.error(f"Error deleting from {table_name}: {str(e)}")
-            
+    
     # Optionally delete the user itself
     try:
         if not dry_run:
