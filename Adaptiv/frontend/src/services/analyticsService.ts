@@ -1,6 +1,5 @@
 import api from './api';
 import { Item } from './itemService';
-import { Order } from './orderService';
 import authService from './authService';
 
 export interface CompetitorData {

@@ -2,7 +2,6 @@ import api from './api';
 import { Item } from './itemService';
 import itemService, { PriceHistory } from './itemService';
 import authService from './authService';
-import orderService, { Order, OrderItem } from './orderService';
 
 // New interface for agent-based pricing recommendations
 export interface AgentPricingRecommendation {
@@ -129,12 +128,9 @@ export const pricingService = {
       console.log(`Using batch API to fetch price history for ${itemIds.length} items at once`);
       
       // Fetch all orders for price analysis in parallel with price history
-      const [priceHistoryByItemId, orders] = await Promise.all([
-        itemService.getPriceHistoryBatch(itemIds),
-        orderService.getOrders()
-      ]);
+      const [priceHistoryByItemId] = await Promise.all([
+        itemService.getPriceHistoryBatch(itemIds)]);
       
-      console.log('Fetched orders:', orders.length);
       console.log('Fetched price history for', Object.keys(priceHistoryByItemId).length, 'items');
 
       // Build recommendations using detailed price history data
@@ -143,8 +139,7 @@ export const pricingService = {
         items,
         performanceData,
         priceHistoryByItemId,
-        timeFrame,
-        orders
+        timeFrame
       );
     } catch (error) {
       console.error('Error fetching item summaries:', error);
@@ -183,7 +178,6 @@ const generateRecommendationsFromData = (
   performanceData: any[], 
   priceHistoryByItemId: {[itemId: number]: PriceHistory[]},
   timeFrame: string,
-  orders: Order[]
 ): PriceRecommendation[] => {
   return items.map((item: Item) => {
     // Find performance data for this item
