@@ -728,7 +728,8 @@ class TestDBAgentWrapper:
                 (models.PricingRecommendation.implementation_status == "approved")
             ).order_by(models.PricingRecommendation.created_at.desc()).first()
 
-            item_dict["reevaluation_date"] = latest_recommendation.reevaluation_date
+            if latest_recommendation:
+                item_dict["reevaluation_date"] = latest_recommendation.reevaluation_date
             
             # Check if reevaluation date is approaching
             if item_dict.get("reevaluation_date") and isinstance(item_dict["reevaluation_date"], datetime):
