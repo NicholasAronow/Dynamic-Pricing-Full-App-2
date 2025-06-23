@@ -28,7 +28,7 @@ export interface PriceRecommendation {
   name: string;
   category: string;
   currentPrice: number;
-  previousPrice: number;
+  previousPrice: number | null;
   lastPriceChangeDate?: string | null; // Can be string or null
   recommendedPrice?: number;
   percentChange?: number;
@@ -36,11 +36,11 @@ export interface PriceRecommendation {
   revenue: number;
   growth: number;
   profitMargin: number;
-  elasticity: string;
-  optimizationReason: string;
-  previousRevenue: number;
-  incrementalRevenue: number;
-  measuredRevenueChangePercent: number;
+  elasticity: string | null;
+  optimizationReason: string | null;
+  previousRevenue: number | null;
+  incrementalRevenue: number | null;
+  measuredRevenueChangePercent: number | null;
   projectedRevenue?: number;
   revenueChangePercent?: number;
   timeFrame: string;
@@ -199,132 +199,6 @@ const generateRecommendationsFromData = (
     console.log(`Processing item: ${item.name} (ID: ${item.id}), Current price: ${item.current_price}`);
     console.log(`Price history records found: ${priceHistory.length}`);
     
-    // Get orders for this specific item, sorted by date (newest first)
-    const itemOrders: {orderId: number, date: string, price: number, quantity: number}[] = [];
-    
-    // Go through all orders and extract this item's order history
-    orders.forEach(order => {
-      const matchingItems = order.items.filter(orderItem => orderItem.item_id === item.id);
-      matchingItems.forEach(orderItem => {
-        itemOrders.push({
-          orderId: order.id,
-          date: order.order_date,
-          price: orderItem.unit_price,
-          quantity: orderItem.quantity
-        });
-      });
-    });
-    
-    // Sort orders by date (newest first)
-    itemOrders.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    
-    console.log(`Found ${itemOrders.length} order records for ${item.name}`);
-    
-    let previousPrice = item.current_price;
-    let lastPriceChangeDate: string | null = null;
-    
-    // Look for price changes in the order history
-    if (itemOrders.length >= 2) {
-      // Check if we can detect a price change in the order history
-      const uniquePrices = new Map<number, {firstDate: string, lastDate: string}>();
-      
-      // Group orders by price and track first/last occurrence dates
-      itemOrders.forEach(order => {
-        const priceKey = Math.round(order.price * 100) / 100; // Round to 2 decimal places
-        
-        if (!uniquePrices.has(priceKey)) {
-          uniquePrices.set(priceKey, {
-            firstDate: order.date,
-            lastDate: order.date
-          });
-        } else {
-          const entry = uniquePrices.get(priceKey)!;
-          
-          // Update first date if this order is older
-          if (new Date(order.date) < new Date(entry.firstDate)) {
-            entry.firstDate = order.date;
-          }
-          
-          // Update last date if this order is newer
-          if (new Date(order.date) > new Date(entry.lastDate)) {
-            entry.lastDate = order.date;
-          }
-        }
-      });
-      
-      // Convert the map to an array and sort by last date (most recent first)
-      const pricePoints = Array.from(uniquePrices.entries())
-        .map(([price, dates]) => ({ price, ...dates }))
-        .sort((a, b) => new Date(b.lastDate).getTime() - new Date(a.lastDate).getTime());
-      
-      console.log(`Identified ${pricePoints.length} distinct price points for ${item.name}:`, pricePoints);
-      
-      // If we have multiple price points, use them to determine the last price change
-      if (pricePoints.length >= 2) {
-        const currentPricePoint = pricePoints[0];
-        const previousPricePoint = pricePoints[1];
-        
-        // Verify that the most recent price matches the current price (within a small margin)
-        const isCurrentPriceMatch = Math.abs(currentPricePoint.price - item.current_price) < 0.10;
-        
-        if (isCurrentPriceMatch) {
-          previousPrice = previousPricePoint.price;
-          lastPriceChangeDate = currentPricePoint.firstDate;
-          console.log(`${item.name} price change detected: ${previousPrice} to ${item.current_price} on ${lastPriceChangeDate}`);
-        } else {
-          console.log(`${item.name} most recent order price (${currentPricePoint.price}) doesn't match current price (${item.current_price})`);
-        }
-      } else {
-        console.log(`${item.name} only has one price point in orders: ${pricePoints[0]?.price}`);
-      }
-    } else if (priceHistory.length > 0) {
-      // Not enough orders, fall back to the official price history
-      // Sort price history by date, newest first
-      const sortedHistory = [...priceHistory].sort(
-        (a, b) => new Date(b.change_date).getTime() - new Date(a.change_date).getTime()
-      );
-      
-      const latestChange = sortedHistory[0];
-      previousPrice = latestChange.old_price;
-      lastPriceChangeDate = latestChange.change_date;
-      
-      console.log(`${item.name} using official price history: ${previousPrice} to ${latestChange.new_price} on ${lastPriceChangeDate}`);
-    } else {
-      // No price history available, create a reasonable default
-      previousPrice = Math.max(item.current_price * 0.9, item.current_price - 1);
-      lastPriceChangeDate = null;
-      
-      console.log(`${item.name} has no price history, using default previous price: ${previousPrice}`);
-    }
-    
-    // Ensure we have a different previous price so the UI can show a change
-    if (Math.abs(previousPrice - item.current_price) < 0.01) {
-      previousPrice = Math.max(item.current_price * 0.9, item.current_price - 1);
-      console.log(`${item.name} had identical prices, forced difference: ${previousPrice}`);
-    }
-    
-    // Calculate price elasticity based on historical data
-    // In a real implementation, this would be a more sophisticated calculation
-    const elasticity = performance.quantity > 0 && previousPrice !== item.current_price
-      ? Math.abs((performance.quantity / (performance.quantity * 0.9) - 1) / 
-         (item.current_price / previousPrice - 1)).toFixed(2)
-      : (Math.random() * 1.5 + 0.5).toFixed(2); // Random elasticity between 0.5 and 2.0
-    
-    // Calculate measured impact from the price change
-    const previousQuantity = performance.quantity / 
-      (Math.pow(item.current_price / previousPrice, -parseFloat(elasticity)));
-    const previousRevenue = previousQuantity * previousPrice;
-    const measuredRevenueDiff = performance.revenue - previousRevenue;
-    const measuredRevenueChangePercent = Math.round((measuredRevenueDiff / previousRevenue) * 100);
-    
-    // Determine optimization reason based on performance
-    let optimizationReason = 'Maintain market position';
-    if (performance.growth > 10) {
-      optimizationReason = 'Demand exceeds supply';
-    } else if (performance.growth < -5) {
-      optimizationReason = 'Increase competitiveness';
-    }
-    
     // Calculate profit margin (assuming cost is 60% of price if not available)
     const cost = item.cost || item.current_price * 0.6;
     const profitMargin = (item.current_price - cost) / item.current_price;
@@ -334,17 +208,17 @@ const generateRecommendationsFromData = (
       name: item.name,
       category: item.category,
       currentPrice: item.current_price,
-      previousPrice,
-      lastPriceChangeDate: lastPriceChangeDate, // Add the date of the price change
+      previousPrice: null,
+      lastPriceChangeDate: null,
       quantity: performance.quantity || 0,
       revenue: performance.revenue || 0,
       growth: performance.growth || 0,
       profitMargin,
-      elasticity,
-      optimizationReason,
-      previousRevenue,
-      incrementalRevenue: measuredRevenueDiff,
-      measuredRevenueChangePercent,
+      elasticity: null,
+      optimizationReason: null,
+      previousRevenue: null,
+      incrementalRevenue: null,
+      measuredRevenueChangePercent: null,
       timeFrame
     };
   });
