@@ -502,6 +502,8 @@ Provide your response as a JSON array of recommendation objects. Be precise with
             # Call Claude's API directly instead of using self.call_llm
             # Claude API requires system message to be separate from the messages array
             messages = [{"role": "system", "content": prompt}]
+            # response = self.call_llm(messages)
+            # GPT costs practically nothing per call - claude is close to $0.20 for the analysis. Noticeably better results with claude
             try:
                 # Initialize the Anthropic client
                 anthropic_client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
