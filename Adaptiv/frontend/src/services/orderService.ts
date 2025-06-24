@@ -1,3 +1,4 @@
+import moment from 'moment';
 import api from './api';
 import authService from './authService';
 
@@ -26,9 +27,18 @@ export interface OrderCreate {
 }
 
 export const orderService = {
-  getOrders: async (): Promise<Order[]> => {
-    const response = await api.get('/orders');
-    return response.data;
+  getOrders: async (limit?: number, skip?: number): Promise<Order[]> => {
+    try {
+      const params: any = {};
+      if (limit !== undefined) params.limit = limit;
+      if (skip !== undefined) params.skip = skip;
+      
+      const response = await api.get('/orders/', { params });
+      return response.data || [];
+    } catch (error) {
+      console.error('Error fetching orders:', error);
+      return [];
+    }
   },
 
   getOrder: async (id: number): Promise<Order> => {
@@ -86,8 +96,38 @@ export const orderService = {
 
   // Get orders by date range
   getOrdersByDateRange: async (startDate: string, endDate: string): Promise<Order[]> => {
-    const response = await api.get(`/orders/range?start_date=${startDate}&end_date=${endDate}`);
-    return response.data;
+    try {
+      const currentUser = authService.getCurrentUser();
+      if (!currentUser) {
+        console.error('User not authenticated');
+        return [];
+      }
+      
+      console.log('Requesting orders with dates:', { startDate, endDate });
+
+      const isoStartDate = `${startDate}T00:00:00`;
+      const isoEndDate = `${endDate}T23:59:59`;
+      
+      console.log('Requesting orders with ISO dates:', { 
+        start_date: isoStartDate, 
+        end_date: isoEndDate 
+      });
+      
+        const response = await api.get('/orders/range', {
+          params: {
+            start_date: isoStartDate,
+            end_date: isoEndDate
+          }
+        });
+      
+      
+      console.log(`Fetched ${response.data.length} orders for date range ${startDate} to ${endDate}`);
+      return response.data || [];
+    } catch (error: any) {
+      console.error('Error fetching orders by date range:', error);
+      console.error('Error response:', error.response?.data);
+      return [];
+    }
   },
   
   // Helper method to process sync response (defined first so we can use it in syncSquareOrders)

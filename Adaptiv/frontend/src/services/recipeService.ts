@@ -295,3 +295,69 @@ export const getRecipeNetMargin = async (recipeId: string, sellingPrice: number)
     throw error;
   }
 };
+
+// Batch fetch recipes by item IDs for efficiency
+export const getRecipesByItemIds = async (itemIds: string[]): Promise<Map<string, RecipeItem>> => {
+  try {
+    const recipeMap = new Map<string, RecipeItem>();
+    
+    // Fetch all recipes
+    const response = await api.get('recipes/');
+    
+    console.log(`Fetched ${response.data.length} recipes`);
+    
+    if (response.data && response.data.length > 0) {
+      response.data.forEach((recipe: any) => {
+        // The key issue: recipe.item_id is the menu item it's linked to
+        // But we need to map it by the item_id, not the recipe id
+        if (recipe.item_id) {
+          const itemId = recipe.item_id.toString();
+          
+          console.log(`Mapping recipe "${recipe.name}" to item ID ${itemId}`);
+          
+          // Map by item_id (menu item), not recipe id
+          recipeMap.set(itemId, {
+            item_id: recipe.id.toString(),
+            item_name: recipe.name,
+            menu_item_id: itemId, // This is what we want to map by
+            ingredients: recipe.ingredients.map((ing: any) => ({
+              ingredient_id: ing.ingredient_id.toString(),
+              ingredient_name: ing.name,
+              quantity: ing.quantity,
+              unit: ing.unit,
+              cost: ing.cost
+            })),
+            total_cost: recipe.total_cost,
+            date_created: recipe.date_created
+          });
+        }
+      });
+    }
+    
+    console.log('Recipe map created with keys:', Array.from(recipeMap.keys()));
+    
+    return recipeMap;
+  } catch (error) {
+    console.error('Error fetching recipes for items:', error);
+    return new Map();
+  }
+};
+
+const recipeService = {
+  getRecipes,
+  getRecipe,
+  createRecipe,
+  updateRecipe,
+  deleteRecipe,
+  getIngredients,
+  getIngredient,
+  createIngredient,
+  updateIngredient,
+  deleteIngredient,
+  generateSuggestionsFromMenu,
+  pollTaskUntilComplete,
+  getRecipeNetMargin,
+  getRecipesByItemIds
+};
+
+export default recipeService;

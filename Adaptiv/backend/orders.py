@@ -12,7 +12,6 @@ orders_router = APIRouter()
 @orders_router.get("/", response_model=List[schemas.Order])
 def get_orders(
     skip: int = 0, 
-    limit: int = 100, 
     account_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
@@ -26,7 +25,6 @@ def get_orders(
     orders = db.query(models.Order)\
         .filter(models.Order.user_id == user_id)\
         .offset(skip)\
-        .limit(limit)\
         .all()
         
     return orders
@@ -52,28 +50,7 @@ def check_has_orders(
     return {"has_orders": has_orders}
 
 
-@orders_router.get("/{order_id}", response_model=schemas.Order)
-def get_order(
-    order_id: int, 
-    account_id: Optional[int] = None,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
-):
-    """
-    Get a specific order by ID, ensuring it belongs to the user's account
-    """
-    # Filter by the current user's ID unless specifically requesting another account's data
-    user_id = account_id if account_id else current_user.id
-    
-    order = db.query(models.Order).filter(
-        models.Order.id == order_id,
-        models.Order.user_id == user_id
-    ).first()
-    
-    if order is None:
-        raise HTTPException(status_code=404, detail="Order not found or you don't have permission to view it")
-        
-    return order
+
 
 @orders_router.post("/", response_model=schemas.Order, status_code=status.HTTP_201_CREATED)
 def create_order(
@@ -243,3 +220,26 @@ def get_order_analytics(
         "average_order_value": average_order_value,
         "top_selling_items": top_selling_items
     }
+
+@orders_router.get("/{order_id}", response_model=schemas.Order)
+def get_order(
+    order_id: int, 
+    account_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Get a specific order by ID, ensuring it belongs to the user's account
+    """
+    # Filter by the current user's ID unless specifically requesting another account's data
+    user_id = account_id if account_id else current_user.id
+    
+    order = db.query(models.Order).filter(
+        models.Order.id == order_id,
+        models.Order.user_id == user_id
+    ).first()
+    
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found or you don't have permission to view it")
+        
+    return order

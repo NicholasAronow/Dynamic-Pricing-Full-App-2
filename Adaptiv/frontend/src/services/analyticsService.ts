@@ -1,6 +1,7 @@
 import api from './api';
 import { Item } from './itemService';
 import authService from './authService';
+import moment from 'moment';
 
 export interface CompetitorData {
   item: {
@@ -383,6 +384,37 @@ export const analyticsService = {
       };
     }
   }
+};
+
+// Helper function to get date range from time frame
+const getDateRangeFromTimeFrame = (timeFrame: string) => {
+  const end = moment().endOf('day');
+  let start;
+  
+  switch (timeFrame) {
+    case '1d':
+      start = moment().subtract(1, 'day').startOf('day');
+      break;
+    case '7d':
+      start = moment().subtract(6, 'days').startOf('day');
+      break;
+    case '1m':
+      start = moment().subtract(30, 'days').startOf('day');
+      break;
+    case '6m':
+      start = moment().subtract(180, 'days').startOf('day');
+      break;
+    case '1yr':
+      start = moment().subtract(365, 'days').startOf('day');
+      break;
+    default:
+      start = moment().subtract(30, 'days').startOf('day');
+  }
+  
+  return {
+    startDate: start.format('YYYY-MM-DD'),
+    endDate: end.format('YYYY-MM-DD')
+  };
 };
 
 export default analyticsService;

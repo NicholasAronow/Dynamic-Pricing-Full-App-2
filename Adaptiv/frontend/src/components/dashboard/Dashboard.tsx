@@ -14,6 +14,9 @@ import orderService, { Order } from '../../services/orderService';
 import analyticsService, { SalesAnalytics } from '../../services/analyticsService';
 import competitorService from '../../services/competitorService';
 import { integrationService } from '../../services/integrationService';
+import recipeService from '../../services/recipeService';
+import api from 'services/api';
+import { RecipeItem } from 'types/recipe';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -59,21 +62,25 @@ const Dashboard: React.FC = () => {
   const [competitorsLoading, setCompetitorsLoading] = useState(true);
   // Use pos_connected field from the user object
   const isPosConnected = user?.pos_connected ?? false;
+  const [hasAnySalesData, setHasAnySalesData] = useState(false);
+
+  // Cache for orders and recipes
+  const [cachedOrders, setCachedOrders] = useState<Order[]>([]);
+  const [cachedRecipes, setCachedRecipes] = useState<Map<string, RecipeItem>>(new Map());
+  const [lastFetchDate, setLastFetchDate] = useState<string | null>(null);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   
-  // Helper function to convert timeframe to dates
+  /// Helper function to convert timeframe to dates
   const getDateRangeFromTimeFrame = (timeFrame: string) => {
-    // For all views except 1d, include today in the range to ensure we capture current week's COGS data
-    const end = timeFrame === '1d' ? moment().subtract(1, 'day').endOf('day') : moment().endOf('day');
+    const end = moment().endOf('day');
     let start;
     
     switch (timeFrame) {
       case '1d':
-        // For 1-day view, use yesterday's full day (midnight to midnight)
         start = moment().subtract(1, 'day').startOf('day');
+        end.subtract(1, 'day').endOf('day');
         break;
       case '7d':
-        // For 7-day view, include today to ensure we capture data from the current week
-        // This ensures we include the current week's COGS data which is critical
         start = moment().subtract(6, 'days').startOf('day');
         break;
       case '1m':
@@ -89,146 +96,365 @@ const Dashboard: React.FC = () => {
         start = moment().subtract(30, 'days').startOf('day');
     }
     
-    console.log(`Time frame selected: ${timeFrame}, Date range: ${start.format('YYYY-MM-DD')} to ${end.format('YYYY-MM-DD')}`);
-    
     return {
       startDate: start.format('YYYY-MM-DD'),
       endDate: end.format('YYYY-MM-DD')
     };
   };
 
-  // Fetch sales data and COGS data from API
-  // Keep track of whether we have ANY sales data across all time frames
-  const [hasAnySalesData, setHasAnySalesData] = useState(false);
-  const [cogsData, setCogsData] = useState<any[]>([]);
-  
-  // Check if the user has ever had orders - this is used to determine if we should show the "Connect POS" prompt
-  useEffect(() => {
-    const checkForAnyOrders = async () => {
-      try {
-        const hasOrders = await orderService.checkHasEverHadOrders();
-        console.log('User has ever had orders:', hasOrders);
-      } catch (error) {
-        console.error('Error checking if user has ever had orders:', error);
-        // If there's an error, assume test accounts have orders to avoid showing unnecessary prompts
-        if (user?.email?.includes('test')) {
-        }
-      }
-    };
-    
-    checkForAnyOrders();
-  }, [user?.email]);
-  // Add cache for monthly aggregated data to ensure consistency
-  const [monthlyAggregatedData, setMonthlyAggregatedData] = useState<Record<string, Record<string, { revenue: number; orders: number; cogs: number; profitMargin: number | null }>>>({});
-  
-  // Helper function to convert weekly COGS to daily values
-  // Can process either the current cogsData state or a directly provided array
-  const processCogsDataToDaily = (cogsDataToProcess = cogsData) => {
-    // Create a map of daily COGS by date
-    const dailyCogsByDate: Record<string, number> = {};
-    
-    console.log('Processing COGS data to daily values:', cogsData);
-    
-    // If we have no COGS data, let's add some test data to ensure the line appears
-    if (!cogsData || cogsData.length === 0) {
-      console.log('No COGS data found');
-    }
-    
-    // Process each COGS entry (weekly) into daily values
-    cogsDataToProcess.forEach(cogsEntry => {
-      const weekStart = moment(cogsEntry.week_start_date);
-      const weekEnd = moment(cogsEntry.week_end_date);
-      const daysInWeek = weekEnd.diff(weekStart, 'days') + 1;
-      const dailyCogs = cogsEntry.amount / daysInWeek; // Distribute weekly COGS evenly to each day
-      
-      console.log(`Processing COGS entry: ${weekStart.format('YYYY-MM-DD')} to ${weekEnd.format('YYYY-MM-DD')}, amount: ${cogsEntry.amount}, daily: ${dailyCogs}`);
-      
-      // For each day in the week, add the daily COGS value
-      for (let day = 0; day < daysInWeek; day++) {
-        const currentDate = moment(weekStart).add(day, 'days').format('YYYY-MM-DD');
-        dailyCogsByDate[currentDate] = dailyCogs;
-      }
-    });
-    
-    console.log('Processed daily COGS data:', dailyCogsByDate);
-    return dailyCogsByDate;
-  };
-  
+  // Single unified data structure
+  interface ChartDataPoint {
+    name: string;
+    revenue: number;
+    orders: number;
+    cogs: number;
+    profitMargin: number | null;
+  }
 
-  // Generate empty chart data structure
-  const getEmptyChartData = (timeFrame: string) => {
-    switch (timeFrame) {
-      case '1d':
-        return Array.from({ length: 24 }, (_, i) => ({
-          name: moment().subtract(1, 'day').startOf('day').add(i, 'hours').format('HH:00'),
-          revenue: 0,
-          orders: 0,
-          profitMargin: null
-        }));
-      case '7d':
-        return Array.from({ length: 7 }, (_, i) => ({
-          name: moment().subtract(6 - i, 'days').format('MMM DD'),
-          revenue: 0,
-          orders: 0,
-          profitMargin: null
-        }));
-      case '1m':
-        return Array.from({ length: 30 }, (_, i) => ({
-          name: moment().subtract(29 - i, 'days').format('MMM DD'),
-          revenue: 0,
-          orders: 0,
-          profitMargin: null
-        }));
-      case '6m':
-        return Array.from({ length: 6 }, (_, i) => ({
-          name: moment().subtract(5 - i, 'months').format('MMM'),
-          revenue: 0,
-          orders: 0,
-          profitMargin: null
-        }));
-      case '1yr':
-        return Array.from({ length: 12 }, (_, i) => ({
-          name: moment().subtract(11 - i, 'months').format('MMM'),
-          revenue: 0,
-          orders: 0,
-          profitMargin: null
-        }));
-      default:
-        return [];
+  const fetchAndCacheYearData = async () => {
+    try {
+      console.log('Fetching full year of order data...');
+
+      const debugRecipes = await api.get('/recipes/');
+      console.log('Sample recipe structure:', debugRecipes.data[0]);
+      
+      // Get date range for the past year
+      const endDate = moment().endOf('day').format('YYYY-MM-DD');
+      const startDate = moment().subtract(365, 'days').startOf('day').format('YYYY-MM-DD');
+      
+      console.time('fetchYearOrders');
+      const yearOrders = await orderService.getOrdersByDateRange(startDate, endDate);
+      console.timeEnd('fetchYearOrders');
+      
+      console.log(`Cached ${yearOrders.length} orders for the year`);
+      setCachedOrders(yearOrders);
+      
+      // Pre-fetch all recipes for items in these orders
+      const itemIds = new Set<string>();
+      yearOrders.forEach(order => {
+        order.items.forEach(item => {
+          itemIds.add(item.item_id.toString());
+        });
+      });
+      
+      console.log(`Pre-fetching recipes for ${itemIds.size} unique items...`);
+      console.time('fetchAllRecipes');
+      const recipeMap = await recipeService.getRecipesByItemIds(Array.from(itemIds));
+      console.timeEnd('fetchAllRecipes');
+      
+      setCachedRecipes(recipeMap);
+      setLastFetchDate(moment().format('YYYY-MM-DD'));
+      
+      return { orders: yearOrders, recipes: recipeMap };
+    } catch (error) {
+      console.error('Error fetching year data:', error);
+      return { orders: [], recipes: new Map() };
     }
   };
 
-  // Add this function to process chart data efficiently
-  const processChartData = (
-    salesData: any[], 
-    cogsEntries: COGSEntry[], 
-    timeFrame: string,
-    startDate: string,
-    endDate: string
-  ) => {
-    // Create a map of COGS by date for O(1) lookup
+  // Smart COGS calculation using order and recipe data
+  const calculateCOGSFromOrders = async (orders: Order[], startDate: string, endDate: string): Promise<Record<string, number>> => {
     const cogsByDate: Record<string, number> = {};
-    cogsEntries.forEach(entry => {
-      // Since COGS entries now have daily granularity from the service
-      cogsByDate[entry.week_start_date] = entry.amount;
+    
+    if (orders.length === 0) return cogsByDate;
+    
+    // Get all unique item IDs from orders
+    const itemIds = new Set<string>();
+    orders.forEach(order => {
+      order.items.forEach(item => {
+        itemIds.add(item.item_id.toString());
+      });
     });
     
-    // Create a map of sales by date for O(1) lookup
-    const salesByDate: Record<string, { revenue: number; orders: number }> = {};
-    salesData.forEach(day => {
-      salesByDate[day.date] = { revenue: day.revenue, orders: day.orders };
+    console.log(`Fetching recipes for ${itemIds.size} unique items`);
+    
+    // Fetch all recipes for these items in one call
+    const recipeMap = await recipeService.getRecipesByItemIds(Array.from(itemIds));
+    
+    console.log(`Found recipes for ${recipeMap.size} items`);
+    
+    // Calculate COGS for each order
+    orders.forEach(order => {
+      const orderDate = moment(order.order_date).format('YYYY-MM-DD');
+      if (!cogsByDate[orderDate]) {
+        cogsByDate[orderDate] = 0;
+      }
+      
+      // Sum up COGS for all items in the order
+      order.items.forEach(item => {
+        const recipe = recipeMap.get(item.item_id.toString());
+        if (recipe && recipe.total_cost) {
+          cogsByDate[orderDate] += recipe.total_cost * item.quantity;
+        }
+      });
     });
+    
+    return cogsByDate;
+  };
+
+  // Fallback method to get sales data directly from orders
+  // Optimized method to get sales data using the date range endpoint
+  const getSalesDataFromOrders = async (timeFrame: string) => {
+    try {
+      const { startDate, endDate } = getDateRangeFromTimeFrame(timeFrame);
+      
+      console.log(`Fetching orders for timeframe ${timeFrame}: ${startDate} to ${endDate}`);
+      
+      // Use the date range endpoint to get only relevant orders
+      const orders = await orderService.getOrdersByDateRange(startDate, endDate);
+      
+      console.log(`Retrieved ${orders.length} orders`);
+      
+      // Process into daily sales
+      const salesByDay: Record<string, { revenue: number; orders: number }> = {};
+      
+      orders.forEach(order => {
+        const date = moment(order.order_date).format('YYYY-MM-DD');
+        if (!salesByDay[date]) {
+          salesByDay[date] = { revenue: 0, orders: 0 };
+        }
+        salesByDay[date].revenue += order.total_amount;
+        salesByDay[date].orders += 1;
+      });
+      
+      // Convert to array
+      const salesArray = Object.entries(salesByDay).map(([date, data]) => ({
+        date,
+        revenue: data.revenue,
+        orders: data.orders
+      }));
+      
+      return {
+        orders,
+        salesByDay: salesArray
+      };
+    } catch (error) {
+      console.error('Error getting sales data from orders:', error);
+      return {
+        orders: [],
+        salesByDay: []
+      };
+    }
+  };
+
+  // Main data fetching function
+  const fetchDashboardData = async (timeFrame: string, forceRefresh: boolean = false) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      let orders: Order[] = cachedOrders;
+      let recipes: Map<string, RecipeItem> = cachedRecipes;
+      
+      // Fetch full year data on initial load or if forced
+      if (isInitialLoad || forceRefresh || cachedOrders.length === 0) {
+        console.log('Initial load or refresh requested, fetching year data...');
+        const yearData = await fetchAndCacheYearData();
+        orders = yearData.orders;
+        recipes = yearData.recipes;
+        setIsInitialLoad(false);
+      }
+      
+      // Get date range for current timeframe
+      const { startDate, endDate } = getDateRangeFromTimeFrame(timeFrame);
+      
+      // Filter cached orders to current timeframe
+      console.time('filterOrders');
+      const filteredOrders = orders.filter(order => {
+        const orderDate = moment(order.order_date).format('YYYY-MM-DD');
+        return orderDate >= startDate && orderDate <= endDate;
+      });
+      console.timeEnd('filterOrders');
+      
+      console.log(`Using ${filteredOrders.length} orders for timeframe ${timeFrame}`);
+      
+      // Process orders into sales by day
+      const salesByDay = processSalesFromOrders(filteredOrders);
+      
+      // Calculate COGS using cached recipes
+      console.time('calculateCOGS');
+      const cogsByDate = calculateCOGSFromOrdersWithCache(filteredOrders, recipes);
+      console.timeEnd('calculateCOGS');
+      
+      // Calculate item performance
+      const itemPerformance = calculateItemPerformance(filteredOrders);
+      
+      setHasAnySalesData(salesByDay.length > 0);
+      
+      // Process chart data
+      const chartData = processChartData(
+        salesByDay,
+        cogsByDate,
+        timeFrame
+      );
+      
+      setSalesData(chartData);
+      
+      // Enhance products with cached recipe data
+      console.time('enhanceProducts');
+      const enhancedProducts = enhanceProductsWithCache(itemPerformance, recipes);
+      console.timeEnd('enhanceProducts');
+      
+      setProductPerformance(enhancedProducts);
+      
+    } catch (err) {
+      console.error('Error fetching dashboard data:', err);
+      setError('Failed to load dashboard data');
+      setSalesData(getEmptyChartData(timeFrame));
+      setProductPerformance([]);
+    } finally {
+      setLoading(false);
+      setProductsLoading(false);
+    }
+  };
+
+  // Calculate COGS using cached recipes
+const calculateCOGSFromOrdersWithCache = (
+    orders: Order[], 
+    recipeMap: Map<string, RecipeItem>
+  ): Record<string, number> => {
+    const cogsByDate: Record<string, number> = {};
+    
+    orders.forEach(order => {
+      const orderDate = moment(order.order_date).format('YYYY-MM-DD');
+      if (!cogsByDate[orderDate]) {
+        cogsByDate[orderDate] = 0;
+      }
+      
+      order.items.forEach(item => {
+        const recipe = recipeMap.get(item.item_id.toString());
+        if (recipe && recipe.total_cost) {
+          cogsByDate[orderDate] += recipe.total_cost * item.quantity;
+        }
+      });
+    });
+    
+    return cogsByDate;
+  };
+
+// Enhance products with cached recipe data
+  const enhanceProductsWithCache = (
+    products: any[], 
+    recipeMap: Map<string, RecipeItem>
+  ): any[] => {
+    return products.map(product => {
+      const recipe = recipeMap.get(product.id.toString());
+      
+      if (recipe && recipe.total_cost) {
+        const totalCOGS = recipe.total_cost * product.quantitySold;
+        const profitMargin = calculateProfitMargin(product.revenue, totalCOGS);
+        
+        return {
+          ...product,
+          recipeCost: recipe.total_cost,
+          totalCOGS,
+          profitMargin,
+          hasRecipe: true
+        };
+      }
+      
+      return {
+        ...product,
+        recipeCost: 0,
+        totalCOGS: 0,
+        profitMargin: null,
+        hasRecipe: false
+      };
+    });
+  };
+
+  // Use the analytics endpoint for aggregated data
+  const getAnalyticsData = async (timeFrame: string) => {
+    try {
+      const { startDate, endDate } = getDateRangeFromTimeFrame(timeFrame);
+      
+      // Use the analytics endpoint which is more efficient
+      const response = await api.get('/orders/analytics', {
+        params: {
+          start_date: startDate,
+          end_date: endDate
+        }
+      });
+      
+      const analytics = response.data;
+      
+      // The analytics endpoint gives us aggregated data
+      // We need to get daily breakdown separately or enhance the backend
+      
+      // For now, get the orders for daily breakdown
+      const orders = await orderService.getOrdersByDateRange(startDate, endDate);
+      
+      return {
+        analytics,
+        orders
+      };
+    } catch (error) {
+      console.error('Error fetching analytics:', error);
+      return null;
+    }
+  };
+
+  // Helper function to process orders into sales by day
+  const processSalesFromOrders = (orders: Order[]): any[] => {
+    const salesMap: Record<string, { revenue: number; orders: number }> = {};
+    
+    orders.forEach(order => {
+      const date = moment(order.order_date).format('YYYY-MM-DD');
+      if (!salesMap[date]) {
+        salesMap[date] = { revenue: 0, orders: 0 };
+      }
+      salesMap[date].revenue += order.total_amount;
+      salesMap[date].orders += 1;
+    });
+    
+    return Object.entries(salesMap).map(([date, data]) => ({
+      date,
+      revenue: data.revenue,
+      orders: data.orders
+    }));
+  };
+
+  // Helper function to calculate item performance from orders
+  const calculateItemPerformance = (orders: Order[]): any[] => {
+    const itemMap: Record<string, any> = {};
+    
+    orders.forEach(order => {
+      order.items.forEach(item => {
+        const itemId = item.item_id.toString();
+        if (!itemMap[itemId]) {
+          itemMap[itemId] = {
+            id: itemId,
+            name: item.item_name,
+            revenue: 0,
+            quantitySold: 0,
+            currentPrice: item.unit_price,
+            growth: 0 // Would need historical data to calculate
+          };
+        }
+        itemMap[itemId].revenue += item.subtotal;
+        itemMap[itemId].quantitySold += item.quantity;
+      });
+    });
+    
+    return Object.values(itemMap);
+  };
+
+  // Process chart data based on timeframe
+  const processChartData = (
+    salesData: any[],
+    cogsByDate: Record<string, number>,
+    timeFrame: string
+  ): ChartDataPoint[] => {
     
     switch (timeFrame) {
       case '1d':
-        return processHourlyData(salesByDate, cogsByDate);
+        return processHourlyData(salesData, cogsByDate);
       case '7d':
-        return processDailyData(salesByDate, cogsByDate, 7);
       case '1m':
-        return processDailyData(salesByDate, cogsByDate, 30);
+        return processDailyData(salesData, cogsByDate, timeFrame);
       case '6m':
       case '1yr':
-        return processMonthlyData(salesByDate, cogsByDate, timeFrame);
+        return processMonthlyData(salesData, cogsByDate, timeFrame);
       default:
         return [];
     }
@@ -236,193 +462,249 @@ const Dashboard: React.FC = () => {
 
   // Process hourly data for 1d view
   const processHourlyData = (
-    salesByDate: Record<string, { revenue: number; orders: number }>,
+    salesData: any[],
     cogsByDate: Record<string, number>
-  ) => {
-    const yesterday = moment().subtract(1, 'day').startOf('day');
-    const yesterdayStr = yesterday.format('YYYY-MM-DD');
-    const dailySales = salesByDate[yesterdayStr] || { revenue: 0, orders: 0 };
-    const dailyCogs = cogsByDate[yesterdayStr] || 0;
+  ): ChartDataPoint[] => {
+    const yesterday = moment().subtract(1, 'day').format('YYYY-MM-DD');
+    const dailySales = salesData.find(d => d.date === yesterday) || { revenue: 0, orders: 0 };
+    const dailyCogs = cogsByDate[yesterday] || 0;
     
-    const hourlyData = [];
-    for (let hour = 0; hour < 24; hour++) {
-      // Distribute daily values across hours (simplified - could be enhanced with hourly patterns)
+    return Array.from({ length: 24 }, (_, hour) => {
       const hourlyRevenue = dailySales.revenue / 24;
       const hourlyCogs = dailyCogs / 24;
+      const profitMargin = calculateProfitMargin(hourlyRevenue, hourlyCogs);
       
-      const profitMargin = hourlyRevenue > 0 && hourlyCogs > 0
-        ? ((hourlyRevenue - hourlyCogs) / hourlyRevenue * 100)
-        : null;
-      
-      hourlyData.push({
-        name: moment(yesterday).add(hour, 'hours').format('HH:00'),
+      return {
+        name: moment().subtract(1, 'day').startOf('day').add(hour, 'hours').format('HH:00'),
         revenue: Math.round(hourlyRevenue * 100) / 100,
         orders: Math.round(dailySales.orders / 24),
-        profitMargin: profitMargin ? Math.round(profitMargin * 100) / 100 : null
-      });
-    }
-    
-    return hourlyData;
+        cogs: Math.round(hourlyCogs * 100) / 100,
+        profitMargin
+      };
+    });
   };
 
-  // Process daily data for 7d and 1m views
+  // Process daily data
   const processDailyData = (
-    salesByDate: Record<string, { revenue: number; orders: number }>,
+    salesData: any[],
     cogsByDate: Record<string, number>,
-    days: number
-  ) => {
-    const endDate = moment().endOf('day');
+    timeFrame: string
+  ): ChartDataPoint[] => {
+    const days = timeFrame === '7d' ? 7 : 30;
     const startDate = moment().subtract(days - 1, 'days').startOf('day');
     
-    const dailyData = [];
-    for (let i = 0; i < days; i++) {
+    const salesByDate = new Map(salesData.map(d => [d.date, d]));
+    
+    return Array.from({ length: days }, (_, i) => {
       const currentDate = moment(startDate).add(i, 'days');
       const dateStr = currentDate.format('YYYY-MM-DD');
       
-      const sales = salesByDate[dateStr] || { revenue: 0, orders: 0 };
+      const sales = salesByDate.get(dateStr) || { revenue: 0, orders: 0 };
       const cogs = cogsByDate[dateStr] || 0;
+      const profitMargin = calculateProfitMargin(sales.revenue, cogs);
       
-      const profitMargin = sales.revenue > 0 && cogs > 0
-        ? ((sales.revenue - cogs) / sales.revenue * 100)
-        : null;
-      
-      dailyData.push({
+      return {
         name: currentDate.format('MMM DD'),
         revenue: Math.round(sales.revenue * 100) / 100,
         orders: sales.orders,
-        profitMargin: profitMargin ? Math.round(profitMargin * 100) / 100 : null
-      });
-    }
-    
-    return dailyData;
+        cogs: Math.round(cogs * 100) / 100,
+        profitMargin
+      };
+    });
   };
 
-  // Process monthly data for 6m and 1yr views
+  // Process monthly data
   const processMonthlyData = (
-    salesByDate: Record<string, { revenue: number; orders: number }>,
+    salesData: any[],
     cogsByDate: Record<string, number>,
     timeFrame: string
-  ) => {
-    // Aggregate by month
-    const monthlyAggregates: Record<string, { revenue: number; orders: number; cogs: number }> = {};
+  ): ChartDataPoint[] => {
+    const months = timeFrame === '6m' ? 6 : 12;
+    const monthlyData: Record<string, { revenue: number; orders: number; cogs: number }> = {};
     
-    // Process sales data
-    Object.entries(salesByDate).forEach(([date, data]) => {
-      const monthKey = moment(date).format('YYYY-MM');
-      if (!monthlyAggregates[monthKey]) {
-        monthlyAggregates[monthKey] = { revenue: 0, orders: 0, cogs: 0 };
+    // Aggregate sales by month
+    salesData.forEach(day => {
+      const monthKey = moment(day.date).format('YYYY-MM');
+      if (!monthlyData[monthKey]) {
+        monthlyData[monthKey] = { revenue: 0, orders: 0, cogs: 0 };
       }
-      monthlyAggregates[monthKey].revenue += data.revenue;
-      monthlyAggregates[monthKey].orders += data.orders;
+      monthlyData[monthKey].revenue += day.revenue;
+      monthlyData[monthKey].orders += day.orders;
     });
     
-    // Process COGS data
+    // Aggregate COGS by month
     Object.entries(cogsByDate).forEach(([date, amount]) => {
       const monthKey = moment(date).format('YYYY-MM');
-      if (!monthlyAggregates[monthKey]) {
-        monthlyAggregates[monthKey] = { revenue: 0, orders: 0, cogs: 0 };
+      if (!monthlyData[monthKey]) {
+        monthlyData[monthKey] = { revenue: 0, orders: 0, cogs: 0 };
       }
-      monthlyAggregates[monthKey].cogs += amount;
+      monthlyData[monthKey].cogs += amount;
     });
     
-    // Convert to sorted array and calculate profit margins
-    const allMonths = Object.entries(monthlyAggregates)
-      .map(([monthKey, data]) => {
-        const profitMargin = data.revenue > 0 && data.cogs > 0
-          ? ((data.revenue - data.cogs) / data.revenue * 100)
-          : null;
+    const sortedMonths = Object.entries(monthlyData)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-months);
+    
+    return sortedMonths.map(([monthKey, data]) => {
+      const profitMargin = calculateProfitMargin(data.revenue, data.cogs);
+      
+      return {
+        name: moment(monthKey, 'YYYY-MM').format('MMM'),
+        revenue: Math.round(data.revenue * 100) / 100,
+        orders: data.orders,
+        cogs: Math.round(data.cogs * 100) / 100,
+        profitMargin
+      };
+    });
+  };
+
+  // Enhance products with recipe-based COGS
+  const enhanceProductsWithCOGS = async (products: any[]): Promise<any[]> => {
+    if (!products || products.length === 0) return [];
+    
+    const itemIds = products.map(p => p.id.toString());
+    const recipeMap = await recipeService.getRecipesByItemIds(itemIds);
+    
+    return products.map(product => {
+      const recipe = recipeMap.get(product.id.toString());
+      
+      if (recipe && recipe.total_cost) {
+        const totalCOGS = recipe.total_cost * product.quantitySold;
+        const profitMargin = calculateProfitMargin(product.revenue, totalCOGS);
         
         return {
-          monthKey,
-          name: moment(monthKey, 'YYYY-MM').format('MMM'),
-          revenue: Math.round(data.revenue * 100) / 100,
-          orders: data.orders,
-          profitMargin: profitMargin ? Math.round(profitMargin * 100) / 100 : null
+          ...product,
+          recipeCost: recipe.total_cost,
+          totalCOGS,
+          profitMargin,
+          hasRecipe: true
         };
-      })
-      .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
-    
-    // Return the appropriate number of months
-    if (timeFrame === '6m') {
-      return allMonths.slice(-6);
-    } else {
-      return allMonths.slice(-12);
+      }
+      
+      return {
+        ...product,
+        recipeCost: 0,
+        totalCOGS: 0,
+        profitMargin: null,
+        hasRecipe: false
+      };
+    });
+  };
+
+  // Utility function to calculate profit margin
+  const calculateProfitMargin = (revenue: number, cogs: number): number | null => {
+    if (revenue <= 0) return null;
+    if (cogs <= 0) return 100; // If no COGS, margin is 100%
+    return Math.round(((revenue - cogs) / revenue * 100) * 100) / 100;
+  };
+
+  // Generate empty chart data structure
+  const getEmptyChartData = (timeFrame: string): ChartDataPoint[] => {
+    switch (timeFrame) {
+      case '1d':
+        return Array.from({ length: 24 }, (_, i) => ({
+          name: moment().subtract(1, 'day').startOf('day').add(i, 'hours').format('HH:00'),
+          revenue: 0,
+          orders: 0,
+          cogs: 0,
+          profitMargin: null
+        }));
+      case '7d':
+        return Array.from({ length: 7 }, (_, i) => ({
+          name: moment().subtract(6 - i, 'days').format('MMM DD'),
+          revenue: 0,
+          orders: 0,
+          cogs: 0,
+          profitMargin: null
+        }));
+      case '1m':
+        return Array.from({ length: 30 }, (_, i) => ({
+          name: moment().subtract(29 - i, 'days').format('MMM DD'),
+          revenue: 0,
+          orders: 0,
+          cogs: 0,
+          profitMargin: null
+        }));
+      case '6m':
+        return Array.from({ length: 6 }, (_, i) => ({
+          name: moment().subtract(5 - i, 'months').format('MMM'),
+          revenue: 0,
+          orders: 0,
+          cogs: 0,
+          profitMargin: null
+        }));
+      case '1yr':
+        return Array.from({ length: 12 }, (_, i) => ({
+          name: moment().subtract(11 - i, 'months').format('MMM'),
+          revenue: 0,
+          orders: 0,
+          cogs: 0,
+          profitMargin: null
+        }));
+      default:
+        return [];
     }
   };
-  
-  // Replace the existing useEffect for fetchSalesData with this optimized version:
+
+  // Replace the main useEffect for fetching sales data
+  // Initial data fetch
+useEffect(() => {
+    if (user && isPosConnected) {
+      fetchDashboardData(timeFrame, isInitialLoad);
+    }
+  }, [user, isPosConnected]);
+
+  // Handle timeframe changes (use cached data)
   useEffect(() => {
-    const fetchSalesData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        // Get the appropriate date range
-        const dateRange = getDateRangeFromTimeFrame(timeFrame);
-        const { startDate, endDate } = dateRange;
-        
-        // Fetch sales data
-        const analytics = await analyticsService.getSalesAnalytics(startDate, endDate);
-        setHasAnySalesData(analytics.salesByDay && analytics.salesByDay.length > 0);
-        
-        // Fetch COGS data
-        const fetchedCogsData = await cogsService.getCOGSData(startDate, endDate);
-        console.log('Fetched COGS data:', fetchedCogsData.length, 'entries');
-        
-        // Process the data based on timeframe
-        if (analytics.salesByDay && analytics.salesByDay.length > 0) {
-          const chartData = processChartData(
-            analytics.salesByDay, 
-            fetchedCogsData, 
-            timeFrame,
-            startDate,
-            endDate
-          );
-          
-          setSalesData(chartData);
-        } else {
-          // Handle no data case
-          setSalesData(getEmptyChartData(timeFrame));
-        }
-        
-      } catch (err) {
-        console.error('Error fetching sales data:', err);
-        setError('Failed to load sales data');
-        setSalesData(getEmptyChartData(timeFrame));
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    fetchSalesData();
+    if (!isInitialLoad && cachedOrders.length > 0) {
+      fetchDashboardData(timeFrame, false);
+    }
   }, [timeFrame]);
-  
-  // Fetch product performance data from API
+
+  // Handle items timeframe changes separately
   useEffect(() => {
-    const fetchProductPerformance = async () => {
+    if (!isInitialLoad && cachedOrders.length > 0) {
+      const { startDate, endDate } = getDateRangeFromTimeFrame(itemsTimeFrame);
+      
+      // Filter cached orders for items timeframe
+      const filteredOrders = cachedOrders.filter(order => {
+        const orderDate = moment(order.order_date).format('YYYY-MM-DD');
+        return orderDate >= startDate && orderDate <= endDate;
+      });
+      
+      // Calculate item performance
+      const itemPerformance = calculateItemPerformance(filteredOrders);
+      
+      // Enhance with cached recipes
+      const enhancedProducts = enhanceProductsWithCache(itemPerformance, cachedRecipes);
+      setProductPerformance(enhancedProducts);
+    }
+  }, [itemsTimeFrame]);
+
+    // Main data fetching effect
+  useEffect(() => {
+    fetchDashboardData(timeFrame);
+  }, [timeFrame]);
+
+  // Separate effect for items time frame
+  useEffect(() => {
+    const fetchProducts = async () => {
       try {
         setProductsLoading(true);
-        
-        // Try to fetch real item performance data
-        try {
-          const data = await analyticsService.getItemPerformance(itemsTimeFrame);
-          setProductPerformance(data);
-        } catch (err) {
-          console.error('Failed to fetch item performance:', err);
-          // No mock data fallback, just set empty array
-          setProductPerformance([]);
-        }
+        const products = await analyticsService.getItemPerformance(itemsTimeFrame);
+        const enhancedProducts = await enhanceProductsWithCOGS(products);
+        setProductPerformance(enhancedProducts);
       } catch (err) {
         console.error('Error fetching product performance:', err);
-        // No mock data fallback, just set empty array
         setProductPerformance([]);
       } finally {
         setProductsLoading(false);
       }
     };
     
-    fetchProductPerformance();
+    fetchProducts();
   }, [itemsTimeFrame]);
+  
   
   // Fetch competitor data using Gemini API endpoint (same as Competitors component)
   useEffect(() => {
@@ -545,73 +827,6 @@ const Dashboard: React.FC = () => {
     
     fetchCompetitorData();
   }, []);
-  
-  // Ensure the current week's COGS data is always included in dashboard calculations
-  useEffect(() => {
-    const ensureCurrentWeekCOGSData = async () => {
-      if (!user) return;
-      
-      try {
-        // Use our specialized function to get current week's COGS data specifically
-        const currentWeekCOGS = await cogsService.getCurrentWeekCOGSData();
-        
-        // Check if we have current week COGS data
-        const hasCurrentWeekData = currentWeekCOGS.length > 0;
-        
-        // If we have current week data, ensure it's included in our processed COGS data
-        if (hasCurrentWeekData) {
-          console.log('Found current week COGS data, processing for display', currentWeekCOGS);
-          
-          // Process current week's COGS data into daily values
-          const currentWeekProcessed = processCogsDataToDaily(currentWeekCOGS);
-          
-          // Debug logging
-          console.log('Processed current week COGS data into daily values:', currentWeekProcessed);
-          Object.entries(currentWeekProcessed).forEach(([date, amount]) => {
-            console.log(`Daily COGS for ${date}: $${amount.toFixed(2)}`);
-          });
-          
-          // Also update the raw COGS data array to include current week entries
-          setCogsData(prevData => {
-            // Remove any entries for the current week that might be outdated
-            const today = moment();
-            const startOfWeek = today.clone().startOf('week');
-            
-            const filteredData = prevData.filter(entry => 
-              !moment(entry.week_start_date).isSame(startOfWeek, 'day')
-            );
-            
-            // Add the new current week entries
-            const updatedData = [...filteredData, ...currentWeekCOGS];
-            console.log('Updated cogsData with current week entries', updatedData);
-            return updatedData;
-          });
-          
-          // Force a re-calculation of all data that depends on COGS
-          if (timeFrame === '7d' || timeFrame === '1m') {
-            console.log(`Force refreshing ${timeFrame} view to include current week COGS data`);
-            // This will trigger the useEffect that depends on timeFrame
-            setTimeFrame(prev => prev === '7d' ? '7d_refresh' : '1m_refresh');
-            // Immediately set it back to avoid double refresh
-            setTimeout(() => setTimeFrame(prev => prev.includes('refresh') ? prev.split('_')[0] : prev), 10);
-          }
-        }
-      } catch (error) {
-        console.error('Error ensuring current week COGS data:', error);
-      }
-    };
-    
-    // Always check for current week's COGS data when component loads or user changes
-    ensureCurrentWeekCOGSData();
-    
-    // We'll also set up an interval to check for updates every 5 minutes if the dashboard stays open
-    const intervalId = setInterval(() => {
-      console.log('Scheduled COGS data refresh');
-      ensureCurrentWeekCOGSData();
-    }, 5 * 60 * 1000); // 5 minutes
-    
-    return () => clearInterval(intervalId);
-  }, [user]);
 
   // Extract the user's name for the welcome message
   const userName = user?.email?.split('@')[0] || 'User';
@@ -929,28 +1144,50 @@ const Dashboard: React.FC = () => {
               >
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
-                {/* Primary Y-axis for revenue */}
                 <YAxis 
                   yAxisId="left"
                   tickFormatter={(tick) => `$${formatNumberWithCommas(tick)}`}
                 />
-                {/* Secondary Y-axis for profit margin percentage */}
                 <YAxis 
                   yAxisId="right" 
                   orientation="right" 
-                  domain={[-50, 100]}
+                  domain={[0, 100]}
                   tickFormatter={(tick) => `${tick}%`}
                 />
                 <RechartsTooltip 
-                  formatter={(value: number, name: string) => {
-                    if (name === 'Sales') {
-                      return [`$${formatNumberWithCommas(value.toFixed(2))}`, name];
-                    } else if (name === 'Profit Margin') {
-                      return [`Profit Margin: ${value.toFixed(2)}%`, name];
+                  content={(props) => {
+                    const { active, payload, label } = props;
+                    if (active && payload && payload.length) {
+                      const data = payload[0].payload;
+                      return (
+                        <div style={{ 
+                          backgroundColor: 'white', 
+                          padding: '10px', 
+                          border: '1px solid #ccc',
+                          borderRadius: '4px'
+                        }}>
+                          <p style={{ margin: 0, fontWeight: 'bold' }}>{label}</p>
+                          <p style={{ margin: '4px 0', color: '#9370DB' }}>
+                            Sales: ${formatNumberWithCommas(data.revenue?.toFixed(2) || '0')}
+                          </p>
+                          {data.cogs > 0 && (
+                            <p style={{ margin: '4px 0', color: '#ff7875' }}>
+                              COGS: ${formatNumberWithCommas(data.cogs?.toFixed(2) || '0')}
+                            </p>
+                          )}
+                          {data.profitMargin !== null && (
+                            <p style={{ margin: '4px 0', color: '#00C853' }}>
+                              Margin: {data.profitMargin.toFixed(1)}%
+                            </p>
+                          )}
+                          <p style={{ margin: '4px 0', color: '#666' }}>
+                            Orders: {data.orders}
+                          </p>
+                        </div>
+                      );
                     }
-                    return [value, name];
+                    return null;
                   }}
-                  labelFormatter={(label: string) => `Date: ${label}`}
                 />
                 <Legend />
                 <Bar 
@@ -960,18 +1197,16 @@ const Dashboard: React.FC = () => {
                   radius={[4, 4, 0, 0]}
                   yAxisId="left"
                 />
-                {/* Profit margin as a dashed line with MAXIMUM visibility */}
                 <Line 
                   type="monotone" 
                   dataKey="profitMargin" 
                   name="Profit Margin" 
                   stroke="#00C853" 
                   strokeWidth={3}
-                  strokeDasharray="5 5"
-                  dot={false}
-                  activeDot={{ r: 8 }}
+                  dot={{ fill: '#00C853', r: 4 }}
+                  activeDot={{ r: 6 }}
                   yAxisId="right"
-                  connectNulls={true} /* Connect points even if some are null - critical for continuous line */
+                  connectNulls={true}
                 />
               </ComposedChart>
             </ResponsiveContainer>
@@ -1044,53 +1279,75 @@ const Dashboard: React.FC = () => {
                     Best Selling Items
                   </Title>
                   <div style={{ marginBottom: 36 }}>
-                  {!error && topProducts && topProducts.map((product: any, index: number) => {
-                    const color = barColors[index % barColors.length];
-                    return (
-                      <Card
-                        key={product.id}
-                        style={{ marginBottom: 8, borderRadius: 0, border: 'none'}}
-                        size="small"
-                        className="dashboard-card-item"
-                        onClick={() => navigate(`/product/${product.id}`)}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center' }}>
-                              <strong>{product.name}</strong>
-                            </div>
-                            <div style={{ marginTop: 4 }}>
-                              <span>
-                                ${formatNumberWithCommas(Number((product.currentPrice || 0).toFixed(2)))}
-                              </span>
-                            </div>
+                  {!error && topProducts && topProducts.map((product: any, index: number) => (
+                    <Card
+                      key={product.id}
+                      style={{ marginBottom: 8, borderRadius: 0, border: 'none'}}
+                      size="small"
+                      className="dashboard-card-item"
+                      onClick={() => navigate(`/product/${product.id}`)}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center' }}>
+                            <strong>{product.name}</strong>
+                            {product.hasRecipe && (
+                              <Tag color="green" style={{ marginLeft: 8, fontSize: '11px' }}>
+                                Recipe
+                              </Tag>
+                            )}
                           </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <div>
-                              <strong>${formatNumberWithCommas(Number((product.revenue || 0).toFixed(2)))}</strong>
-                              <span style={{ fontSize: '0.85em', color: '#8c8c8c', marginLeft: 4 }}>revenue</span>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 4 }}>
-                              <div style={{ marginRight: 12 }}>
-                                <Tooltip title="Units Sold">
-                                  <span>{formatNumberWithCommas(product.quantitySold || 0)} units</span>
-                                </Tooltip>
-                              </div>
-                              {product.growth > 0 ? (
-                                <span style={{ color: '#3f8600' }}>
-                                  <ArrowUpOutlined /> {product.growth}%
-                                </span>
-                              ) : (
-                                <span style={{ color: '#cf1322' }}>
-                                  <ArrowDownOutlined /> {Math.abs(product.growth)}%
-                                </span>
-                              )}
-                            </div>
+                          <div style={{ marginTop: 4 }}>
+                            <span>
+                              ${formatNumberWithCommas(Number((product.currentPrice || 0).toFixed(2)))}
+                            </span>
+                            {product.recipeCost > 0 && (
+                              <span style={{ fontSize: '0.85em', color: '#8c8c8c', marginLeft: 8 }}>
+                                Cost: ${product.recipeCost.toFixed(2)}
+                              </span>
+                            )}
                           </div>
                         </div>
-                      </Card>
-                    );
-                  })}
+                        <div style={{ textAlign: 'right' }}>
+                          <div>
+                            <strong>${formatNumberWithCommas(Number((product.revenue || 0).toFixed(2)))}</strong>
+                            <span style={{ fontSize: '0.85em', color: '#8c8c8c', marginLeft: 4 }}>revenue</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 4 }}>
+                            <div style={{ marginRight: 12 }}>
+                              <Tooltip title={
+                                <div>
+                                  <div>Units Sold: {formatNumberWithCommas(product.quantitySold || 0)}</div>
+                                  {product.profitMargin !== null && (
+                                    <div>Margin: {product.profitMargin.toFixed(1)}%</div>
+                                  )}
+                                </div>
+                              }>
+                                <span>{formatNumberWithCommas(product.quantitySold || 0)} units</span>
+                              </Tooltip>
+                            </div>
+                            {product.profitMargin !== null ? (
+                              <Tag color={product.profitMargin > 70 ? 'green' : product.profitMargin > 50 ? 'blue' : 'orange'}>
+                                {product.profitMargin.toFixed(1)}%
+                              </Tag>
+                            ) : (
+                              product.growth !== undefined && (
+                                product.growth > 0 ? (
+                                  <span style={{ color: '#3f8600' }}>
+                                    <ArrowUpOutlined /> {product.growth}%
+                                  </span>
+                                ) : (
+                                  <span style={{ color: '#cf1322' }}>
+                                    <ArrowDownOutlined /> {Math.abs(product.growth)}%
+                                  </span>
+                                )
+                              )
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
                   </div>
                 </div>
     
