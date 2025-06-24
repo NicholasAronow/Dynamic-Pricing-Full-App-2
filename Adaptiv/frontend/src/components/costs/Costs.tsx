@@ -699,25 +699,44 @@ const Costs: React.FC = () => {
         ingredientMap.set(ingredient.ingredient_name.toLowerCase(), ingredient);
       });
 
+      // Get menu items to associate with recipes by name
+      const existingMenuItems = await itemService.getItems();
+      const menuItemMap = new Map();
+      existingMenuItems.forEach(item => {
+        menuItemMap.set(item.name.toLowerCase(), item.id);
+      });
+      console.log('Menu items available for linking:', Array.from(menuItemMap.keys()));
+      
       // Create recipes using the created ingredients
-      const recipesToCreate = suggestions.recipes.map((recipe: RecipeSuggestion) => ({
-        item_name: recipe.item_name,
-        ingredients: recipe.ingredients.map((ing: SuggestionIngredient) => {
-          // Find the created ingredient by name
-          const matchedIngredient = ingredientMap.get(ing.ingredient.toLowerCase());
-          
-          if (!matchedIngredient) {
-            console.warn(`Ingredient not found: ${ing.ingredient}`);
-            return null;
-          }
-          
-          return {
-            ingredient_id: matchedIngredient.ingredient_id,
-            quantity: ing.quantity,
-            unit: ing.unit
-          };
-        }).filter(Boolean as any) // Remove any null values
-      }));
+      const recipesToCreate = suggestions.recipes.map((recipe: RecipeSuggestion) => {
+        // Look for matching menu item by name
+        const matchedMenuItemId = menuItemMap.get(recipe.item_name.toLowerCase());
+        if (matchedMenuItemId) {
+          console.log(`Found menu item match: ${recipe.item_name} -> ID ${matchedMenuItemId}`);
+        } else {
+          console.log(`No menu item match for recipe: ${recipe.item_name}`);
+        }
+        
+        return {
+          item_name: recipe.item_name,
+          menu_item_id: matchedMenuItemId ? matchedMenuItemId.toString() : undefined,
+          ingredients: recipe.ingredients.map((ing: SuggestionIngredient) => {
+            // Find the created ingredient by name
+            const matchedIngredient = ingredientMap.get(ing.ingredient.toLowerCase());
+            
+            if (!matchedIngredient) {
+              console.warn(`Ingredient not found: ${ing.ingredient}`);
+              return null;
+            }
+            
+            return {
+              ingredient_id: matchedIngredient.ingredient_id,
+              quantity: ing.quantity,
+              unit: ing.unit
+            };
+          }).filter(Boolean as any) // Remove any null values
+        };
+      });
 
       // Create recipes sequentially to avoid overwhelming the server
       const validRecipes = recipesToCreate.filter(recipe => recipe.ingredients.length > 0);

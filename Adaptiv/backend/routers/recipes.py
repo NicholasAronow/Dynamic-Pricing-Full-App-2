@@ -8,6 +8,7 @@ from auth import get_current_user
 from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import List
+import models
 
 # Pydantic models for request/response
 class IngredientCreate(BaseModel):
@@ -229,7 +230,22 @@ def create_recipe(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Create recipe first
+    # If no item_id is provided, try to find a matching menu item by name
+    if not recipe.item_id:
+        # Import here to avoid circular imports
+        from models import MenuItem
+        
+        # Search for menu items with matching name
+        matching_item = db.query(MenuItem).filter(
+            MenuItem.user_id == current_user.id,
+            MenuItem.name.ilike(recipe.name)  # Case-insensitive comparison
+        ).first()
+        
+        if matching_item:
+            recipe.item_id = matching_item.id
+            print(f"Auto-linked recipe '{recipe.name}' to menu item ID {matching_item.id}")
+    
+    # Create recipe with potential auto-linked item_id
     db_recipe = Recipe(
         user_id=current_user.id,
         name=recipe.name,
@@ -523,6 +539,34 @@ def get_recipe_net_margin(
     )
     
     return net_margin
+
+    
+@router.post("/link-recipes-to-items")
+async def link_recipes_to_items(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Match recipes to items by name and update item_id"""
+    # Get all items for user
+    items = db.query(models.Item).filter(models.Item.user_id == current_user.id).all()
+    
+    # Get all recipes for user
+    recipes = db.query(models.Recipe).filter(
+        models.Recipe.user_id == current_user.id,
+        models.Recipe.item_id == None
+    ).all()
+    
+    matches = 0
+    for recipe in recipes:
+        # Try to find matching item by name
+        for item in items:
+            if recipe.name.lower() == item.name.lower():
+                recipe.item_id = item.id
+                matches += 1
+                break
+    
+    db.commit()
+    return {"message": f"Linked {matches} recipes to items"}
 
 @router.post("/batch-net-margin")
 def get_batch_net_margin(

@@ -118,6 +118,7 @@ const Dashboard: React.FC = () => {
       const debugRecipes = await api.get('/recipes/');
       console.log('Sample recipe structure:', debugRecipes.data[0]);
       
+      
       // Get date range for the past year
       const endDate = moment().endOf('day').format('YYYY-MM-DD');
       const startDate = moment().subtract(365, 'days').startOf('day').format('YYYY-MM-DD');
@@ -125,6 +126,8 @@ const Dashboard: React.FC = () => {
       console.time('fetchYearOrders');
       const yearOrders = await orderService.getOrdersByDateRange(startDate, endDate);
       console.timeEnd('fetchYearOrders');
+      const uniqueItems = debugOrderItems(yearOrders);
+
       
       console.log(`Cached ${yearOrders.length} orders for the year`);
       setCachedOrders(yearOrders);
@@ -190,6 +193,32 @@ const Dashboard: React.FC = () => {
     });
     
     return cogsByDate;
+  };
+
+  // Debug function to see what items we have in orders
+  const debugOrderItems = (orders: Order[]) => {
+    const uniqueItems = new Map<string, { id: string, name: string, count: number }>();
+    
+    orders.forEach(order => {
+      order.items.forEach(item => {
+        const key = item.item_id.toString();
+        if (!uniqueItems.has(key)) {
+          uniqueItems.set(key, { 
+            id: key, 
+            name: item.item_name, 
+            count: 0 
+          });
+        }
+        uniqueItems.get(key)!.count++;
+      });
+    });
+    
+    console.log('Unique items in orders:');
+    uniqueItems.forEach((item, id) => {
+      console.log(`  ID: ${id}, Name: "${item.name}", Order count: ${item.count}`);
+    });
+    
+    return uniqueItems;
   };
 
   // Fallback method to get sales data directly from orders
