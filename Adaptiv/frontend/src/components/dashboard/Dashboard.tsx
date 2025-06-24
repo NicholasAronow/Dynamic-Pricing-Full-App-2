@@ -35,20 +35,10 @@ const handleSquareIntegration = async () => {
   }
 };
 
-
-
-// Note: Mock data generator functions were removed as they're now unused
-
 // Utility function to format numbers with commas that safely handles undefined/null
 const formatNumberWithCommas = (num: number | string | undefined | null) => {
   if (num === undefined || num === null) return '0';
   return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-};
-
-// Safe number formatting with toFixed that handles undefined/null values
-const safeNumberFormat = (value: any, decimals: number = 2) => {
-  if (value === undefined || value === null) return '0.00';
-  return Number(value).toFixed(decimals);
 };
 
 // Define colors for charts and graphs
@@ -65,18 +55,8 @@ const Dashboard: React.FC = () => {
   const [productsLoading, setProductsLoading] = useState(true);
   const [productPerformance, setProductPerformance] = useState<any[]>([]);
   const [itemsTimeFrame, setItemsTimeFrame] = useState('7d');
-  const [analyticsData, setAnalyticsData] = useState<SalesAnalytics | null>(null);
   const [competitors, setCompetitors] = useState<any[]>([]);
   const [competitorsLoading, setCompetitorsLoading] = useState(true);
-  // States to track if we have any data
-  const [hasSalesData, setHasSalesData] = useState(false);
-  const [hasProductsData, setHasProductsData] = useState(false);
-  const [hasCustomersData, setHasCustomersData] = useState(false);
-  // We'll check competitors.length > 0 directly instead of using a separate state
-  const [hasAdaptivData, setHasAdaptivData] = useState(false);
-  const [showCOGSPrompt, setShowCOGSPrompt] = useState(false);
-  // Flag to track if we've ever had an order (used to determine if we should show "Connect POS" prompt)
-  const [hasEverHadOrders, setHasEverHadOrders] = useState(false);
   // Use pos_connected field from the user object
   const isPosConnected = user?.pos_connected ?? false;
   
@@ -121,7 +101,6 @@ const Dashboard: React.FC = () => {
   // Keep track of whether we have ANY sales data across all time frames
   const [hasAnySalesData, setHasAnySalesData] = useState(false);
   const [cogsData, setCogsData] = useState<any[]>([]);
-  const [processedCogsData, setProcessedCogsData] = useState<Record<string, number>>({});
   
   // Check if the user has ever had orders - this is used to determine if we should show the "Connect POS" prompt
   useEffect(() => {
@@ -129,12 +108,10 @@ const Dashboard: React.FC = () => {
       try {
         const hasOrders = await orderService.checkHasEverHadOrders();
         console.log('User has ever had orders:', hasOrders);
-        setHasEverHadOrders(hasOrders);
       } catch (error) {
         console.error('Error checking if user has ever had orders:', error);
         // If there's an error, assume test accounts have orders to avoid showing unnecessary prompts
         if (user?.email?.includes('test')) {
-          setHasEverHadOrders(true);
         }
       }
     };
@@ -177,17 +154,6 @@ const Dashboard: React.FC = () => {
     return dailyCogsByDate;
   };
   
-  // Check if we have Adaptiv metrics data
-  useEffect(() => {
-    // This would typically be a real API call to get Adaptiv metrics
-    // For now, we're using the presence of other data as a proxy
-    const checkAdaptivData = () => {
-      // If we have sales data, assume we have Adaptiv data too
-      setHasAdaptivData(hasAnySalesData);
-    };
-    
-    checkAdaptivData();
-  }, [hasAnySalesData]);
 
   // Generate empty chart data structure
   const getEmptyChartData = (timeFrame: string) => {
@@ -397,7 +363,6 @@ const Dashboard: React.FC = () => {
         
         // Fetch sales data
         const analytics = await analyticsService.getSalesAnalytics(startDate, endDate);
-        setAnalyticsData(analytics);
         setHasAnySalesData(analytics.salesByDay && analytics.salesByDay.length > 0);
         
         // Fetch COGS data
@@ -415,18 +380,15 @@ const Dashboard: React.FC = () => {
           );
           
           setSalesData(chartData);
-          setHasSalesData(true);
         } else {
           // Handle no data case
           setSalesData(getEmptyChartData(timeFrame));
-          setHasSalesData(false);
         }
         
       } catch (err) {
         console.error('Error fetching sales data:', err);
         setError('Failed to load sales data');
         setSalesData(getEmptyChartData(timeFrame));
-        setHasSalesData(false);
       } finally {
         setLoading(false);
       }
@@ -445,12 +407,10 @@ const Dashboard: React.FC = () => {
         try {
           const data = await analyticsService.getItemPerformance(itemsTimeFrame);
           setProductPerformance(data);
-          setHasProductsData(data && data.length > 0);
         } catch (err) {
           console.error('Failed to fetch item performance:', err);
           // No mock data fallback, just set empty array
           setProductPerformance([]);
-          setHasProductsData(false);
         }
       } catch (err) {
         console.error('Error fetching product performance:', err);
@@ -598,9 +558,6 @@ const Dashboard: React.FC = () => {
         // Check if we have current week COGS data
         const hasCurrentWeekData = currentWeekCOGS.length > 0;
         
-        // Update the COGS prompt visibility based on whether we have data
-        setShowCOGSPrompt(!hasCurrentWeekData);
-        
         // If we have current week data, ensure it's included in our processed COGS data
         if (hasCurrentWeekData) {
           console.log('Found current week COGS data, processing for display', currentWeekCOGS);
@@ -612,13 +569,6 @@ const Dashboard: React.FC = () => {
           console.log('Processed current week COGS data into daily values:', currentWeekProcessed);
           Object.entries(currentWeekProcessed).forEach(([date, amount]) => {
             console.log(`Daily COGS for ${date}: $${amount.toFixed(2)}`);
-          });
-          
-          // Ensure all timeframes have access to this current week's data
-          setProcessedCogsData(prevData => {
-            const updatedData = { ...prevData, ...currentWeekProcessed };
-            console.log('Updated processedCogsData with current week data', updatedData);
-            return updatedData;
           });
           
           // Also update the raw COGS data array to include current week entries
@@ -648,7 +598,6 @@ const Dashboard: React.FC = () => {
         }
       } catch (error) {
         console.error('Error ensuring current week COGS data:', error);
-        setShowCOGSPrompt(true); // Show prompt on error as a safe default
       }
     };
     
@@ -663,11 +612,6 @@ const Dashboard: React.FC = () => {
     
     return () => clearInterval(intervalId);
   }, [user]);
-
-  // Handle completion of COGS data entry
-  const handleCOGSComplete = () => {
-    setShowCOGSPrompt(false);
-  };
 
   // Extract the user's name for the welcome message
   const userName = user?.email?.split('@')[0] || 'User';
