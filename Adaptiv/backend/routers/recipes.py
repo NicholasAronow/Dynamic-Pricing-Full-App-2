@@ -51,15 +51,18 @@ class RecipeIngredientResponse(BaseModel):
 
 class RecipeCreate(BaseModel):
     name: str
+    item_id: Optional[int] = None
     ingredients: List[RecipeIngredientCreate]
 
 class RecipeUpdate(BaseModel):
     name: Optional[str] = None
+    item_id: Optional[int] = None
     ingredients: Optional[List[RecipeIngredientCreate]] = None
 
 class RecipeResponse(BaseModel):
     id: int
     name: str
+    item_id: Optional[int] = None
     ingredients: List[RecipeIngredientResponse]
     total_cost: float
     date_created: datetime
@@ -229,7 +232,8 @@ def create_recipe(
     # Create recipe first
     db_recipe = Recipe(
         user_id=current_user.id,
-        name=recipe.name
+        name=recipe.name,
+        item_id=recipe.item_id
     )
     db.add(db_recipe)
     db.commit()
@@ -331,6 +335,7 @@ def get_recipes(
         response.append({
             "id": recipe.id,
             "name": recipe.name,
+            "item_id": recipe.item_id,
             "ingredients": ingredients_response,
             "total_cost": total_cost,
             "date_created": recipe.date_created
@@ -372,6 +377,7 @@ def get_recipe(
     return {
         "id": recipe.id,
         "name": recipe.name,
+        "item_id": recipe.item_id,
         "ingredients": ingredients_response,
         "total_cost": total_cost,
         "date_created": recipe.date_created
@@ -398,6 +404,10 @@ def update_recipe(
     # Update recipe name if provided
     if recipe_update.name:
         db_recipe.name = recipe_update.name
+        
+    # Update item_id if provided
+    if recipe_update.item_id is not None:
+        db_recipe.item_id = recipe_update.item_id
     
     # Update ingredients if provided
     if recipe_update.ingredients is not None:

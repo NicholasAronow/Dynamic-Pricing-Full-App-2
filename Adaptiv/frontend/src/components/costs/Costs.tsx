@@ -4,7 +4,7 @@ import { Card, Table, Typography, Space, Button, Empty, Spin, message, Tabs, Mod
 import { PlusOutlined, DollarOutlined, CoffeeOutlined, AppstoreOutlined, ExclamationCircleOutlined, ThunderboltOutlined, DeleteOutlined, EditOutlined, TagsOutlined, UserOutlined, SaveOutlined } from '@ant-design/icons';
 import * as recipeService from '../../services/recipeService';
 import { generateSuggestionsFromMenu } from '../../services/recipeService';
-import itemService from '../../services/itemService';
+import itemService, { Item } from '../../services/itemService';
 import * as otherCostsService from '../../services/otherCostsService';
 import { FixedCost, Employee } from '../../services/otherCostsService';
 import { RecipeItem, IngredientItem, RecipeIngredient, RecipeSuggestion, SuggestionIngredient, MenuSuggestionResponse } from '../../types/recipe';
@@ -86,6 +86,8 @@ const Costs: React.FC = () => {
   const [ingredients, setIngredients] = useState<IngredientItem[]>([]);
   const [recipesLoading, setRecipesLoading] = useState<boolean>(true);
   const [ingredientsLoading, setIngredientsLoading] = useState<boolean>(true);
+  const [menuItemsForRecipes, setMenuItemsForRecipes] = useState<Item[]>([]);
+  const [menuItemsLoading, setMenuItemsLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<string>('1');
   
   // State for other costs
@@ -266,10 +268,25 @@ const Costs: React.FC = () => {
 
 
 
+  // Load menu items for recipe linking
+  const loadMenuItemsForRecipes = async () => {
+    try {
+      setMenuItemsLoading(true);
+      const items = await itemService.getItems();
+      setMenuItemsForRecipes(items);
+    } catch (error) {
+      message.error('Failed to load menu items');
+      console.error(error);
+    } finally {
+      setMenuItemsLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadRecipes();
     loadIngredients();
     loadOtherCosts();
+    loadMenuItemsForRecipes();
   }, []);
 
   // Columns for recipes table
@@ -1235,6 +1252,7 @@ const Costs: React.FC = () => {
         onSave={handleSaveRecipe}
         recipe={selectedRecipe}
         ingredients={ingredients}
+        menuItems={menuItemsForRecipes}
         isNew={isNewRecipe}
       />
       

@@ -31,11 +31,13 @@ class Recipe(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     name = Column(String, index=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=True, index=True)
     date_created = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
     user = relationship("User", backref="recipes")
+    item = relationship("Item")
     ingredients = relationship("RecipeIngredient", back_populates="recipe", cascade="all, delete-orphan")
     
     def calculate_cost(self):

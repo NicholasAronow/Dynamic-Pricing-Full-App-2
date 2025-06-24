@@ -27,6 +27,7 @@ export interface MenuSuggestionResponse {
 export interface RecipeItem {
   item_id: string;
   item_name: string;
+  menu_item_id?: string; // ID of the menu item this recipe is linked to
   ingredients: RecipeIngredient[];
   total_cost?: number; // Optional as it's calculated on the server
   date_created: string;

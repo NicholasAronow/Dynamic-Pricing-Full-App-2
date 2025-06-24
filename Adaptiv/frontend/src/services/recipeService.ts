@@ -9,6 +9,7 @@ export const getRecipes = async (): Promise<RecipeItem[]> => {
   return response.data.map((recipe: any) => ({
     item_id: recipe.id.toString(),
     item_name: recipe.name,
+    menu_item_id: recipe.item_id ? recipe.item_id.toString() : undefined,
     ingredients: recipe.ingredients.map((ing: any) => ({
       ingredient_id: ing.ingredient_id.toString(),
       ingredient_name: ing.name,
@@ -28,6 +29,7 @@ export const getRecipe = async (id: string): Promise<RecipeItem> => {
   return {
     item_id: recipe.id.toString(),
     item_name: recipe.name,
+    menu_item_id: recipe.item_id ? recipe.item_id.toString() : undefined,
     ingredients: recipe.ingredients.map((ing: any) => ({
       ingredient_id: ing.ingredient_id.toString(),
       ingredient_name: ing.name,
@@ -43,6 +45,7 @@ export const getRecipe = async (id: string): Promise<RecipeItem> => {
 export const createRecipe = async (recipe: Omit<RecipeItem, 'item_id' | 'date_created' | 'total_cost'>): Promise<RecipeItem> => {
   const payload = {
     name: recipe.item_name,
+    item_id: recipe.menu_item_id ? parseInt(recipe.menu_item_id) : undefined,
     ingredients: recipe.ingredients.map(ing => ({
       ingredient_id: parseInt(ing.ingredient_id),
       quantity: ing.quantity,
@@ -57,6 +60,7 @@ export const createRecipe = async (recipe: Omit<RecipeItem, 'item_id' | 'date_cr
   return {
     item_id: newRecipe.id.toString(),
     item_name: newRecipe.name,
+    menu_item_id: newRecipe.item_id ? newRecipe.item_id.toString() : undefined,
     ingredients: newRecipe.ingredients.map((ing: any) => ({
       ingredient_id: ing.ingredient_id.toString(),
       ingredient_name: ing.name,
@@ -72,6 +76,7 @@ export const createRecipe = async (recipe: Omit<RecipeItem, 'item_id' | 'date_cr
 export const updateRecipe = async (recipe: Omit<RecipeItem, 'date_created' | 'total_cost'>): Promise<RecipeItem> => {
   const payload = {
     name: recipe.item_name,
+    item_id: recipe.menu_item_id ? parseInt(recipe.menu_item_id) : undefined,
     ingredients: recipe.ingredients.map(ing => ({
       ingredient_id: parseInt(ing.ingredient_id),
       quantity: ing.quantity,
@@ -86,6 +91,7 @@ export const updateRecipe = async (recipe: Omit<RecipeItem, 'date_created' | 'to
   return {
     item_id: updatedRecipe.id.toString(),
     item_name: updatedRecipe.name,
+    menu_item_id: updatedRecipe.item_id ? updatedRecipe.item_id.toString() : undefined,
     ingredients: updatedRecipe.ingredients.map((ing: any) => ({
       ingredient_id: ing.ingredient_id.toString(),
       ingredient_name: ing.name,

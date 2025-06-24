@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Form, Input, Button, Select, InputNumber, Space, Table, Typography, Divider } from 'antd';
 import { PlusOutlined, MinusCircleOutlined } from '@ant-design/icons';
+import { Item } from '../../services/itemService';
 
 const { Text } = Typography;
 const { Option } = Select;
@@ -14,6 +15,7 @@ interface RecipeIngredient {
 interface RecipeItem {
   item_id: string;
   item_name: string;
+  menu_item_id?: string; // ID of the menu item this recipe is linked to
   ingredients: RecipeIngredient[];
   date_created: string;
 }
@@ -33,6 +35,7 @@ interface RecipeModalProps {
   onSave: (recipe: RecipeItem) => void;
   recipe?: RecipeItem;
   ingredients: IngredientItem[];
+  menuItems: Item[]; // Added menu items prop
   isNew?: boolean;
 }
 
@@ -42,6 +45,7 @@ const RecipeModal: React.FC<RecipeModalProps> = ({
   onSave,
   recipe,
   ingredients,
+  menuItems,
   isNew = false
 }) => {
   const [form] = Form.useForm();
@@ -68,6 +72,7 @@ const RecipeModal: React.FC<RecipeModalProps> = ({
     if (visible && recipe) {
       form.setFieldsValue({
         item_name: recipe.item_name,
+        menu_item_id: recipe.menu_item_id,
         ingredients: recipe.ingredients
       });
       setSelectedIngredients(recipe.ingredients);
@@ -130,6 +135,7 @@ const RecipeModal: React.FC<RecipeModalProps> = ({
         const newRecipe: RecipeItem = {
           item_id: recipe?.item_id || `new-${Date.now()}`,
           item_name: values.item_name,
+          menu_item_id: values.menu_item_id,
           ingredients: values.ingredients,
           date_created: recipe?.date_created || new Date().toISOString().split('T')[0]
         };
@@ -164,10 +170,32 @@ const RecipeModal: React.FC<RecipeModalProps> = ({
       >
         <Form.Item
           name="item_name"
-          label="Menu Item Name"
-          rules={[{ required: true, message: 'Please enter the menu item name!' }]}
+          label="Recipe Name"
+          rules={[{ required: true, message: 'Please enter the recipe name!' }]}
         >
-          <Input placeholder="Enter menu item name" />
+          <Input placeholder="Enter recipe name" />
+        </Form.Item>
+        
+        <Form.Item
+          name="menu_item_id"
+          label="Link to Menu Item"
+          tooltip="Associate this recipe with a menu item from your menu"
+        >
+          <Select 
+            placeholder="Select a menu item to link (optional)" 
+            allowClear
+            showSearch
+            optionFilterProp="children"
+            filterOption={(input, option) =>
+              (option?.children as unknown as string)?.toLowerCase().indexOf(input.toLowerCase()) >= 0
+            }
+          >
+            {menuItems.map(item => (
+              <Select.Option key={item.id} value={item.id.toString()}>
+                {item.name} (${item.current_price.toFixed(2)})
+              </Select.Option>
+            ))}
+          </Select>
         </Form.Item>
 
         <Divider orientation="left">Ingredients</Divider>
