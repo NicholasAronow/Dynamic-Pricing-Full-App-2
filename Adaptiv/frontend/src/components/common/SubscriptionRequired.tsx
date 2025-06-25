@@ -10,6 +10,7 @@ interface SubscriptionRequiredProps {
   children: ReactNode;
   minTier?: string;
   featureName?: string;
+  feature?: string; // Specific feature to check access for
 }
 
 /**
@@ -20,12 +21,18 @@ interface SubscriptionRequiredProps {
 const SubscriptionRequired: React.FC<SubscriptionRequiredProps> = ({
   children,
   minTier = SUBSCRIPTION_TIERS.PREMIUM,
-  featureName = 'This feature'
+  featureName = 'This feature',
+  feature
 }) => {
   const navigate = useNavigate();
-  const { isSubscribed, currentPlan } = useSubscription();
+  const { isSubscribed, currentPlan, hasAccess: checkFeatureAccess } = useSubscription();
   
-  const hasAccess = isSubscribed() && currentPlan === minTier;
+  // Determine access based on subscription status
+  const hasAccess = feature ? 
+    // If specific feature is provided, use the context's hasAccess function
+    checkFeatureAccess(feature as any) : 
+    // Otherwise, check if the user is subscribed (premium user)
+    isSubscribed();
   
   if (hasAccess) {
     return <>{children}</>;

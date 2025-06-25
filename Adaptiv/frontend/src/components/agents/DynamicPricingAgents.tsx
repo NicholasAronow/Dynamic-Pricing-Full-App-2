@@ -1374,8 +1374,8 @@ const DynamicPricingAgentsContent: React.FC = () => {
 const DynamicPricingAgents: React.FC = () => {
   return (
     <SubscriptionRequired
-      minTier={SUBSCRIPTION_TIERS.PREMIUM}
       featureName="AI-powered dynamic pricing analysis"
+      feature="ai_recommendations" // Use the specific feature from SUBSCRIPTION_FEATURES
     >
       <DynamicPricingAgentsContent />
     </SubscriptionRequired>
