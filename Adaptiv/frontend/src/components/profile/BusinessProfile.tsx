@@ -349,17 +349,7 @@ const BusinessProfile: React.FC = () => {
         </Form>
       </Card>
       {subscription?.active ? (
-        <Card bordered>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <Title level={3} style={{ margin: 0 }}>Subscription Details</Title>
-            <Button 
-              icon={<ReloadOutlined />}
-              onClick={fetchSubscription}
-            >
-              Refresh
-            </Button>
-          </div>
-          
+        <Card>
           <Divider />
           
           <div style={{ marginBottom: 16 }}>
