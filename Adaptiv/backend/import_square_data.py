@@ -288,6 +288,10 @@ def import_square_orders(user_id: int, db: Session, catalog_mapping: Dict[str, i
                 total_amount = 0
                 total_cost = 0
                 order_items = []
+
+                # Calculate fixed costs using the same method as in Recipe model
+                fixed_costs = Recipe.calculate_fixed_costs(db, user_id)
+                fixed_cost_per_item = fixed_costs.get('fixed_cost_per_item', 0)
                 
                 line_items = order.get("line_items", [])
                 for line_item in line_items:
@@ -378,10 +382,6 @@ def import_square_orders(user_id: int, db: Session, catalog_mapping: Dict[str, i
                     
                     # For net margin, calculate using fixed costs from the Recipe model
                     from recipe_models import Recipe
-                    
-                    # Calculate fixed costs using the same method as in Recipe model
-                    fixed_costs = Recipe.calculate_fixed_costs(db, user_id)
-                    fixed_cost_per_item = fixed_costs.get('fixed_cost_per_item', 0)
                     
                     # Calculate total fixed costs for this order (fixed cost per item * quantity)
                     total_fixed_cost = fixed_cost_per_item * total_items
