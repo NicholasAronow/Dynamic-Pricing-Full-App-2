@@ -120,6 +120,8 @@ const Dashboard: React.FC = () => {
           setProductsLoading(true);
           const { startDate, endDate } = getDateRangeFromTimeFrame(itemsTimeFrame);
           
+          console.log(`Fetching product performance data for ${itemsTimeFrame} timeframe`);
+          
           // Use analytics service to get pre-aggregated item performance data
           // The analytics service now accepts timeframe and item detail flag
           const salesAnalytics = await analyticsService.getSalesAnalytics(
@@ -130,8 +132,14 @@ const Dashboard: React.FC = () => {
           );
           
           // Process the pre-aggregated item data
-          const itemPerformance = processTopSellingItems(salesAnalytics.topSellingItems);
-          setProductPerformance(itemPerformance);
+          if (salesAnalytics.topSellingItems && salesAnalytics.topSellingItems.length > 0) {
+            const itemPerformance = processTopSellingItems(salesAnalytics.topSellingItems);
+            setProductPerformance(itemPerformance);
+            console.log('Product performance data loaded successfully', itemPerformance);
+          } else {
+            console.warn('No top selling items found in analytics data');
+            setProductPerformance([]);
+          }
         } catch (err) {
           console.error('Error fetching product performance:', err);
           setProductPerformance([]);
@@ -309,11 +317,8 @@ const Dashboard: React.FC = () => {
       // Process data from backend according to timeframe
       const chartData = processAggregatedDataForCharts(salesAnalytics, timeFrame);
       
-      // Use top selling items for product performance
-      const itemPerformance = processTopSellingItems(salesAnalytics.topSellingItems);
-      
+      // Only update sales data, not product performance (which uses its own itemsTimeFrame)
       setSalesData(chartData);
-      setProductPerformance(itemPerformance);
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
       setError('Failed to load dashboard data');
@@ -366,17 +371,39 @@ const Dashboard: React.FC = () => {
   
   // Helper function to process top selling items from analytics
   const processTopSellingItems = (topItems: any[] = []): any[] => {
-    return topItems.map(item => ({
-      id: item.itemId?.toString() || '',
-      name: item.name || 'Unknown Item',
-      quantitySold: item.quantity || 0,
-      revenue: item.revenue || 0,
-      unitPrice: item.unitPrice || 0,
-      hasRecipe: item.hasCost || false,
-      recipeCost: item.unitCost || 0,
-      totalCOGS: item.totalCost || 0,
-      profitMargin: item.marginPercentage || null
-    }));
+    return topItems.map(item => {
+      // Handle different field naming conventions
+      const id = item.itemId?.toString() || item.id?.toString() || '';
+      const name = item.name || 'Unknown Item';
+      const quantitySold = item.quantity || 0;
+      const revenue = item.revenue || 0;
+      
+      // Check different price field variations
+      let unitPrice = 0;
+      if (item.unitPrice !== undefined && item.unitPrice !== null) {
+        unitPrice = item.unitPrice;
+      }
+      
+      const hasRecipe = Boolean(item.hasCost || item.totalCost || item.unitCost);
+      const recipeCost = item.unitCost || 0;
+      const totalCOGS = item.totalCost || 0;
+      const profitMargin = item.marginPercentage || null;
+      
+      const processedItem = {
+        id,
+        name,
+        quantitySold,
+        revenue,
+        unitPrice,
+        hasRecipe,
+        recipeCost,
+        totalCOGS,
+        profitMargin
+      };
+      
+      console.log('Processed item:', processedItem);
+      return processedItem;
+    });
   };
 
 // Enhance products with cached recipe data
@@ -1228,7 +1255,7 @@ const Dashboard: React.FC = () => {
                           </div>
                           <div style={{ marginTop: 4 }}>
                             <span>
-                              ${formatNumberWithCommas(Number((product.currentPrice || 0).toFixed(2)))}
+                              ${formatNumberWithCommas(Number((product.unitPrice || 0).toFixed(2)))}
                             </span>
                             {product.recipeCost > 0 && (
                               <span style={{ fontSize: '0.85em', color: '#8c8c8c', marginLeft: 8 }}>
@@ -1301,7 +1328,7 @@ const Dashboard: React.FC = () => {
                             </div>
                             <div style={{ marginTop: 4 }}>
                               <span>
-                                ${formatNumberWithCommas(Number((product.currentPrice || 0).toFixed(2)))}
+                                ${formatNumberWithCommas(Number((product.unitPrice || 0).toFixed(2)))}
                               </span>
                             </div>
                           </div>

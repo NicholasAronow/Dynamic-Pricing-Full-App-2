@@ -150,6 +150,7 @@ export const analyticsService = {
       
       // Process the response to ensure it's in the expected format with properly formatted dates
       const result = response.data;
+
       
       // Add any missing properties needed by the frontend
       if (result.salesByDay && result.salesByDay.length > 0) {

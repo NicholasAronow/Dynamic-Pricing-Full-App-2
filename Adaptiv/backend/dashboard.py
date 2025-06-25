@@ -85,7 +85,9 @@ def get_sales_data(
                 models.Item.id,
                 models.Item.name,
                 models.Item.category,
-                func.count(models.OrderItem.id).label('order_count')
+                models.Item.current_price,
+                func.count(models.OrderItem.id).label('order_count'),
+                func.sum(models.OrderItem.quantity * models.OrderItem.unit_price).label('revenue')
             ).join(
                 models.OrderItem,
                 models.Item.id == models.OrderItem.item_id
@@ -105,8 +107,9 @@ def get_sales_data(
                     "id": item.id,
                     "name": item.name,
                     "category": item.category,
-                    "total_quantity": item.order_count,
-                    "total_revenue": 0  # Simplified
+                    "quantity": item.order_count,
+                    "revenue": float(item.revenue) if item.revenue is not None else 0.0,
+                    "unitPrice": float(item.current_price) if item.current_price is not None else 0.0,
                 } for item in item_query
             ]
         except Exception as e:
@@ -204,7 +207,7 @@ def get_sales_data(
             logger.error(f"Error getting sales by category: {str(e)}")
             # Fall back to empty array
             sales_by_category = []
-            
+                    
         # Return comprehensive dashboard data
         return {
             "totalSales": total_revenue,
