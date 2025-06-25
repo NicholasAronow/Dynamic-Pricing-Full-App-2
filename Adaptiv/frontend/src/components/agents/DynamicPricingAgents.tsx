@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import SubscriptionRequired from '../common/SubscriptionRequired';
+import { SUBSCRIPTION_TIERS } from '../../contexts/SubscriptionContext';
 import { Alert, Badge, Button, Card, Col, Empty, Input, Modal, Radio, Row, Select, Space, Spin, Statistic, Steps, Tabs, Tag, Timeline, message } from 'antd';
 import { CheckCircleOutlined, CheckOutlined, ClockCircleOutlined, CloseOutlined, DownOutlined, ExperimentOutlined, LineChartOutlined, PlayCircleOutlined, RobotOutlined, SearchOutlined, ThunderboltOutlined, UpOutlined, WarningOutlined } from '@ant-design/icons';
 import axios from 'axios';
@@ -48,7 +50,7 @@ const { TextArea } = Input;
 
 // Modal removed as per requirements
 
-const DynamicPricingAgents: React.FC = () => {
+const DynamicPricingAgentsContent: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [analysisStatus, setAnalysisStatus] = useState<'idle' | 'running' | 'completed' | 'error'>('idle');
@@ -762,26 +764,26 @@ const DynamicPricingAgents: React.FC = () => {
             </p>
           </div>
         </Space>
-        <Button
-          type="primary"
-          icon={<PlayCircleOutlined />}
-          loading={loading}
-          onClick={runFullAnalysis}
-          disabled={analysisStatus === 'running'}
-          size="large"
-          style={{
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            border: 'none',
-            height: '48px',
-            paddingLeft: '32px',
-            paddingRight: '32px',
-            borderRadius: '12px',
-            fontWeight: '600',
-            boxShadow: '0 4px 12px rgba(102, 126, 234, 0.4)'
-          }}
-        >
-          {analysisStatus === 'running' ? 'Analysis Running...' : 'Run Full Analysis'}
-        </Button>
+          <Button
+            type="primary"
+            icon={<PlayCircleOutlined />}
+            loading={loading}
+            onClick={runFullAnalysis}
+            disabled={analysisStatus === 'running'}
+            size="large"
+            style={{
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              border: 'none',
+              height: '48px',
+              paddingLeft: '32px',
+              paddingRight: '32px',
+              borderRadius: '12px',
+              fontWeight: '600',
+              boxShadow: '0 4px 12px rgba(102, 126, 234, 0.4)'
+            }}
+          >
+            {analysisStatus === 'running' ? 'Analysis Running...' : 'Run Full Analysis'}
+          </Button>
       </div>
       
       {/* Main Content Area */}
@@ -1368,4 +1370,16 @@ const DynamicPricingAgents: React.FC = () => {
     </div>
   );
 }
+// Wrap the entire page with SubscriptionRequired to make it premium-only
+const DynamicPricingAgents: React.FC = () => {
+  return (
+    <SubscriptionRequired
+      minTier={SUBSCRIPTION_TIERS.PREMIUM}
+      featureName="AI-powered dynamic pricing analysis"
+    >
+      <DynamicPricingAgentsContent />
+    </SubscriptionRequired>
+  );
+};
+
 export default DynamicPricingAgents;
