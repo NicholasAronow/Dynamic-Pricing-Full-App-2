@@ -108,6 +108,9 @@ class Order(Base):
     pos_id = Column(String, nullable=True, index=True)  # Store external POS system order ID (Square order ID)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    total_cost = Column(Float, nullable=True)
+    gross_margin = Column(Float, nullable=True)
+    net_margin = Column(Float, nullable=True)
     
     # Add relationship to User
     user = relationship("User", backref="orders")
@@ -123,6 +126,8 @@ class OrderItem(Base):
     item_id = Column(Integer, ForeignKey("items.id"))
     quantity = Column(Integer)
     unit_price = Column(Float)
+    unit_cost = Column(Float, nullable=True)
+    subtotal_cost = Column(Float, nullable=True)
     
     # Relationships
     order = relationship("Order", back_populates="items")

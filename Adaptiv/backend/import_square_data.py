@@ -207,6 +207,8 @@ def import_square_orders(user_id: int, db: Session, catalog_mapping: Dict[str, i
     Returns:
         Number of orders imported
     """
+    from recipe_models import Recipe
+    from sqlalchemy.orm import joinedload
     orders_created = 0
     
     try:
@@ -284,6 +286,7 @@ def import_square_orders(user_id: int, db: Session, catalog_mapping: Dict[str, i
                 
                 # Calculate total from line items
                 total_amount = 0
+                total_cost = 0
                 order_items = []
                 
                 line_items = order.get("line_items", [])
@@ -334,12 +337,62 @@ def import_square_orders(user_id: int, db: Session, catalog_mapping: Dict[str, i
                             if catalog_object_id:
                                 catalog_mapping[catalog_object_id] = item_id
                     
+                    # Get recipe cost data for this item if available
+                    unit_cost = None
+                    subtotal_cost = None
+                    recipe = db.query(Recipe).filter(Recipe.item_id == item_id).first()
+                    
+                    if recipe:
+                        # Calculate cost from recipe
+                        recipe_ingredients = db.query(models.RecipeIngredient)\
+                            .options(joinedload(models.RecipeIngredient.ingredient))\
+                            .filter(models.RecipeIngredient.recipe_id == recipe.id)\
+                            .all()
+                        
+                        unit_cost = sum(ri.quantity * ri.ingredient.price for ri in recipe_ingredients if ri.ingredient)
+                        subtotal_cost = unit_cost * quantity
+                        
+                        logger.debug(f"Item {name} has recipe with cost {unit_cost} per unit")
+                    
                     # Add to order items list
                     order_items.append({
                         "item_id": item_id,
                         "quantity": quantity,
-                        "unit_price": unit_price
+                        "unit_price": unit_price,
+                        "unit_cost": unit_cost,
+                        "subtotal_cost": subtotal_cost
                     })
+                    
+                    # Add to total cost if available
+                    if subtotal_cost is not None:
+                        total_cost += subtotal_cost
+                
+                # Create order with cost and margin data
+                gross_margin = None
+                net_margin = None
+                
+                # Calculate margins if we have cost data
+                if total_cost > 0 and total_amount > 0:
+                    # Gross margin percentage
+                    gross_margin = ((total_amount - total_cost) / total_amount) * 100
+                    
+                    # For net margin, calculate using fixed costs from the Recipe model
+                    from recipe_models import Recipe
+                    
+                    # Calculate fixed costs using the same method as in Recipe model
+                    fixed_costs = Recipe.calculate_fixed_costs(db, user_id)
+                    fixed_cost_per_item = fixed_costs.get('fixed_cost_per_item', 0)
+                    
+                    # Calculate total fixed costs for this order (fixed cost per item * quantity)
+                    total_fixed_cost = fixed_cost_per_item * total_items
+                    
+                    # Calculate net margin using the same formula as Recipe.calculate_net_margin
+                    if total_amount > 0:
+                        total_cost_with_fixed = total_cost + total_fixed_cost
+                        net_margin = ((total_amount - total_cost_with_fixed) / total_amount) * 100
+                    
+                    logger.debug(f"Order {square_order_id} has gross margin {gross_margin:.2f}% and net margin {net_margin:.2f}%")
+                    logger.debug(f"Order details: total_amount=${total_amount:.2f}, ingredient_cost=${total_cost:.2f}, fixed_cost=${total_fixed_cost:.2f}")
                 
                 # Create order
                 new_order = models.Order(
@@ -348,7 +401,10 @@ def import_square_orders(user_id: int, db: Session, catalog_mapping: Dict[str, i
                     user_id=user_id,
                     pos_id=square_order_id,  # Store Square order ID
                     created_at=order_date,  # Use Square creation date
-                    updated_at=order_date
+                    updated_at=order_date,
+                    total_cost=total_cost if total_cost > 0 else None,
+                    gross_margin=gross_margin,
+                    net_margin=net_margin
                 )
                 db.add(new_order)
                 db.flush()  # Get ID
@@ -359,7 +415,9 @@ def import_square_orders(user_id: int, db: Session, catalog_mapping: Dict[str, i
                         order_id=new_order.id,
                         item_id=item_data["item_id"],
                         quantity=item_data["quantity"],
-                        unit_price=item_data["unit_price"]
+                        unit_price=item_data["unit_price"],
+                        unit_cost=item_data["unit_cost"],
+                        subtotal_cost=item_data["subtotal_cost"]
                     )
                     db.add(order_item)
                 

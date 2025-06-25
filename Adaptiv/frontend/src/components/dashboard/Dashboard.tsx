@@ -64,12 +64,6 @@ const Dashboard: React.FC = () => {
   const isPosConnected = user?.pos_connected ?? false;
   const [hasAnySalesData, setHasAnySalesData] = useState(false);
 
-  // Cache for orders and recipes
-  const [cachedOrders, setCachedOrders] = useState<Order[]>([]);
-  const [cachedRecipes, setCachedRecipes] = useState<Map<string, RecipeItem>>(new Map());
-  const [lastFetchDate, setLastFetchDate] = useState<string | null>(null);
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
-  
   /// Helper function to convert timeframe to dates
   const getDateRangeFromTimeFrame = (timeFrame: string) => {
     const end = moment().endOf('day');
@@ -111,49 +105,34 @@ const Dashboard: React.FC = () => {
     profitMargin: number | null;
   }
 
-  const fetchAndCacheYearData = async () => {
-    try {
-      console.log('Fetching full year of order data...');
-
-      const debugRecipes = await api.get('/recipes/');
-      console.log('Sample recipe structure:', debugRecipes.data[0]);
-      
-      
-      // Get date range for the past year
-      const endDate = moment().endOf('day').format('YYYY-MM-DD');
-      const startDate = moment().subtract(365, 'days').startOf('day').format('YYYY-MM-DD');
-      
-      console.time('fetchYearOrders');
-      const yearOrders = await orderService.getOrdersByDateRange(startDate, endDate);
-      console.timeEnd('fetchYearOrders');
-      const uniqueItems = debugOrderItems(yearOrders);
-
-      
-      console.log(`Cached ${yearOrders.length} orders for the year`);
-      setCachedOrders(yearOrders);
-      
-      // Pre-fetch all recipes for items in these orders
-      const itemIds = new Set<string>();
-      yearOrders.forEach(order => {
-        order.items.forEach(item => {
-          itemIds.add(item.item_id.toString());
-        });
-      });
-      
-      console.log(`Pre-fetching recipes for ${itemIds.size} unique items...`);
-      console.time('fetchAllRecipes');
-      const recipeMap = await recipeService.getRecipesByItemIds(Array.from(itemIds));
-      console.timeEnd('fetchAllRecipes');
-      
-      setCachedRecipes(recipeMap);
-      setLastFetchDate(moment().format('YYYY-MM-DD'));
-      
-      return { orders: yearOrders, recipes: recipeMap };
-    } catch (error) {
-      console.error('Error fetching year data:', error);
-      return { orders: [], recipes: new Map() };
+  // Main data fetching effect
+  useEffect(() => {
+    if (user && isPosConnected) {
+      fetchDashboardData(timeFrame);
     }
-  };
+  }, [user, isPosConnected, timeFrame]);
+
+  // Separate effect for items time frame
+  useEffect(() => {
+    if (user && isPosConnected) {
+      const fetchProducts = async () => {
+        try {
+          setProductsLoading(true);
+          const { startDate, endDate } = getDateRangeFromTimeFrame(itemsTimeFrame);
+          const orders = await orderService.getOrdersByDateRange(startDate, endDate);
+          const itemPerformance = calculateItemPerformanceWithMargins(orders);
+          setProductPerformance(itemPerformance);
+        } catch (err) {
+          console.error('Error fetching product performance:', err);
+          setProductPerformance([]);
+        } finally {
+          setProductsLoading(false);
+        }
+      };
+      
+      fetchProducts();
+    }
+  }, [user, isPosConnected, itemsTimeFrame]);
 
   // Smart COGS calculation using order and recipe data
   const calculateCOGSFromOrders = async (orders: Order[], startDate: string, endDate: string): Promise<Record<string, number>> => {
@@ -266,65 +245,251 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  // Process sales data using pre-calculated margins
+  const processSalesFromOrdersWithMargins = (orders: Order[]): any[] => {
+    const salesMap: Record<string, { 
+      revenue: number; 
+      orders: number; 
+      cogs: number;
+      hasMarginData: boolean;
+    }> = {};
+    
+    orders.forEach(order => {
+      const date = moment(order.order_date).format('YYYY-MM-DD');
+      if (!salesMap[date]) {
+        salesMap[date] = { revenue: 0, orders: 0, cogs: 0, hasMarginData: false };
+      }
+      
+      salesMap[date].revenue += order.total_amount;
+      salesMap[date].orders += 1;
+      
+      // Use pre-calculated cost if available
+      if (order.total_cost !== undefined && order.total_cost !== null) {
+        salesMap[date].cogs += order.total_cost;
+        salesMap[date].hasMarginData = true;
+      }
+    });
+    
+    return Object.entries(salesMap).map(([date, data]) => ({
+      date,
+      revenue: data.revenue,
+      orders: data.orders,
+      cogs: data.cogs,
+      hasMarginData: data.hasMarginData
+    }));
+  };
+
+  // Calculate item performance using pre-calculated margins
+  const calculateItemPerformanceWithMargins = (orders: Order[]): any[] => {
+    const itemMap: Record<string, any> = {};
+    
+    orders.forEach(order => {
+      order.items.forEach(item => {
+        const itemId = item.item_id.toString();
+        if (!itemMap[itemId]) {
+          itemMap[itemId] = {
+            id: itemId,
+            name: item.item_name,
+            revenue: 0,
+            cost: 0,
+            quantitySold: 0,
+            currentPrice: item.unit_price,
+            hasCostData: false
+          };
+        }
+        
+        itemMap[itemId].revenue += item.subtotal;
+        itemMap[itemId].quantitySold += item.quantity;
+        
+        // Use pre-calculated cost if available
+        if (item.subtotal_cost !== undefined && item.subtotal_cost !== null) {
+          itemMap[itemId].cost += item.subtotal_cost;
+          itemMap[itemId].hasCostData = true;
+        }
+      });
+    });
+    
+    // Calculate margins for items
+    return Object.values(itemMap).map(item => {
+      let profitMargin = null;
+      let recipeCost = 0;
+      
+      if (item.hasCostData && item.revenue > 0) {
+        profitMargin = ((item.revenue - item.cost) / item.revenue * 100);
+        recipeCost = item.cost / item.quantitySold;
+      }
+      
+      return {
+        ...item,
+        recipeCost,
+        totalCOGS: item.cost,
+        profitMargin,
+        hasRecipe: item.hasCostData
+      };
+    });
+  };
+
+  // Process chart data using pre-calculated margins
+  const processChartDataWithMargins = (
+    salesData: any[],
+    timeFrame: string
+  ): ChartDataPoint[] => {
+    
+    switch (timeFrame) {
+      case '1d':
+        return processHourlyDataWithMargins(salesData);
+      case '7d':
+      case '1m':
+        return processDailyDataWithMargins(salesData, timeFrame);
+      case '6m':
+      case '1yr':
+        return processMonthlyDataWithMargins(salesData, timeFrame);
+      default:
+        return [];
+    }
+  };
+
+  // Process daily data with margins
+  const processDailyDataWithMargins = (
+    salesData: any[],
+    timeFrame: string
+  ): ChartDataPoint[] => {
+    const days = timeFrame === '7d' ? 7 : 30;
+    const startDate = moment().subtract(days - 1, 'days').startOf('day');
+    
+    const salesByDate = new Map(salesData.map(d => [d.date, d]));
+    
+    return Array.from({ length: days }, (_, i) => {
+      const currentDate = moment(startDate).add(i, 'days');
+      const dateStr = currentDate.format('YYYY-MM-DD');
+      
+      const dayData = salesByDate.get(dateStr) || { 
+        revenue: 0, 
+        orders: 0, 
+        cogs: 0, 
+        hasMarginData: false 
+      };
+      
+      let profitMargin = null;
+      if (dayData.hasMarginData && dayData.revenue > 0) {
+        profitMargin = ((dayData.revenue - dayData.cogs) / dayData.revenue * 100);
+      }
+      
+      return {
+        name: currentDate.format('MMM DD'),
+        revenue: Math.round(dayData.revenue * 100) / 100,
+        orders: dayData.orders,
+        cogs: Math.round(dayData.cogs * 100) / 100,
+        profitMargin: profitMargin ? Math.round(profitMargin * 100) / 100 : null
+      };
+    });
+  };
+
+  // Process hourly data with margins
+  const processHourlyDataWithMargins = (salesData: any[]): ChartDataPoint[] => {
+    const yesterday = moment().subtract(1, 'day').format('YYYY-MM-DD');
+    const dayData = salesData.find(d => d.date === yesterday) || { 
+      revenue: 0, 
+      orders: 0, 
+      cogs: 0,
+      hasMarginData: false 
+    };
+    
+    return Array.from({ length: 24 }, (_, hour) => {
+      const hourlyRevenue = dayData.revenue / 24;
+      const hourlyCogs = dayData.cogs / 24;
+      
+      let profitMargin = null;
+      if (dayData.hasMarginData && hourlyRevenue > 0) {
+        profitMargin = ((hourlyRevenue - hourlyCogs) / hourlyRevenue * 100);
+      }
+      
+      return {
+        name: moment().subtract(1, 'day').startOf('day').add(hour, 'hours').format('HH:00'),
+        revenue: Math.round(hourlyRevenue * 100) / 100,
+        orders: Math.round(dayData.orders / 24),
+        cogs: Math.round(hourlyCogs * 100) / 100,
+        profitMargin: profitMargin ? Math.round(profitMargin * 100) / 100 : null
+      };
+    });
+  };
+
+  // Process monthly data with margins
+  const processMonthlyDataWithMargins = (
+    salesData: any[],
+    timeFrame: string
+  ): ChartDataPoint[] => {
+    const months = timeFrame === '6m' ? 6 : 12;
+    const monthlyData: Record<string, { 
+      revenue: number; 
+      orders: number; 
+      cogs: number;
+      hasMarginData: boolean;
+    }> = {};
+    
+    // Aggregate by month
+    salesData.forEach(day => {
+      const monthKey = moment(day.date).format('YYYY-MM');
+      if (!monthlyData[monthKey]) {
+        monthlyData[monthKey] = { revenue: 0, orders: 0, cogs: 0, hasMarginData: false };
+      }
+      monthlyData[monthKey].revenue += day.revenue;
+      monthlyData[monthKey].orders += day.orders;
+      monthlyData[monthKey].cogs += day.cogs;
+      if (day.hasMarginData) {
+        monthlyData[monthKey].hasMarginData = true;
+      }
+    });
+    
+    const sortedMonths = Object.entries(monthlyData)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-months);
+    
+    return sortedMonths.map(([monthKey, data]) => {
+      let profitMargin = null;
+      if (data.hasMarginData && data.revenue > 0) {
+        profitMargin = ((data.revenue - data.cogs) / data.revenue * 100);
+      }
+      
+      return {
+        name: moment(monthKey, 'YYYY-MM').format('MMM'),
+        revenue: Math.round(data.revenue * 100) / 100,
+        orders: data.orders,
+        cogs: Math.round(data.cogs * 100) / 100,
+        profitMargin: profitMargin ? Math.round(profitMargin * 100) / 100 : null
+      };
+    });
+  };
+
   // Main data fetching function
   const fetchDashboardData = async (timeFrame: string, forceRefresh: boolean = false) => {
     try {
       setLoading(true);
       setError(null);
       
-      let orders: Order[] = cachedOrders;
-      let recipes: Map<string, RecipeItem> = cachedRecipes;
-      
-      // Fetch full year data on initial load or if forced
-      if (isInitialLoad || forceRefresh || cachedOrders.length === 0) {
-        console.log('Initial load or refresh requested, fetching year data...');
-        const yearData = await fetchAndCacheYearData();
-        orders = yearData.orders;
-        recipes = yearData.recipes;
-        setIsInitialLoad(false);
-      }
-      
       // Get date range for current timeframe
       const { startDate, endDate } = getDateRangeFromTimeFrame(timeFrame);
       
-      // Filter cached orders to current timeframe
-      console.time('filterOrders');
-      const filteredOrders = orders.filter(order => {
-        const orderDate = moment(order.order_date).format('YYYY-MM-DD');
-        return orderDate >= startDate && orderDate <= endDate;
-      });
-      console.timeEnd('filterOrders');
+      // Fetch orders for the specific timeframe only
+      console.time('fetchOrders');
+      const orders = await orderService.getOrdersByDateRange(startDate, endDate);
+      console.timeEnd('fetchOrders');
       
-      console.log(`Using ${filteredOrders.length} orders for timeframe ${timeFrame}`);
+      console.log(`Processing ${orders.length} orders for timeframe ${timeFrame}`);
       
-      // Process orders into sales by day
-      const salesByDay = processSalesFromOrders(filteredOrders);
-      
-      // Calculate COGS using cached recipes
-      console.time('calculateCOGS');
-      const cogsByDate = calculateCOGSFromOrdersWithCache(filteredOrders, recipes);
-      console.timeEnd('calculateCOGS');
+      // Process orders into sales by day with pre-calculated margins
+      const salesByDay = processSalesFromOrdersWithMargins(orders);
       
       // Calculate item performance
-      const itemPerformance = calculateItemPerformance(filteredOrders);
+      const itemPerformance = calculateItemPerformanceWithMargins(orders);
       
       setHasAnySalesData(salesByDay.length > 0);
       
-      // Process chart data
-      const chartData = processChartData(
-        salesByDay,
-        cogsByDate,
-        timeFrame
-      );
+      // Process chart data using the new margin data
+      const chartData = processChartDataWithMargins(salesByDay, timeFrame);
       
       setSalesData(chartData);
-      
-      // Enhance products with cached recipe data
-      console.time('enhanceProducts');
-      const enhancedProducts = enhanceProductsWithCache(itemPerformance, recipes);
-      console.timeEnd('enhanceProducts');
-      
-      setProductPerformance(enhancedProducts);
+      setProductPerformance(itemPerformance);
       
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
@@ -673,67 +838,7 @@ const calculateCOGSFromOrdersWithCache = (
       default:
         return [];
     }
-  };
-
-  // Replace the main useEffect for fetching sales data
-  // Initial data fetch
-useEffect(() => {
-    if (user && isPosConnected) {
-      fetchDashboardData(timeFrame, isInitialLoad);
-    }
-  }, [user, isPosConnected]);
-
-  // Handle timeframe changes (use cached data)
-  useEffect(() => {
-    if (!isInitialLoad && cachedOrders.length > 0) {
-      fetchDashboardData(timeFrame, false);
-    }
-  }, [timeFrame]);
-
-  // Handle items timeframe changes separately
-  useEffect(() => {
-    if (!isInitialLoad && cachedOrders.length > 0) {
-      const { startDate, endDate } = getDateRangeFromTimeFrame(itemsTimeFrame);
-      
-      // Filter cached orders for items timeframe
-      const filteredOrders = cachedOrders.filter(order => {
-        const orderDate = moment(order.order_date).format('YYYY-MM-DD');
-        return orderDate >= startDate && orderDate <= endDate;
-      });
-      
-      // Calculate item performance
-      const itemPerformance = calculateItemPerformance(filteredOrders);
-      
-      // Enhance with cached recipes
-      const enhancedProducts = enhanceProductsWithCache(itemPerformance, cachedRecipes);
-      setProductPerformance(enhancedProducts);
-    }
-  }, [itemsTimeFrame]);
-
-    // Main data fetching effect
-  useEffect(() => {
-    fetchDashboardData(timeFrame);
-  }, [timeFrame]);
-
-  // Separate effect for items time frame
-  useEffect(() => {
-    const fetchProducts = async () => {
-      try {
-        setProductsLoading(true);
-        const products = await analyticsService.getItemPerformance(itemsTimeFrame);
-        const enhancedProducts = await enhanceProductsWithCOGS(products);
-        setProductPerformance(enhancedProducts);
-      } catch (err) {
-        console.error('Error fetching product performance:', err);
-        setProductPerformance([]);
-      } finally {
-        setProductsLoading(false);
-      }
-    };
-    
-    fetchProducts();
-  }, [itemsTimeFrame]);
-  
+  };  
   
   // Fetch competitor data using Gemini API endpoint (same as Competitors component)
   useEffect(() => {

@@ -8,6 +8,9 @@ export interface Order {
   total_amount: number;
   items: OrderItem[];
   created_at: string;
+  total_cost?: number;
+  gross_margin?: number;
+  net_margin?: number;
 }
 
 export interface OrderItem {
@@ -18,6 +21,8 @@ export interface OrderItem {
   quantity: number;
   unit_price: number;
   subtotal: number;
+  unit_cost?: number;
+  subtotal_cost?: number;
 }
 
 export interface OrderCreate {
