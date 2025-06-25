@@ -112,15 +112,25 @@ const Dashboard: React.FC = () => {
     }
   }, [user, isPosConnected, timeFrame]);
 
-  // Separate effect for items time frame
+  // Separate effect for items time frame - optimized to use analytics service
   useEffect(() => {
     if (user && isPosConnected) {
       const fetchProducts = async () => {
         try {
           setProductsLoading(true);
           const { startDate, endDate } = getDateRangeFromTimeFrame(itemsTimeFrame);
-          const orders = await orderService.getOrdersByDateRange(startDate, endDate);
-          const itemPerformance = calculateItemPerformanceWithMargins(orders);
+          
+          // Use analytics service to get pre-aggregated item performance data
+          // The analytics service now accepts timeframe and item detail flag
+          const salesAnalytics = await analyticsService.getSalesAnalytics(
+            startDate, 
+            endDate, 
+            itemsTimeFrame,
+            true
+          );
+          
+          // Process the pre-aggregated item data
+          const itemPerformance = processTopSellingItems(salesAnalytics.topSellingItems);
           setProductPerformance(itemPerformance);
         } catch (err) {
           console.error('Error fetching product performance:', err);
@@ -378,7 +388,7 @@ const Dashboard: React.FC = () => {
     });
   };
 
-  // Main data fetching function
+  // Main data fetching function - optimized to use analytics service for all time frames
   const fetchDashboardData = async (timeFrame: string, forceRefresh: boolean = false) => {
     try {
       setLoading(true);
@@ -387,50 +397,28 @@ const Dashboard: React.FC = () => {
       // Get date range for current timeframe
       const { startDate, endDate } = getDateRangeFromTimeFrame(timeFrame);
       
-      // For longer time periods (6m, 1yr), use the more efficient analytics service
-      // which aggregates data on the backend instead of loading all individual orders
-      if (timeFrame === '6m' || timeFrame === '1yr') {
-        console.time('fetchSalesAnalytics');
-        console.log(`Using optimized analytics service for ${timeFrame} timeframe`);
-        
-        // Use the analytics service for better performance with large datasets
-        const salesAnalytics = await analyticsService.getSalesAnalytics(startDate, endDate);
-        console.timeEnd('fetchSalesAnalytics');
-        
-        // Check if we have data
-        setHasAnySalesData(salesAnalytics.salesByDay?.length > 0);
-        
-        // Process pre-aggregated data from backend for charts
-        const chartData = processSaleAnalyticsForCharts(salesAnalytics, timeFrame);
-        
-        // Use top selling items for product performance
-        const itemPerformance = processTopSellingItems(salesAnalytics.topSellingItems);
-        
-        setSalesData(chartData);
-        setProductPerformance(itemPerformance);
-      } 
-      else {
-        // For shorter time periods, use the original approach with individual orders
-        console.time('fetchOrders');
-        const orders = await orderService.getOrdersByDateRange(startDate, endDate);
-        console.timeEnd('fetchOrders');
-        
-        console.log(`Processing ${orders.length} orders for timeframe ${timeFrame}`);
-        
-        // Process orders into sales by day with pre-calculated margins
-        const salesByDay = processSalesFromOrdersWithMargins(orders);
-        
-        // Calculate item performance
-        const itemPerformance = calculateItemPerformanceWithMargins(orders);
-        
-        setHasAnySalesData(salesByDay.length > 0);
-        
-        // Process chart data using the new margin data
-        const chartData = processChartDataWithMargins(salesByDay, timeFrame);
-        
-        setSalesData(chartData);
-        setProductPerformance(itemPerformance);
-      }
+      console.time('fetchSalesAnalytics');
+      console.log(`Using analytics service for ${timeFrame} timeframe`);
+      
+      // Use the analytics service for all timeframes for better performance
+      const salesAnalytics = await analyticsService.getSalesAnalytics(
+        startDate, 
+        endDate, 
+        timeFrame // Pass timeframe parameter to allow backend to optimize aggregation
+      );
+      console.timeEnd('fetchSalesAnalytics');
+      
+      // Check if we have data
+      setHasAnySalesData(salesAnalytics.salesByDay?.length > 0);
+      
+      // Process data from backend according to timeframe
+      const chartData = processAggregatedDataForCharts(salesAnalytics, timeFrame);
+      
+      // Use top selling items for product performance
+      const itemPerformance = processTopSellingItems(salesAnalytics.topSellingItems);
+      
+      setSalesData(chartData);
+      setProductPerformance(itemPerformance);
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
       setError('Failed to load dashboard data');
@@ -442,21 +430,37 @@ const Dashboard: React.FC = () => {
     }
   };
   
-  // Helper function to process the SalesAnalytics data for charts
-  const processSaleAnalyticsForCharts = (salesAnalytics: SalesAnalytics, timeFrame: string): ChartDataPoint[] => {
+  // Unified function to process aggregated data for all timeframes
+  const processAggregatedDataForCharts = (salesAnalytics: SalesAnalytics, timeFrame: string): ChartDataPoint[] => {
     if (!salesAnalytics.salesByDay || salesAnalytics.salesByDay.length === 0) {
       return getEmptyChartData(timeFrame);
     }
     
+    // The backend now returns properly formatted data for each timeframe
+    // This can handle daily, hourly, or monthly aggregations as needed
     return salesAnalytics.salesByDay.map(day => {
-      // Calculate profit margin if we have cost data
-      let profitMargin = null;
-      if (day.revenue > 0 && day.totalCost && day.totalCost > 0) {
+      // Use pre-calculated margin from backend when available
+      let profitMargin: number | null = day.profitMargin || null;
+      
+      // Fallback calculation if needed
+      if (profitMargin === null && day.revenue > 0 && day.totalCost && day.totalCost > 0) {
         profitMargin = ((day.revenue - day.totalCost) / day.revenue) * 100;
       }
       
+      // Format the name based on the timeframe if not already formatted
+      let formattedName = day.formattedDate || day.date;
+      if (!day.formattedDate) {
+        if (timeFrame === '1d') {
+          formattedName = moment(day.date).format('HH:00');
+        } else if (timeFrame === '7d' || timeFrame === '1m') {
+          formattedName = moment(day.date).format('MMM DD');
+        } else {
+          formattedName = moment(day.date).format('MMM');
+        }
+      }
+      
       return {
-        name: day.date,
+        name: formattedName,
         revenue: day.revenue || 0,
         orders: day.orderCount || 0,
         cogs: day.totalCost || 0,
@@ -511,36 +515,8 @@ const Dashboard: React.FC = () => {
     });
   };
 
-  // Use the analytics endpoint for aggregated data
-  const getAnalyticsData = async (timeFrame: string) => {
-    try {
-      const { startDate, endDate } = getDateRangeFromTimeFrame(timeFrame);
-      
-      // Use the analytics endpoint which is more efficient
-      const response = await api.get('/orders/analytics', {
-        params: {
-          start_date: startDate,
-          end_date: endDate
-        }
-      });
-      
-      const analytics = response.data;
-      
-      // The analytics endpoint gives us aggregated data
-      // We need to get daily breakdown separately or enhance the backend
-      
-      // For now, get the orders for daily breakdown
-      const orders = await orderService.getOrdersByDateRange(startDate, endDate);
-      
-      return {
-        analytics,
-        orders
-      };
-    } catch (error) {
-      console.error('Error fetching analytics:', error);
-      return null;
-    }
-  };
+  // This function is now redundant since we're using the analyticsService for all timeframes
+  // Keeping as a reference but it's not used anymore
 
   // Helper function to process orders into sales by day
   const processSalesFromOrders = (orders: Order[]): any[] => {

@@ -58,6 +58,8 @@ export interface DailySales {
   orders: number;
   orderCount?: number; // Alternative name for orders used in some API responses
   totalCost?: number; // Cost data for margin calculations
+  profitMargin?: number; // Pre-calculated profit margin
+  formattedDate?: string; // Pre-formatted date string for display
 }
 
 export interface CategorySales {
@@ -118,8 +120,8 @@ export const analyticsService = {
       };
     }
   },
-  // Get sales data for dashboard
-  getSalesAnalytics: async (startDate?: string, endDate?: string): Promise<SalesAnalytics> => {
+  // Get sales data for dashboard - optimized for all timeframes
+  getSalesAnalytics: async (startDate?: string, endDate?: string, timeFrame?: string, includeItemDetails: boolean = false): Promise<SalesAnalytics> => {
     try {
       const currentUser = authService.getCurrentUser();
       if (!currentUser) {
@@ -132,12 +134,47 @@ export const analyticsService = {
       if (startDate && endDate) {
         queryParams += `&start_date=${startDate}&end_date=${endDate}`;
       }
+      
+      // Add timeFrame parameter to let backend optimize aggregation
+      if (timeFrame) {
+        queryParams += `&time_frame=${timeFrame}`;
+      }
+      
+      // Flag to include detailed item performance data
+      if (includeItemDetails) {
+        queryParams += `&include_item_details=true`;
+      }
 
-      // Use our new dashboard endpoint which returns data in the exact format we need
+      // Use our endpoint with the enhanced parameters
       const response = await api.get(`dashboard/sales-data?${queryParams}`);
       
-      // The data is already in the correct format for the frontend
-      return response.data;
+      // Process the response to ensure it's in the expected format with properly formatted dates
+      const result = response.data;
+      
+      // Add any missing properties needed by the frontend
+      if (result.salesByDay && result.salesByDay.length > 0) {
+        result.salesByDay = result.salesByDay.map((day: DailySales) => {
+          // Ensure profit margin is calculated if not provided
+          if (day.profitMargin === undefined && day.revenue > 0 && day.totalCost && day.totalCost > 0) {
+            day.profitMargin = ((day.revenue - day.totalCost) / day.revenue) * 100;
+          }
+          
+          // Format dates based on timeFrame if not already formatted
+          if (!day.formattedDate && timeFrame) {
+            if (timeFrame === '1d') {
+              day.formattedDate = moment(day.date).format('HH:00');
+            } else if (timeFrame === '7d' || timeFrame === '1m') {
+              day.formattedDate = moment(day.date).format('MMM DD');
+            } else {
+              day.formattedDate = moment(day.date).format('MMM');
+            }
+          }
+          
+          return day;
+        });
+      }
+      
+      return result;
     } catch (error) {
       console.error('Error fetching sales analytics:', error);
       // Return default structure with zeros if API fails
