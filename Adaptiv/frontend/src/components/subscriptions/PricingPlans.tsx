@@ -18,7 +18,7 @@ interface Plan {
   disabled?: boolean;
 }
 
-const PREMIUM_PRODUCT_ID = 'prod_SZ9VLgjajkW0rM'; // Your Stripe Product ID
+const PREMIUM_PRODUCT_ID = 'prod_SZAVh4qmsRJS6k'; // Your Stripe Product ID
 
 const PricingPlans: React.FC = () => {
   const navigate = useNavigate();
