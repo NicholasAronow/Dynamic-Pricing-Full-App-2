@@ -1282,23 +1282,6 @@ const Dashboard: React.FC = () => {
                                 <span>{formatNumberWithCommas(product.quantitySold || 0)} units</span>
                               </Tooltip>
                             </div>
-                            {product.profitMargin !== null ? (
-                              <Tag color={product.profitMargin > 70 ? 'green' : product.profitMargin > 50 ? 'blue' : 'orange'}>
-                                {product.profitMargin.toFixed(1)}%
-                              </Tag>
-                            ) : (
-                              product.growth !== undefined && (
-                                product.growth > 0 ? (
-                                  <span style={{ color: '#3f8600' }}>
-                                    <ArrowUpOutlined /> {product.growth}%
-                                  </span>
-                                ) : (
-                                  <span style={{ color: '#cf1322' }}>
-                                    <ArrowDownOutlined /> {Math.abs(product.growth)}%
-                                  </span>
-                                )
-                              )
-                            )}
                           </div>
                         </div>
                       </div>
@@ -1343,15 +1326,6 @@ const Dashboard: React.FC = () => {
                                   <span>{formatNumberWithCommas(product.quantitySold || 0)} units</span>
                                 </Tooltip>
                               </div>
-                              {product.growth > 0 ? (
-                                <span style={{ color: '#3f8600' }}>
-                                  <ArrowUpOutlined /> {product.growth}%
-                                </span>
-                              ) : (
-                                <span style={{ color: '#cf1322' }}>
-                                  <ArrowDownOutlined /> {Math.abs(product.growth)}%
-                                </span>
-                              )}
                             </div>
                           </div>
                         </div>
