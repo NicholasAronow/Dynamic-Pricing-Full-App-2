@@ -30,6 +30,7 @@ import {
   SyncOutlined,
   ShoppingOutlined
 } from '@ant-design/icons';
+import { ShimmerPriceRecommendations } from '../../components/common/ShimmerLoaders';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { integrationService } from '../../services/integrationService';
@@ -477,9 +478,7 @@ const PriceRecommendations: React.FC = () => {
       </Text>
       
       {loading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '100px 0' }}>
-          <LoadingOutlined style={{ fontSize: 24 }} spin />
-        </div>
+        <ShimmerPriceRecommendations />
       ) : usingMock ? (
         <div style={{ position: 'relative' }}>
           {/* Blurred sample data in background */}

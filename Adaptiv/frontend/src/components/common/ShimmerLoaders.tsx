@@ -417,6 +417,117 @@ export const ShimmerProductPerformance: React.FC<{
 };
 
 // Example usage of combined shimmer loaders
+// Specialized shimmer for the price recommendations page
+export const ShimmerPriceRecommendations: React.FC = () => {
+  // Column headers for price recommendations table
+  const columns = [
+    { title: 'Item' },
+    { title: 'Current Price' },
+    { title: 'Performance' },
+    { title: 'Gross Margin' },
+    { title: 'Net Margin' },
+    { title: 'Recommendation' },
+  ];
+
+  return (
+    <>
+      {/* Summary statistics card */}
+      <Card style={{ marginTop: 24, marginBottom: 24 }}>
+        <Row gutter={24}>
+          <Col span={8}>
+            <div>
+              <Shimmer height={14} width="60%" margin="8px 0 8px 0" />
+              <Shimmer height={24} width="30%" />
+              <Shimmer height={18} width="60%" margin="8px 0 8px 0" />
+            </div>
+          </Col>
+          <Col span={8}>
+            <div>
+              <Shimmer height={14} width="40%" margin="8px 0 8px 0" />
+              <Shimmer height={24} width="30%" />
+            </div>
+          </Col>
+          <Col span={8}>
+            <div>
+              <Shimmer height={14} width="60%" margin="8px 0 8px 0" />
+              <Shimmer height={28} width="50%" />
+              <Shimmer height={24} width="40%" margin="12px 0 8px 0" />
+            </div>
+          </Col>
+        </Row>
+      </Card>
+
+      {/* Price recommendations table with shimmer */}
+      <Card>
+        {/* Table header */}
+        <div style={{ padding: '16px 0', borderBottom: '1px solid #f0f0f0' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            {columns.map((column, index) => (
+              <div 
+                key={`header-${index}`} 
+                style={{ 
+                  width: index === 0 ? '20%' : '13.3%',
+                  padding: '0 8px'
+                }}
+              >
+                <Shimmer height={16} width="80%" />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Table rows */}
+        {Array.from({ length: 8 }).map((_, rowIndex) => (
+          <div 
+            key={`row-${rowIndex}`} 
+            style={{ 
+              padding: '16px 0', 
+              borderBottom: '1px solid #f0f0f0',
+              display: 'flex',
+              justifyContent: 'space-between'
+            }}
+          >
+            {/* Item column */}
+            <div style={{ width: '20%', padding: '0 8px' }}>
+              <Shimmer height={16} width="90%" margin="0 0 8px 0" />
+              <Shimmer height={14} width="60%" />
+            </div>
+            
+            {/* Current Price column */}
+            <div style={{ width: '13.3%', padding: '0 8px' }}>
+              <Shimmer height={16} width="60%" />
+            </div>
+            
+            {/* Performance column */}
+            <div style={{ width: '13.3%', padding: '0 8px' }}>
+              <Shimmer height={16} width="80%" margin="0 0 8px 0" />
+              <Shimmer height={14} width="60%" />
+            </div>
+            
+            {/* Gross Margin column */}
+            <div style={{ width: '13.3%', padding: '0 8px' }}>
+              <Shimmer height={16} width="50%" />
+            </div>
+            
+            {/* Net Margin column */}
+            <div style={{ width: '13.3%', padding: '0 8px' }}>
+              <Shimmer height={16} width="50%" />
+            </div>
+            
+            {/* Recommendation column */}
+            <div style={{ width: '13.3%', padding: '0 8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <Shimmer height={24} width={24} borderRadius="50%" margin="0 8px 0 0" />
+                <Shimmer height={16} width="70%" />
+              </div>
+            </div>
+          </div>
+        ))}
+      </Card>
+    </>
+  );
+};
+
 export const DashboardShimmerLoader: React.FC = () => (
   <>
     <ShimmerDashboardStats />
