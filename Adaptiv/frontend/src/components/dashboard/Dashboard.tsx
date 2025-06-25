@@ -146,114 +146,6 @@ const Dashboard: React.FC = () => {
 
 
 
-  // Process sales data using pre-calculated margins directly from orders
-  const processSalesFromOrdersWithMargins = (orders: Order[]): any[] => {
-    const salesMap: Record<string, { 
-      revenue: number; 
-      orders: number; 
-      cogs: number;
-      gross_margin: number | null;
-    }> = {};
-    
-    // Process orders into a map keyed by date
-    orders.forEach(order => {
-      const date = moment(order.order_date).format('YYYY-MM-DD');
-      
-      if (!salesMap[date]) {
-        salesMap[date] = { 
-          revenue: 0, 
-          orders: 0, 
-          cogs: 0,
-          gross_margin: null
-        };
-      }
-      
-      // Add revenue and order count
-      salesMap[date].revenue += order.total_amount;
-      salesMap[date].orders += 1;
-      
-      // Use the pre-calculated cost fields from the order
-      // This avoids the need to fetch and calculate costs separately
-      if (order.total_cost !== undefined && order.total_cost !== null) {
-        salesMap[date].cogs += order.total_cost;
-      }
-      
-      // If order has pre-calculated margin, use it for debugging
-      if (order.gross_margin !== undefined && order.gross_margin !== null) {
-        // We'll calculate the weighted average margin if needed later
-        console.debug(`Order ${order.id} has pre-calculated gross margin: ${order.gross_margin.toFixed(2)}%`);
-      }
-    });
-    
-    // Convert the map to an array and calculate margins
-    return Object.entries(salesMap).map(([date, data]) => {
-      let profitMargin = null;
-      
-      // Calculate profit margin if we have cost data
-      if (data.revenue > 0 && data.cogs > 0) {
-        profitMargin = ((data.revenue - data.cogs) / data.revenue) * 100;
-      }
-      
-      return {
-        date,
-        revenue: data.revenue,
-        orders: data.orders,
-        cogs: data.cogs,
-        profitMargin
-      };
-    });
-  };
-
-  // Calculate item performance using pre-calculated margins
-  const calculateItemPerformanceWithMargins = (orders: Order[]): any[] => {
-    const itemMap: Record<string, any> = {};
-    
-    orders.forEach(order => {
-      order.items.forEach(item => {
-        const itemId = item.item_id.toString();
-        if (!itemMap[itemId]) {
-          itemMap[itemId] = {
-            id: itemId,
-            name: item.item_name,
-            revenue: 0,
-            cost: 0,
-            quantitySold: 0,
-            currentPrice: item.unit_price,
-            hasCostData: false
-          };
-        }
-        
-        itemMap[itemId].revenue += item.subtotal;
-        itemMap[itemId].quantitySold += item.quantity;
-        
-        // Use pre-calculated cost if available
-        if (item.subtotal_cost !== undefined && item.subtotal_cost !== null) {
-          itemMap[itemId].cost += item.subtotal_cost;
-          itemMap[itemId].hasCostData = true;
-        }
-      });
-    });
-    
-    // Calculate margins for items
-    return Object.values(itemMap).map(item => {
-      let profitMargin = null;
-      let recipeCost = 0;
-      
-      if (item.hasCostData && item.revenue > 0) {
-        profitMargin = ((item.revenue - item.cost) / item.revenue * 100);
-        recipeCost = item.cost / item.quantitySold;
-      }
-      
-      return {
-        ...item,
-        recipeCost,
-        totalCOGS: item.cost,
-        profitMargin,
-        hasRecipe: item.hasCostData
-      };
-    });
-  };
-
   // Process chart data using pre-calculated margins
   const processChartDataWithMargins = (
     salesData: any[],
@@ -280,7 +172,10 @@ const Dashboard: React.FC = () => {
     timeFrame: string
   ): ChartDataPoint[] => {
     const days = timeFrame === '7d' ? 7 : 30;
-    const startDate = moment().subtract(days - 1, 'days').startOf('day');
+    
+    // Always ensure the end date is today, regardless of data availability
+    const endDate = moment().endOf('day');
+    const startDate = moment(endDate).subtract(days - 1, 'days').startOf('day');
     
     const salesByDate = new Map(salesData.map(d => [d.date, d]));
     
@@ -1212,9 +1107,11 @@ const Dashboard: React.FC = () => {
                               Margin: {data.profitMargin.toFixed(1)}%
                             </p>
                           )}
-                          <p style={{ margin: '4px 0', color: '#666' }}>
-                            Orders: {data.orders}
-                          </p>
+                          {data.orders !== 0 && (
+                            <p style={{ margin: '4px 0', color: '#666' }}>
+                              Orders: {data.orders}
+                            </p>
+                          )}
                         </div>
                       );
                     }
