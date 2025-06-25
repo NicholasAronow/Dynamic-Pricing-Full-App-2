@@ -134,116 +134,7 @@ const Dashboard: React.FC = () => {
     }
   }, [user, isPosConnected, itemsTimeFrame]);
 
-  // Smart COGS calculation using order and recipe data
-  const calculateCOGSFromOrders = async (orders: Order[], startDate: string, endDate: string): Promise<Record<string, number>> => {
-    const cogsByDate: Record<string, number> = {};
-    
-    if (orders.length === 0) return cogsByDate;
-    
-    // Get all unique item IDs from orders
-    const itemIds = new Set<string>();
-    orders.forEach(order => {
-      order.items.forEach(item => {
-        itemIds.add(item.item_id.toString());
-      });
-    });
-    
-    console.log(`Fetching recipes for ${itemIds.size} unique items`);
-    
-    // Fetch all recipes for these items in one call
-    const recipeMap = await recipeService.getRecipesByItemIds(Array.from(itemIds));
-    
-    console.log(`Found recipes for ${recipeMap.size} items`);
-    
-    // Calculate COGS for each order
-    orders.forEach(order => {
-      const orderDate = moment(order.order_date).format('YYYY-MM-DD');
-      if (!cogsByDate[orderDate]) {
-        cogsByDate[orderDate] = 0;
-      }
-      
-      // Sum up COGS for all items in the order
-      order.items.forEach(item => {
-        const recipe = recipeMap.get(item.item_id.toString());
-        if (recipe && recipe.total_cost) {
-          cogsByDate[orderDate] += recipe.total_cost * item.quantity;
-        }
-      });
-    });
-    
-    return cogsByDate;
-  };
 
-  // Debug function to see what items we have in orders
-  const debugOrderItems = (orders: Order[]) => {
-    const uniqueItems = new Map<string, { id: string, name: string, count: number }>();
-    
-    orders.forEach(order => {
-      order.items.forEach(item => {
-        const key = item.item_id.toString();
-        if (!uniqueItems.has(key)) {
-          uniqueItems.set(key, { 
-            id: key, 
-            name: item.item_name, 
-            count: 0 
-          });
-        }
-        uniqueItems.get(key)!.count++;
-      });
-    });
-    
-    console.log('Unique items in orders:');
-    uniqueItems.forEach((item, id) => {
-      console.log(`  ID: ${id}, Name: "${item.name}", Order count: ${item.count}`);
-    });
-    
-    return uniqueItems;
-  };
-
-  // Fallback method to get sales data directly from orders
-  // Optimized method to get sales data using the date range endpoint
-  const getSalesDataFromOrders = async (timeFrame: string) => {
-    try {
-      const { startDate, endDate } = getDateRangeFromTimeFrame(timeFrame);
-      
-      console.log(`Fetching orders for timeframe ${timeFrame}: ${startDate} to ${endDate}`);
-      
-      // Use the date range endpoint to get only relevant orders
-      const orders = await orderService.getOrdersByDateRange(startDate, endDate);
-      
-      console.log(`Retrieved ${orders.length} orders`);
-      
-      // Process into daily sales
-      const salesByDay: Record<string, { revenue: number; orders: number }> = {};
-      
-      orders.forEach(order => {
-        const date = moment(order.order_date).format('YYYY-MM-DD');
-        if (!salesByDay[date]) {
-          salesByDay[date] = { revenue: 0, orders: 0 };
-        }
-        salesByDay[date].revenue += order.total_amount;
-        salesByDay[date].orders += 1;
-      });
-      
-      // Convert to array
-      const salesArray = Object.entries(salesByDay).map(([date, data]) => ({
-        date,
-        revenue: data.revenue,
-        orders: data.orders
-      }));
-      
-      return {
-        orders,
-        salesByDay: salesArray
-      };
-    } catch (error) {
-      console.error('Error getting sales data from orders:', error);
-      return {
-        orders: [],
-        salesByDay: []
-      };
-    }
-  };
 
   // Process sales data using pre-calculated margins
   const processSalesFromOrdersWithMargins = (orders: Order[]): any[] => {
@@ -470,27 +361,50 @@ const Dashboard: React.FC = () => {
       // Get date range for current timeframe
       const { startDate, endDate } = getDateRangeFromTimeFrame(timeFrame);
       
-      // Fetch orders for the specific timeframe only
-      console.time('fetchOrders');
-      const orders = await orderService.getOrdersByDateRange(startDate, endDate);
-      console.timeEnd('fetchOrders');
-      
-      console.log(`Processing ${orders.length} orders for timeframe ${timeFrame}`);
-      
-      // Process orders into sales by day with pre-calculated margins
-      const salesByDay = processSalesFromOrdersWithMargins(orders);
-      
-      // Calculate item performance
-      const itemPerformance = calculateItemPerformanceWithMargins(orders);
-      
-      setHasAnySalesData(salesByDay.length > 0);
-      
-      // Process chart data using the new margin data
-      const chartData = processChartDataWithMargins(salesByDay, timeFrame);
-      
-      setSalesData(chartData);
-      setProductPerformance(itemPerformance);
-      
+      // For longer time periods (6m, 1yr), use the more efficient analytics service
+      // which aggregates data on the backend instead of loading all individual orders
+      if (timeFrame === '6m' || timeFrame === '1yr') {
+        console.time('fetchSalesAnalytics');
+        console.log(`Using optimized analytics service for ${timeFrame} timeframe`);
+        
+        // Use the analytics service for better performance with large datasets
+        const salesAnalytics = await analyticsService.getSalesAnalytics(startDate, endDate);
+        console.timeEnd('fetchSalesAnalytics');
+        
+        // Check if we have data
+        setHasAnySalesData(salesAnalytics.salesByDay?.length > 0);
+        
+        // Process pre-aggregated data from backend for charts
+        const chartData = processSaleAnalyticsForCharts(salesAnalytics, timeFrame);
+        
+        // Use top selling items for product performance
+        const itemPerformance = processTopSellingItems(salesAnalytics.topSellingItems);
+        
+        setSalesData(chartData);
+        setProductPerformance(itemPerformance);
+      } 
+      else {
+        // For shorter time periods, use the original approach with individual orders
+        console.time('fetchOrders');
+        const orders = await orderService.getOrdersByDateRange(startDate, endDate);
+        console.timeEnd('fetchOrders');
+        
+        console.log(`Processing ${orders.length} orders for timeframe ${timeFrame}`);
+        
+        // Process orders into sales by day with pre-calculated margins
+        const salesByDay = processSalesFromOrdersWithMargins(orders);
+        
+        // Calculate item performance
+        const itemPerformance = calculateItemPerformanceWithMargins(orders);
+        
+        setHasAnySalesData(salesByDay.length > 0);
+        
+        // Process chart data using the new margin data
+        const chartData = processChartDataWithMargins(salesByDay, timeFrame);
+        
+        setSalesData(chartData);
+        setProductPerformance(itemPerformance);
+      }
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
       setError('Failed to load dashboard data');
@@ -501,29 +415,43 @@ const Dashboard: React.FC = () => {
       setProductsLoading(false);
     }
   };
-
-  // Calculate COGS using cached recipes
-const calculateCOGSFromOrdersWithCache = (
-    orders: Order[], 
-    recipeMap: Map<string, RecipeItem>
-  ): Record<string, number> => {
-    const cogsByDate: Record<string, number> = {};
+  
+  // Helper function to process the SalesAnalytics data for charts
+  const processSaleAnalyticsForCharts = (salesAnalytics: SalesAnalytics, timeFrame: string): ChartDataPoint[] => {
+    if (!salesAnalytics.salesByDay || salesAnalytics.salesByDay.length === 0) {
+      return getEmptyChartData(timeFrame);
+    }
     
-    orders.forEach(order => {
-      const orderDate = moment(order.order_date).format('YYYY-MM-DD');
-      if (!cogsByDate[orderDate]) {
-        cogsByDate[orderDate] = 0;
+    return salesAnalytics.salesByDay.map(day => {
+      // Calculate profit margin if we have cost data
+      let profitMargin = null;
+      if (day.revenue > 0 && day.totalCost && day.totalCost > 0) {
+        profitMargin = ((day.revenue - day.totalCost) / day.revenue) * 100;
       }
       
-      order.items.forEach(item => {
-        const recipe = recipeMap.get(item.item_id.toString());
-        if (recipe && recipe.total_cost) {
-          cogsByDate[orderDate] += recipe.total_cost * item.quantity;
-        }
-      });
+      return {
+        name: day.date,
+        revenue: day.revenue || 0,
+        orders: day.orderCount || 0,
+        cogs: day.totalCost || 0,
+        profitMargin: profitMargin
+      };
     });
-    
-    return cogsByDate;
+  };
+  
+  // Helper function to process top selling items from analytics
+  const processTopSellingItems = (topItems: any[] = []): any[] => {
+    return topItems.map(item => ({
+      id: item.itemId?.toString() || '',
+      name: item.name || 'Unknown Item',
+      quantitySold: item.quantity || 0,
+      revenue: item.revenue || 0,
+      unitPrice: item.unitPrice || 0,
+      hasRecipe: item.hasCost || false,
+      recipeCost: item.unitCost || 0,
+      totalCOGS: item.totalCost || 0,
+      profitMargin: item.marginPercentage || null
+    }));
   };
 
 // Enhance products with cached recipe data
@@ -752,38 +680,6 @@ const calculateCOGSFromOrdersWithCache = (
     });
   };
 
-  // Enhance products with recipe-based COGS
-  const enhanceProductsWithCOGS = async (products: any[]): Promise<any[]> => {
-    if (!products || products.length === 0) return [];
-    
-    const itemIds = products.map(p => p.id.toString());
-    const recipeMap = await recipeService.getRecipesByItemIds(itemIds);
-    
-    return products.map(product => {
-      const recipe = recipeMap.get(product.id.toString());
-      
-      if (recipe && recipe.total_cost) {
-        const totalCOGS = recipe.total_cost * product.quantitySold;
-        const profitMargin = calculateProfitMargin(product.revenue, totalCOGS);
-        
-        return {
-          ...product,
-          recipeCost: recipe.total_cost,
-          totalCOGS,
-          profitMargin,
-          hasRecipe: true
-        };
-      }
-      
-      return {
-        ...product,
-        recipeCost: 0,
-        totalCOGS: 0,
-        profitMargin: null,
-        hasRecipe: false
-      };
-    });
-  };
 
   // Utility function to calculate profit margin
   const calculateProfitMargin = (revenue: number, cogs: number): number | null => {

@@ -41,15 +41,23 @@ export interface SalesAnalytics {
 
 export interface TopSellingItem {
   id: number;
+  itemId?: number; // Alternative id format sometimes used in API
   name: string;
   quantity: number;
   revenue: number;
+  unitPrice?: number;
+  unitCost?: number;
+  totalCost?: number;
+  hasCost?: boolean;
+  marginPercentage?: number;
 }
 
 export interface DailySales {
   date: string;
   revenue: number;
   orders: number;
+  orderCount?: number; // Alternative name for orders used in some API responses
+  totalCost?: number; // Cost data for margin calculations
 }
 
 export interface CategorySales {
