@@ -5,6 +5,7 @@ import { ShoppingOutlined, ArrowUpOutlined, ArrowDownOutlined, TagsOutlined, Sho
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
 import moment from 'moment';
+import { ShimmerBarChart, ShimmerProductPerformance } from '../common/ShimmerLoaders';
 
 // Import components and services
 import ActionItemsCard from './ActionItemsCard';
@@ -1006,6 +1007,13 @@ const Dashboard: React.FC = () => {
       <Row gutter={24} style={{ marginBottom: 24 }}>
         {/* Sales/Profit Margin Chart - Takes up more space */}
         <Col xs={24} sm={24} md={14} lg={14} xl={14}>
+          {loading ? (
+            <ShimmerBarChart 
+              height={300} 
+              title={<span><LineChartOutlined /> Sales Over Time</span>}
+              showTimeFrameSelector={true}
+            />
+          ) : (
           <Card 
             title={
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1029,11 +1037,7 @@ const Dashboard: React.FC = () => {
             }
             style={{ height: '100%' }}
           >
-        {loading ? (
-          <div style={{ height: 300, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-            <Spin size="large" />
-          </div>
-        ) : !isPosConnected ? (
+        {!isPosConnected ? (
           <div style={{ width: '100%', height: 300, position: 'relative' }}>
             {/* Blurred sample data in background */}
             <div style={{ width: '100%', height: '100%', filter: 'blur(5px)', opacity: 0.6 }}>
@@ -1169,6 +1173,7 @@ const Dashboard: React.FC = () => {
           </div>
         )}
           </Card>
+        )}
         </Col>
         
         {/* Action Items Card - Takes up less space */}
@@ -1207,8 +1212,8 @@ const Dashboard: React.FC = () => {
               bodyStyle={{ padding: '24px' }}
             >
             {productsLoading ? (
-              <div style={{ height: 400, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                <Spin size="large" />
+              <div style={{ padding: '12px 0' }}>
+                <ShimmerProductPerformance itemCount={3} showTopAndBottom={true} />
               </div>
             ) : !isPosConnected ? (
               <div style={{ height: 400, position: 'relative' }}>
