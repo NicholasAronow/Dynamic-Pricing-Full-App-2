@@ -1,9 +1,30 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Row, Col, Typography, Tag, Spin, message } from 'antd';
-import { CheckOutlined, LoadingOutlined } from '@ant-design/icons';
+import { 
+  Card, 
+  Button, 
+  Row, 
+  Col, 
+  Typography, 
+  Tag, 
+  Spin, 
+  message, 
+  Avatar,
+  Divider,
+  Badge
+} from 'antd';
+import { 
+  CheckOutlined, 
+  LoadingOutlined, 
+  StarOutlined,
+  RocketOutlined,
+  CrownOutlined,
+  ThunderboltOutlined,
+  GiftOutlined,
+} from '@ant-design/icons';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import api from 'services/api';
+import { useSubscription, SUBSCRIPTION_TIERS } from '../../contexts/SubscriptionContext';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -16,19 +37,30 @@ interface Plan {
   recommended?: boolean;
   loading?: boolean;
   disabled?: boolean;
+  originalPrice?: string;
+  savings?: string;
+  description: string;
+  icon: React.ReactNode;
+  color: string;
+  gradient: string;
 }
 
-const PREMIUM_PRODUCT_ID = 'prod_SZAVh4qmsRJS6k'; // Your Stripe Product ID
+const PREMIUM_PRODUCT_ID = 'prod_SZAVh4qmsRJS6k';
 
 const PricingPlans: React.FC = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState<string | null>(null);
+  const { currentPlan, isSubscribed, subscriptionStatus, loading: subscriptionLoading } = useSubscription();
   const [plans, setPlans] = useState<Plan[]>([
     {
       name: 'Free',
       priceId: 'free',
       price: '$0',
       interval: 'forever',
+      description: 'Perfect for getting started with basic features',
+      icon: <GiftOutlined />,
+      color: '#10b981',
+      gradient: 'linear-gradient(135deg,rgb(208, 208, 208) 0%,rgb(180, 180, 180) 100%)',
       features: [
         'Basic menu analysis',
         'Simple pricing recommendations',
@@ -39,8 +71,12 @@ const PricingPlans: React.FC = () => {
     {
       name: 'Premium',
       priceId: '',
-      price: '$99', // This will be updated from Stripe
-      interval: 'per month', // This will be updated from Stripe
+      price: '$49',
+      interval: 'per month',
+      description: 'Advanced analytics and unlimited features',
+      icon: <RocketOutlined />,
+      color: '#9370DB',
+      gradient: 'linear-gradient(135deg, #B19CD9 0%, #9370DB 50%, #7D53C8 100%)',
       features: [
         'Everything in Free',
         'Advanced analytics',
@@ -51,17 +87,15 @@ const PricingPlans: React.FC = () => {
         'API access for custom integrations'
       ],
       recommended: true,
-      loading: true // Set loading state for premium plan
+      loading: true
     }
   ]);
   
-  // Fetch price information from Stripe
   useEffect(() => {
     const fetchPriceInfo = async () => {
       try {
         const response = await api.get(`/subscriptions/product-prices?productId=${PREMIUM_PRODUCT_ID}`);
         if (response.data && response.data.prices && response.data.prices.length > 0) {
-          // Find the active price
           const activePrice = response.data.prices.find((price: any) => price.active);
           
           if (activePrice) {
@@ -70,8 +104,7 @@ const PricingPlans: React.FC = () => {
               const premiumPlan = updatedPlans.find(plan => plan.name === 'Premium');
               
               if (premiumPlan) {
-                // Format the price display
-                const amount = activePrice.unit_amount / 100; // Convert from cents to dollars
+                const amount = activePrice.unit_amount / 100;
                 const currency = activePrice.currency.toUpperCase();
                 const interval = activePrice.recurring?.interval || 'month';
                 
@@ -89,7 +122,6 @@ const PricingPlans: React.FC = () => {
         console.error('Error fetching price information:', error);
         message.error('Failed to load subscription prices');
         
-        // Set a fallback price ID if there's an error
         setPlans(prevPlans => {
           const updatedPlans = [...prevPlans];
           const premiumPlan = updatedPlans.find(plan => plan.name === 'Premium');
@@ -106,118 +138,317 @@ const PricingPlans: React.FC = () => {
     fetchPriceInfo();
   }, []);
 
-  const handleSubscribe = async (priceId: string) => {
+  const handleSubscribe = async (priceId: string, planName: string) => {
+    // Don't do anything if this is the current plan
+    const isPlanCurrent = 
+      (planName.toLowerCase() === 'free' && currentPlan === SUBSCRIPTION_TIERS.FREE) || 
+      (planName.toLowerCase() === 'premium' && currentPlan === SUBSCRIPTION_TIERS.PREMIUM);
+      
+    if (isPlanCurrent) {
+      return;
+    }
+    
+    // Handle switching to free plan (downgrade)
     if (priceId === 'free') {
-      message.info('You are already on the Free plan');
+      message.info('Please use the Subscription Management page to change your plan');
+      navigate('/subscription-management');
       return;
     }
     
     setLoading(priceId);
     try {
-      // Log the payload for debugging
       const payload = {
         price_id: priceId,
         success_url: `${window.location.origin}/subscription-success`,
-        cancel_url: `${window.location.origin}/subscription-cancel`,
+        cancel_url: `${window.location.origin}/subscription-plans`,
       };
       console.log('Sending checkout request with payload:', payload);
       
       const response = await api.post('/subscriptions/create-checkout-session', payload);
-      
-      // Redirect to Stripe Checkout
       window.location.href = response.data.url;
     } catch (error: any) {
       console.error('Error creating checkout session:', error);
       if (error.response) {
-        // The request was made and the server responded with a status code
-        // that falls out of the range of 2xx
         console.error('Error data:', error.response.data);
         console.error('Error status:', error.response.status);
         console.error('Error headers:', error.response.headers);
-        message.error(`Subscription error: ${error.response.data.detail || 'Server error'}`);
+        message.error(`Failed to create subscription: ${error.response?.data?.detail || 'Unknown error'}`);
       } else if (error.request) {
-        // The request was made but no response was received
         console.error('Error request:', error.request);
         message.error('No response received from server. Check your connection.');
       } else {
-        // Something happened in setting up the request
         console.error('Error message:', error.message);
         message.error('Error setting up subscription request.');
       }
+    } finally {
       setLoading(null);
     }
   };
 
+  const getButtonText = (plan: Plan) => {
+    // If this is loading state for this specific plan
+    if (loading === plan.priceId) return <LoadingOutlined />;
+    
+    // If this is the current plan
+    const isPlanActive = 
+      (plan.name.toLowerCase() === 'free' && currentPlan === SUBSCRIPTION_TIERS.FREE) || 
+      (plan.name.toLowerCase() === 'premium' && currentPlan === SUBSCRIPTION_TIERS.PREMIUM);
+    
+    if (isPlanActive) return 'Current Plan';
+    
+    // Otherwise standard text
+    if (plan.name.toLowerCase() === 'free') return 'Get Started Free';
+    return 'Subscribe';
+  };
+
+  const isPlanActive = (plan: Plan): boolean => {
+    return (plan.name.toLowerCase() === 'free' && currentPlan === SUBSCRIPTION_TIERS.FREE) || 
+           (plan.name.toLowerCase() === 'premium' && currentPlan === SUBSCRIPTION_TIERS.PREMIUM);
+  };
+
+  const getButtonStyle = (plan: Plan) => {
+    // If this is the current plan
+    if (isPlanActive(plan)) {
+      return {
+        border: '2px solid rgb(170, 170, 170)',  // Gray border
+        color: '#666666',             // Gray text
+        height: '48px',
+        fontSize: '16px',
+        fontWeight: 600,
+        borderRadius: '8px',
+        background: 'rgba(197, 197, 197, 0.1)', // Light gray background
+        cursor: 'default',
+      };
+    }
+    
+    // For recommended plan
+    if (plan.recommended) {
+      return {
+        background: plan.gradient,
+        border: 'none',
+        color: 'white',
+        height: '48px',
+        fontSize: '16px',
+        fontWeight: 600,
+        borderRadius: '8px',
+        boxShadow: '0 4px 14px 0 rgba(147, 112, 219, 0.4)',
+      };
+    }
+    
+    // For other plans
+    return {
+      border: `2px solid ${plan.color}`,
+      color: plan.color,
+      height: '48px',
+      fontSize: '16px',
+      fontWeight: 600,
+      borderRadius: '8px',
+      background: 'white',
+    };
+  };
+
   return (
-    <div style={{ padding: '40px 0' }}>
-      <Title level={2} style={{ textAlign: 'center', marginBottom: 48 }}>
-        Choose the Right Plan for Your Business
-      </Title>
-      <Paragraph style={{ textAlign: 'center', marginBottom: 48, fontSize: 16 }}>
-        Get access to advanced pricing optimization features with our premium plans
-      </Paragraph>
-      
-      <Row gutter={[24, 24]} justify="center">
-        {plans.map((plan) => (
-          <Col xs={24} sm={24} md={8} key={plan.name}>
-            <Card
-              hoverable
-              style={{
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                ...(plan.recommended ? { 
-                  borderColor: '#1890ff',
-                  boxShadow: '0 0 10px rgba(24, 144, 255, 0.2)',
-                } : {}),
-              }}
-              bodyStyle={{ flex: 1, display: 'flex', flexDirection: 'column' }}
-            >
-              {plan.recommended && (
-                <div style={{ 
-                  position: 'absolute', 
-                  top: 0, 
-                  right: 0, 
-                  backgroundColor: '#1890ff', 
-                  color: 'white',
-                  padding: '4px 12px',
-                  borderBottomLeftRadius: 8,
-                }}>
-                  Recommended
-                </div>
-              )}
-              
-              <Title level={3} style={{ marginBottom: 8 }}>{plan.name}</Title>
-              <div style={{ display: 'flex', alignItems: 'flex-end', marginBottom: 24 }}>
-                <Title level={2} style={{ margin: 0 }}>{plan.price}</Title>
-                <Text type="secondary" style={{ marginLeft: 8, marginBottom: 6 }}>
-                  {plan.interval}
-                </Text>
-              </div>
-              
-              <div style={{ flex: 1 }}>
-                {plan.features.map((feature, index) => (
-                  <div key={index} style={{ marginBottom: 12, display: 'flex' }}>
-                    <CheckOutlined style={{ color: '#52c41a', marginRight: 8, marginTop: 4 }} />
-                    <Text>{feature}</Text>
-                  </div>
-                ))}
-              </div>
-              
-              <Button
-                type={plan.recommended ? 'primary' : 'default'}
-                size="large"
-                block
-                onClick={() => handleSubscribe(plan.priceId)}
-                disabled={plan.disabled || loading !== null}
-                style={{ marginTop: 24 }}
+    <div style={{ 
+      minHeight: '100vh',
+      background: '#fefefe',
+      padding: '60px 24px'
+    }}>
+      <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+        {/* Header Section */}
+        <div style={{ textAlign: 'center', marginBottom: 60, color: 'white' }}>
+          <Title level={1} style={{ color: '#9370DB', marginBottom: 16, fontSize: '48px' }}>
+            Choose Your Perfect Plan
+          </Title>
+          <Paragraph style={{ 
+            color: '#9370DB', 
+            fontSize: '20px', 
+            maxWidth: '600px', 
+            margin: '0 auto 32px',
+            lineHeight: '1.6'
+          }}>
+            Transform your restaurant's pricing strategy with our AI-powered optimization platform
+          </Paragraph>
+          
+          {/* Trust indicators */}
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '32px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', color: '#9370DB' }}>
+              <CheckOutlined style={{ marginRight: 8, fontSize: '16px' }} />
+              <Text style={{ color: '#9370DB' }}>30-day money back guarantee</Text>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', color: '#9370DB' }}>
+              <ThunderboltOutlined style={{ marginRight: 8, fontSize: '16px' }} />
+              <Text style={{ color: '#9370DB' }}>Setup in under 5 minutes</Text>
+            </div>
+          </div>
+        </div>
+        
+        <Row gutter={[32, 32]} justify="center">
+          {plans.map((plan, index) => (
+            <Col xs={24} md={12} lg={10} key={plan.name}>
+              <Badge.Ribbon 
+                text={plan.recommended ? "Most Popular" : ""} 
+                color={plan.recommended ? "#9370DB" : "#10b981"}
+                style={{ 
+                  display: plan.recommended ? 'block' : 'none',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  padding: '6px 12px',
+                  right: '-20px',
+                  top: '10px'
+                }}
               >
-                {loading === plan.priceId ? <LoadingOutlined /> : 'Subscribe'}
-              </Button>
-            </Card>
-          </Col>
-        ))}
-      </Row>
+                <Card
+                  style={{
+                    height: '100%',
+                    borderRadius: '16px',
+                    border: 'none',
+                    boxShadow: plan.recommended 
+                      ? '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04), 0 0 0 1px rgba(59, 130, 246, 0.1)'
+                      : '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+                    transform: plan.recommended ? 'scale(1.05)' : 'scale(1)',
+                    transition: 'all 0.3s ease',
+                    background: 'white',
+                    position: 'relative',
+                    overflow: 'hidden'
+                  }}
+                  bodyStyle={{ 
+                    padding: '32px 24px',
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column'
+                  }}
+                  hoverable
+                >
+                  {/* Plan Header */}
+                  <div style={{ textAlign: 'center', marginBottom: 32 }}>
+                    <Avatar 
+                      size={64}
+                      style={{ 
+                        background: plan.gradient,
+                        marginBottom: 16,
+                        border: '3px solid rgba(255,255,255,0.2)'
+                      }}
+                      icon={plan.icon}
+                    />
+                    <Title level={3} style={{ margin: 0, color: '#1f2937' }}>
+                      {plan.name}
+                    </Title>
+                    <Text type="secondary" style={{ fontSize: '14px', display: 'block', marginTop: 4 }}>
+                      {plan.description}
+                    </Text>
+                  </div>
+
+                  {/* Pricing */}
+                  <div style={{ textAlign: 'center', marginBottom: 32 }}>
+                    <Title 
+                      level={1} 
+                      style={{ 
+                        margin: 0, 
+                        color: plan.color,
+                        fontSize: '48px',
+                        fontWeight: 800
+                      }}
+                    >
+                      {plan.loading ? <Spin /> : plan.price}
+                    </Title>
+                    <Text type="secondary" style={{ fontSize: '16px' }}>
+                      {plan.interval}
+                    </Text>
+                  </div>
+
+                  <Divider style={{ margin: '0 0 24px 0' }} />
+
+                  {/* Features */}
+                  <div style={{ flex: 1 }}>
+                    {plan.features.map((feature, featureIndex) => (
+                      <div 
+                        key={featureIndex} 
+                        style={{ 
+                          display: 'flex', 
+                          alignItems: 'flex-start',
+                          marginBottom: 16,
+                          padding: '8px 0'
+                        }}
+                      >
+                        <CheckOutlined 
+                          style={{ 
+                            color: plan.color, 
+                            marginRight: 12, 
+                            marginTop: 2,
+                            fontSize: '16px',
+                            fontWeight: 600
+                          }} 
+                        />
+                        <Text style={{ fontSize: '15px', color: '#374151', lineHeight: '1.5' }}>
+                          {feature}
+                        </Text>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* CTA Button */}
+                  <Button
+                    type={plan.recommended ? 'primary' : 'default'}
+                    size="large"
+                    block
+                    onClick={() => handleSubscribe(plan.priceId, plan.name)}
+                    disabled={plan.disabled || (loading !== null && loading !== plan.priceId)}
+                    style={getButtonStyle(plan)}
+                  >
+                    {getButtonText(plan)}
+                  </Button>
+
+                  {plan.name === 'Premium' && (
+                    <Text 
+                      style={{ 
+                        textAlign: 'center', 
+                        fontSize: '12px', 
+                        color: '#6b7280',
+                        marginTop: 12,
+                        display: 'block'
+                      }}
+                    >
+                      Cancel anytime
+                    </Text>
+                  )}
+                </Card>
+              </Badge.Ribbon>
+            </Col>
+          ))}
+        </Row>
+
+        {/* Bottom Section */}
+        <div style={{ 
+          textAlign: 'center', 
+          marginTop: 80, 
+          padding: '32px',
+          background: 'rgba(255,255,255,0.1)',
+          borderRadius: '16px',
+          backdropFilter: 'blur(10px)',
+          border: '1px solid rgba(255,255,255,0.2)'
+        }}>
+          <Title level={3} style={{ color: 'white', marginBottom: 16 }}>
+            Trusted by 10,000+ restaurants worldwide
+          </Title>
+          <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: '16px' }}>
+            Join successful restaurant owners who've increased their profits by an average of 23% using our platform
+          </Text>
+        </div>
+
+        {/* FAQ Teaser */}
+        <div style={{ textAlign: 'center', marginTop: 40 }}>
+          <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: '14px' }}>
+            Questions? Check out our{' '}
+            <a href="/faq" style={{ color: 'white', textDecoration: 'underline' }}>
+              FAQ
+            </a>
+            {' '}or{' '}
+            <a href="/contact" style={{ color: 'white', textDecoration: 'underline' }}>
+              contact our team
+            </a>
+          </Text>
+        </div>
+      </div>
     </div>
   );
 };

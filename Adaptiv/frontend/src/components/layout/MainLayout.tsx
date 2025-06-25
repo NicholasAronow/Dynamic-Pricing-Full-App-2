@@ -74,9 +74,12 @@ const MainLayout: React.FC = () => {
           <Menu.Item key="/profile" icon={<BankOutlined style={{ fontSize: '18px', color: '#7546C9' }} />}>
             <Link to="/profile">Business Profile</Link>
           </Menu.Item>
-          <Menu.Item key="/subscription-management" icon={<CrownOutlined style={{ fontSize: '18px', color: '#7546C9' }} />}>
-            <Link to="/subscription-management">
-              {isSubscribed() ? 'Manage Subscription' : 'Upgrade Plan'}
+          <Menu.Item 
+            key={isSubscribed() ? "/subscription-management" : "/subscription-plans"} 
+            icon={<CrownOutlined style={{ fontSize: '18px', color: '#7546C9' }} />}
+          >
+            <Link to={isSubscribed() ? "/subscription-management" : "/subscription-plans"}>
+              Subscription
             </Link>
           </Menu.Item>
         </Menu>
