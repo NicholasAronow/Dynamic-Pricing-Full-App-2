@@ -15,6 +15,8 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     competitor_tracking_enabled = Column(Boolean, default=False)
     pos_connected = Column(Boolean, default=False)
+    stripe_customer_id = Column(String, nullable=True)  # For Stripe subscription integration
+    subscription_tier = Column(String, nullable=True, default="free")  # free, basic, premium
     
     # Relationship to BusinessProfile
     business = relationship("BusinessProfile", back_populates="owner", uselist=False)

@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Typography, Card, Row, Col, Button, Tag, Space, Spin, Radio, Tooltip, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
-import { ShoppingOutlined, ArrowUpOutlined, ArrowDownOutlined, TagsOutlined, ShopOutlined, QuestionCircleOutlined, LineChartOutlined} from '@ant-design/icons';
+import { ShoppingOutlined, ArrowUpOutlined, ArrowDownOutlined, TagsOutlined, ShopOutlined, QuestionCircleOutlined, LineChartOutlined, CrownOutlined} from '@ant-design/icons';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
+import { useSubscription } from '../../contexts/SubscriptionContext';
+import FeatureGate from '../subscriptions/FeatureGate';
+import PremiumAnalyticsWidget from './PremiumAnalyticsWidget';
 import moment from 'moment';
 import { ShimmerBarChart, ShimmerProductPerformance } from '../common/ShimmerLoaders';
 
@@ -50,6 +53,7 @@ const barColors = ['#3f8600', '#52c41a', '#73d13d', '#95de64', '#b7eb8f', '#d9f7
 
 const Dashboard: React.FC = () => {
   const { user } = useAuth();
+  const { isSubscribed, currentPlan } = useSubscription();
   const navigate = useNavigate();
   const [timeFrame, setTimeFrame] = useState('7d');
   const [salesData, setSalesData] = useState<any[]>([]);
@@ -1181,6 +1185,15 @@ const Dashboard: React.FC = () => {
           <ActionItemsCard />
         </Col>
 
+      </Row>
+      
+      {/* Premium Analytics Widget - Feature Gated */}
+      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+        <Col xs={24} lg={24}>
+          <FeatureGate feature="advanced_analytics">
+            <PremiumAnalyticsWidget />
+          </FeatureGate>
+        </Col>
       </Row>
       
       {/* Main dashboard layout */}

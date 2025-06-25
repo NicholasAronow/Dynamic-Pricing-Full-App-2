@@ -21,11 +21,13 @@ import {
 } from '@ant-design/icons';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useSubscription } from '../../contexts/SubscriptionContext';
 
 const { Header, Sider, Content } = Layout;
 
 const MainLayout: React.FC = () => {
   const { user, logout } = useAuth();
+  const { currentPlan, isSubscribed } = useSubscription();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -71,6 +73,11 @@ const MainLayout: React.FC = () => {
           </Menu.Item>
           <Menu.Item key="/profile" icon={<BankOutlined style={{ fontSize: '18px', color: '#7546C9' }} />}>
             <Link to="/profile">Business Profile</Link>
+          </Menu.Item>
+          <Menu.Item key="/subscription-management" icon={<CrownOutlined style={{ fontSize: '18px', color: '#7546C9' }} />}>
+            <Link to="/subscription-management">
+              {isSubscribed() ? 'Manage Subscription' : 'Upgrade Plan'}
+            </Link>
           </Menu.Item>
         </Menu>
         </div>
