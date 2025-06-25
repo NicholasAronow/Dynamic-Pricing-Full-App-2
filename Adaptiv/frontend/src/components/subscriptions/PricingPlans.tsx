@@ -59,7 +59,7 @@ const PricingPlans: React.FC = () => {
       interval: 'forever',
       description: 'Perfect for getting started with basic features',
       icon: <GiftOutlined />,
-      color: '#10b981',
+      color: '#rgb(180,180,180)',
       gradient: 'linear-gradient(135deg,rgb(208, 208, 208) 0%,rgb(180, 180, 180) 100%)',
       features: [
         'Basic menu analysis',
