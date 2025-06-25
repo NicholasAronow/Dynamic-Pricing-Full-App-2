@@ -136,38 +136,62 @@ const Dashboard: React.FC = () => {
 
 
 
-  // Process sales data using pre-calculated margins
+  // Process sales data using pre-calculated margins directly from orders
   const processSalesFromOrdersWithMargins = (orders: Order[]): any[] => {
     const salesMap: Record<string, { 
       revenue: number; 
       orders: number; 
       cogs: number;
-      hasMarginData: boolean;
+      gross_margin: number | null;
     }> = {};
     
+    // Process orders into a map keyed by date
     orders.forEach(order => {
       const date = moment(order.order_date).format('YYYY-MM-DD');
+      
       if (!salesMap[date]) {
-        salesMap[date] = { revenue: 0, orders: 0, cogs: 0, hasMarginData: false };
+        salesMap[date] = { 
+          revenue: 0, 
+          orders: 0, 
+          cogs: 0,
+          gross_margin: null
+        };
       }
       
+      // Add revenue and order count
       salesMap[date].revenue += order.total_amount;
       salesMap[date].orders += 1;
       
-      // Use pre-calculated cost if available
+      // Use the pre-calculated cost fields from the order
+      // This avoids the need to fetch and calculate costs separately
       if (order.total_cost !== undefined && order.total_cost !== null) {
         salesMap[date].cogs += order.total_cost;
-        salesMap[date].hasMarginData = true;
+      }
+      
+      // If order has pre-calculated margin, use it for debugging
+      if (order.gross_margin !== undefined && order.gross_margin !== null) {
+        // We'll calculate the weighted average margin if needed later
+        console.debug(`Order ${order.id} has pre-calculated gross margin: ${order.gross_margin.toFixed(2)}%`);
       }
     });
     
-    return Object.entries(salesMap).map(([date, data]) => ({
-      date,
-      revenue: data.revenue,
-      orders: data.orders,
-      cogs: data.cogs,
-      hasMarginData: data.hasMarginData
-    }));
+    // Convert the map to an array and calculate margins
+    return Object.entries(salesMap).map(([date, data]) => {
+      let profitMargin = null;
+      
+      // Calculate profit margin if we have cost data
+      if (data.revenue > 0 && data.cogs > 0) {
+        profitMargin = ((data.revenue - data.cogs) / data.revenue) * 100;
+      }
+      
+      return {
+        date,
+        revenue: data.revenue,
+        orders: data.orders,
+        cogs: data.cogs,
+        profitMargin
+      };
+    });
   };
 
   // Calculate item performance using pre-calculated margins
@@ -258,11 +282,12 @@ const Dashboard: React.FC = () => {
         revenue: 0, 
         orders: 0, 
         cogs: 0, 
-        hasMarginData: false 
+        profitMargin: null 
       };
       
-      let profitMargin = null;
-      if (dayData.hasMarginData && dayData.revenue > 0) {
+      // Use pre-calculated margin if available, otherwise calculate it
+      let profitMargin = dayData.profitMargin;
+      if (profitMargin === null && dayData.revenue > 0 && dayData.cogs > 0) {
         profitMargin = ((dayData.revenue - dayData.cogs) / dayData.revenue * 100);
       }
       
@@ -283,15 +308,16 @@ const Dashboard: React.FC = () => {
       revenue: 0, 
       orders: 0, 
       cogs: 0,
-      hasMarginData: false 
+      profitMargin: null 
     };
     
     return Array.from({ length: 24 }, (_, hour) => {
       const hourlyRevenue = dayData.revenue / 24;
       const hourlyCogs = dayData.cogs / 24;
       
-      let profitMargin = null;
-      if (dayData.hasMarginData && hourlyRevenue > 0) {
+      // Use pre-calculated margin if available, otherwise calculate it
+      let profitMargin = dayData.profitMargin;
+      if (profitMargin === null && hourlyRevenue > 0 && hourlyCogs > 0) {
         profitMargin = ((hourlyRevenue - hourlyCogs) / hourlyRevenue * 100);
       }
       
