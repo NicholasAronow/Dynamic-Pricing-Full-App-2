@@ -75,10 +75,10 @@ const MainLayout: React.FC = () => {
             <Link to="/profile">Business Profile</Link>
           </Menu.Item>
           <Menu.Item 
-            key={isSubscribed() ? "/subscription-management" : "/subscription-plans"} 
+            key="/subscription-plans" 
             icon={<CrownOutlined style={{ fontSize: '18px', color: '#7546C9' }} />}
           >
-            <Link to={isSubscribed() ? "/subscription-management" : "/subscription-plans"}>
+            <Link to="/subscription-plans">
               Subscription
             </Link>
           </Menu.Item>
