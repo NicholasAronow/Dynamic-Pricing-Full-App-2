@@ -190,11 +190,7 @@ const PricingPlans: React.FC = () => {
     if (loading === plan.priceId) return <LoadingOutlined />;
     
     // If this is the current plan
-    const isPlanActive = 
-      (plan.name.toLowerCase() === 'free' && currentPlan === SUBSCRIPTION_TIERS.FREE) || 
-      (plan.name.toLowerCase() === 'premium' && currentPlan === SUBSCRIPTION_TIERS.PREMIUM);
-    
-    if (isPlanActive) return 'Current Plan';
+    if (isPlanActive(plan)) return 'Current Plan';
     
     // Otherwise standard text
     if (plan.name.toLowerCase() === 'free') return 'Get Started Free';
@@ -392,8 +388,11 @@ const PricingPlans: React.FC = () => {
                     size="large"
                     block
                     onClick={() => handleSubscribe(plan.priceId, plan.name)}
-                    disabled={plan.disabled || (loading !== null && loading !== plan.priceId)}
+                    disabled={plan.disabled || 
+                             (loading !== null && loading !== plan.priceId) ||
+                             isPlanActive(plan)}
                     style={getButtonStyle(plan)}
+                    icon={isPlanActive(plan) ? <CheckOutlined /> : null}
                   >
                     {getButtonText(plan)}
                   </Button>
