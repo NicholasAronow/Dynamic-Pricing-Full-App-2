@@ -45,7 +45,7 @@ interface Plan {
   gradient: string;
 }
 
-const PREMIUM_PRODUCT_ID = 'prod_SZAVh4qmsRJS6k';
+const PREMIUM_PRODUCT_ID = 'prod_SZPJX6vB9D0i2H';
 
 const PricingPlans: React.FC = () => {
   const navigate = useNavigate();
