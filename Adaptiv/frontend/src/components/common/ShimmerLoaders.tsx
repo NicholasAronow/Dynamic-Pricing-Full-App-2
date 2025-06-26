@@ -110,20 +110,17 @@ export const ShimmerChart: React.FC<{
   </Card>
 );
 
-// Specific shimmer for bar charts with more accurate bar representation
+// Specific shimmer for area charts with smooth curves
 export const ShimmerBarChart: React.FC<{
   height?: string | number;
   title?: React.ReactNode;
   showTimeFrameSelector?: boolean;
 }> = ({ height = 300, title, showTimeFrameSelector = false }) => {
-  // Bars for the chart
-  const BarsContainer = styled.div`
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
+  // Chart container styles
+  const AreaChartContainer = styled.div`
+    position: relative;
     height: calc(100% - 40px);
     padding-bottom: 40px; /* Space for x-axis */
-    position: relative;
     z-index: 2;
   `;
   
@@ -170,6 +167,148 @@ export const ShimmerBarChart: React.FC<{
     justify-content: space-between;
   `;
 
+  // Area chart with gradient and shimmer effect
+  const ShimmerAnimation = styled.div`
+    @keyframes shimmer {
+      0% { background-position: -1000px 0; }
+      100% { background-position: 1000px 0; }
+    }
+    position: absolute;
+    height: 100%;
+    width: 100%;
+    background: linear-gradient(to right, rgba(232, 234, 237, 0.2) 8%, rgba(240, 240, 240, 0.5) 18%, rgba(232, 234, 237, 0.2) 33%);
+    background-size: 2000px 100%;
+    animation: shimmer 1.5s infinite linear;
+  `;
+
+  // Area chart with gradient
+  const AreaChart = styled.div`
+    position: absolute;
+    bottom: 40px;
+    left: 0;
+    width: 100%;
+    height: calc(100% - 40px);
+    background: linear-gradient(to bottom, rgba(200, 200, 200, 0.8) 0%, rgba(232, 234, 237, 0.1) 100%);
+    clip-path: polygon(
+      0% 100%, /* bottom left */
+      0% 65%, /* left side start */
+      1% 64.5%,
+      2% 64%,
+      3% 63.5%,
+      4% 63%,
+      5% 62.5%,
+      6% 62%,
+      7% 61%,
+      8% 60.5%,
+      9% 60%,
+      10% 60%,
+      11% 61%,
+      12% 62%,
+      13% 64%,
+      14% 66%,
+      15% 68%,
+      16% 70%,
+      17% 72%,
+      18% 74%,
+      19% 75%,
+      20% 76%,
+      21% 75%,
+      22% 74%,
+      23% 71%,
+      24% 68%,
+      25% 64%,
+      26% 60%,
+      27% 56%,
+      28% 52%,
+      29% 48%,
+      30% 44%,
+      31% 42%,
+      32% 41%,
+      33% 42%,
+      34% 43%,
+      35% 44%,
+      36% 45%,
+      37% 46%,
+      38% 47%,
+      39% 47.5%,
+      40% 48%,
+      41% 47.5%,
+      42% 47%,
+      43% 45.5%,
+      44% 44%,
+      45% 42%,
+      46% 40%,
+      47% 38%,
+      48% 36%,
+      49% 34%,
+      50% 32%,
+      51% 31.5%,
+      52% 31%,
+      53% 32%,
+      54% 33%,
+      55% 34%,
+      56% 35%,
+      57% 36%,
+      58% 37%,
+      59% 38%,
+      60% 39%,
+      61% 40.5%,
+      62% 42%,
+      63% 44%,
+      64% 46%,
+      65% 48%,
+      66% 50%,
+      67% 52%,
+      68% 54%,
+      69% 55%,
+      70% 56%,
+      71% 55%,
+      72% 54%,
+      73% 51%,
+      74% 48%,
+      75% 44%,
+      76% 40%,
+      77% 36%,
+      78% 32%,
+      79% 28%,
+      80% 24%,
+      81% 23%,
+      82% 22%,
+      83% 22%,
+      84% 23%,
+      85% 24%,
+      86% 25%,
+      87% 26%,
+      88% 27%,
+      89% 28%,
+      90% 29%,
+      91% 30%,
+      92% 30.5%,
+      93% 31%,
+      94% 31.5%,
+      95% 32%,
+      96% 32.5%,
+      97% 33%,
+      98% 33.5%,
+      99% 34%,
+      100% 34.5%, /* right side end */
+      100% 100% /* bottom right */
+    );
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    overflow: hidden; /* Important to contain the shimmer effect */
+  `;
+
+  // Line on top of area
+  const AreaLine = styled.div`
+    position: absolute;
+    width: 100%;
+    height: 2px;
+    background: #c0c0c0;
+    transform: translateY(-1px);
+    opacity: 0.8;
+  `;
+
   return (
     <Card 
       title={
@@ -198,8 +337,7 @@ export const ShimmerBarChart: React.FC<{
       bodyStyle={{ padding: cardBodyPadding }}
     >
       <ChartContainer style={{ height, position: 'relative', paddingLeft: 50, overflow: 'visible' }}>
-        <BarsContainer>
-          <YAxis />
+        <AreaChartContainer>
           <XAxis />
           {/* Y-axis labels */}
           <YAxisLabels>
@@ -212,31 +350,11 @@ export const ShimmerBarChart: React.FC<{
             ))}
           </YAxisLabels>
           
-          {/* Bars */}
-          {Array.from({ length: 12 }).map((_, i) => {
-            // Make bars more visible with higher minimum height
-            const randomHeight = 20 + Math.random() * 70;
-            return (
-              <div key={i} style={{ 
-                display: 'flex', 
-                flexDirection: 'column', 
-                alignItems: 'center', 
-                width: '7%', 
-                height: `${randomHeight}%`,
-                minHeight: '20px',
-                marginTop: 'auto',
-                position: 'relative',
-                zIndex: 1,
-              }}>
-                <Shimmer 
-                  height="100%"
-                  width="80%"
-                  borderRadius="4px 4px 0 0"
-                  style={{ backgroundColor: '#e8eaed' }}
-                />
-              </div>
-            );
-          })}
+          {/* Area chart */}
+          <AreaChart>
+            {/* Add the shimmer animation inside the chart */}
+            <ShimmerAnimation />
+          </AreaChart>
           
           {/* X-axis labels */}
           <XAxisLabels>
@@ -248,11 +366,15 @@ export const ShimmerBarChart: React.FC<{
               />
             ))}
           </XAxisLabels>
-        </BarsContainer>
+        </AreaChartContainer>
         
         <LegendContainer style={{ marginTop: 20 }}>
           <LegendItem>
             <Shimmer width={16} height={16} borderRadius={4} inline />
+            <Shimmer width={60} height={14} inline />
+          </LegendItem>
+          <LegendItem>
+            <Shimmer width={16} height={16} borderRadius={4} style={{ backgroundColor: '#00C853' }} inline />
             <Shimmer width={60} height={14} inline />
           </LegendItem>
         </LegendContainer>

@@ -154,6 +154,18 @@ async def get_subscription_status(
 ):
     """Get the subscription status for the current user"""
     try:
+        # Special marker for beta testers to bypass payment
+        BETA_TESTER_MARKER = "BETA_TESTER_SUBSCRIPTION_ACTIVE"
+        
+        # Check if the user is a beta tester with our special marker
+        if current_user.stripe_customer_id == BETA_TESTER_MARKER:
+            return SubscriptionStatus(
+                active=True,
+                subscription_id="beta_subscription",
+                current_period_end="2099-12-31",  # Far future date
+                plan="Beta Tester Plan"
+            )
+            
         # Check if the user has a Stripe customer ID
         if not current_user.stripe_customer_id:
             return SubscriptionStatus(active=False)

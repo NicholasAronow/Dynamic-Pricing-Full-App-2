@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Typography, Card, Row, Col, Button, Tag, Space, Spin, Radio, Tooltip, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { ShoppingOutlined, ArrowUpOutlined, ArrowDownOutlined, TagsOutlined, ShopOutlined, QuestionCircleOutlined, LineChartOutlined, CrownOutlined} from '@ant-design/icons';
-import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
+import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, Area } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
 import { useSubscription } from '../../contexts/SubscriptionContext';
 import FeatureGate from '../subscriptions/FeatureGate';
@@ -1050,14 +1050,28 @@ const Dashboard: React.FC = () => {
                   data={[]}
                   margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="name" />
                   <YAxis tickFormatter={(tick) => `$${formatNumberWithCommas(tick)}`} />
-                  <Bar 
+                  <Area 
                     dataKey="revenue" 
                     name="Sales" 
-                    fill="#9370DB" 
-                    radius={[4, 4, 0, 0]}
+                    fill="url(#revenueGradientSample)" 
+                    stroke="#9370DB"
+                    strokeWidth={2}
+                  >
+                    <defs>
+                      <linearGradient id="revenueGradientSample" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#9370DB" stopOpacity={0.9}/>
+                        <stop offset="95%" stopColor="#9370DB" stopOpacity={0.05}/>
+                      </linearGradient>
+                    </defs>
+                  </Area>
+                  <Line 
+                    type="monotone"
+                    dataKey="revenue" 
+                    name="Sales" 
+                    stroke="#9370DB" 
+                    dot={{ fill: '#9370DB', r: 4 }}
                   />
                 </ComposedChart>
               </ResponsiveContainer>
@@ -1104,7 +1118,12 @@ const Dashboard: React.FC = () => {
                 data={salesData}
                 margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
               >
-                <CartesianGrid strokeDasharray="3 3" />
+                <defs>
+                  <linearGradient id="revenueGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#9370DB" stopOpacity={0.95}/>
+                    <stop offset="95%" stopColor="#9370DB" stopOpacity={0.05}/>
+                  </linearGradient>
+                </defs>
                 <XAxis dataKey="name" />
                 <YAxis 
                   yAxisId="left"
@@ -1154,11 +1173,24 @@ const Dashboard: React.FC = () => {
                   }}
                 />
                 <Legend />
-                <Bar 
+                <Area 
+                  type="monotone"
                   dataKey="revenue" 
                   name="Sales" 
-                  fill="#9370DB" 
-                  radius={[4, 4, 0, 0]}
+                  fill="url(#revenueGradient)" 
+                  stroke="#9370DB"
+                  strokeWidth={2}
+                  yAxisId="left"
+                  fillOpacity={1}
+                />
+                <Line 
+                  type="monotone"
+                  dataKey="revenue" 
+                  name="Sales" 
+                  stroke="#9370DB" 
+                  strokeWidth={0}
+                  dot={{ fill: '#9370DB', r: 0 }}
+                  activeDot={{ r: 0 }}
                   yAxisId="left"
                 />
                 <Line 
@@ -1167,8 +1199,8 @@ const Dashboard: React.FC = () => {
                   name="Profit Margin" 
                   stroke="#00C853" 
                   strokeWidth={3}
-                  dot={{ fill: '#00C853', r: 4 }}
-                  activeDot={{ r: 6 }}
+                  dot={{ fill: '#00C853', r: 0 }}
+                  activeDot={{ r: 0 }}
                   yAxisId="right"
                   connectNulls={true}
                 />
