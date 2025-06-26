@@ -219,16 +219,31 @@ const PricingPlans: React.FC = () => {
     }
   };
 
+  const handleCustomerPortal = async () => {
+      setPortalLoading(true);
+      try {
+        const response = await api.post('/subscriptions/customer-portal', {
+          return_url: `${window.location.origin}/subscription-management`
+        });
+        
+        // Redirect to Stripe Customer Portal
+        window.location.href = response.data.url;
+      } catch (error) {
+        console.error('Error creating customer portal session:', error);
+        message.error('Failed to access customer portal. Please try again later.');
+        setPortalLoading(false);
+      }
+    };
+
   const getButtonText = (plan: Plan) => {
     // If this is loading state for this specific plan
     if (loading === plan.priceId) return <LoadingOutlined />;
     
     // If this is the current plan
-    if (isPlanActive(plan)) return 'Current Plan';
+    if (!subscription?.active) return 'Current Plan';
     
     // Otherwise standard text
-    if (plan.name.toLowerCase() === 'free') return 'Get Started Free';
-    return 'Subscribe';
+    else return 'Get Started Free';
   };
 
   const isPlanActive = (plan: Plan): boolean => {
@@ -252,7 +267,7 @@ const PricingPlans: React.FC = () => {
     }
     
     // For recommended plan
-    if (plan.recommended) {
+    else {
       return {
         background: plan.gradient,
         border: 'none',
@@ -421,14 +436,24 @@ const PricingPlans: React.FC = () => {
                     type={plan.recommended ? 'primary' : 'default'}
                     size="large"
                     block
-                    onClick={() => handleSubscribe(plan.priceId, plan.name)}
-                    disabled={plan.disabled || 
-                             (loading !== null && loading !== plan.priceId) ||
-                             isPlanActive(plan)}
+                    onClick={() => {
+                      // If subscribed and this is the free plan, go to customer portal
+                      if (subscription?.active && plan.name.toLowerCase() === 'free') {
+                        handleCustomerPortal();
+                      } else {
+                        handleSubscribe(plan.priceId, plan.name);
+                      }
+                    }}
+                    disabled={
+                      plan.disabled || 
+                      (loading !== null && loading !== plan.priceId) ||
+                      (subscription?.active && plan.name.toLowerCase() === 'premium')
+                    }
                     style={getButtonStyle(plan)}
+                    loading={plan.name.toLowerCase() === 'free' && subscription?.active ? portalLoading : undefined}
                     icon={isPlanActive(plan) ? <CheckOutlined /> : null}
                   >
-                    {getButtonText(plan)}
+                    {subscription?.active && plan.name.toLowerCase() === 'free' ? 'Manage Subscription' : getButtonText(plan)}
                   </Button>
 
                   {plan.name === 'Premium' && (
