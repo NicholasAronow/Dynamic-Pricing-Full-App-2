@@ -222,7 +222,7 @@ const PricingPlans: React.FC = () => {
       setPortalLoading(true);
       try {
         const response = await api.post('/subscriptions/customer-portal', {
-          return_url: `${window.location.origin}/subscription-management`
+          return_url: `${window.location.origin}/subscription-plans`
         });
         
         // Redirect to Stripe Customer Portal
@@ -273,13 +273,13 @@ const PricingPlans: React.FC = () => {
     // If premium plan and user is subscribed - not clickable
     if (plan.name.toLowerCase() === 'premium' && subscription?.active === true) {
       return {
-        border: '2px solid #52c41a',  // Green border
-        color: '#52c41a',             // Green text
+        border: '2px rgba(147, 112, 219, 0.4)',
+        color: '#595959',
         height: '48px',
         fontSize: '16px',
         fontWeight: 600,
         borderRadius: '8px',
-        background: 'rgba(82, 196, 26, 0.1)', // Light green background
+        background: 'rgba(201, 201, 201, 0.1)',
         cursor: 'default',
         boxShadow: 'none'
       };
@@ -288,13 +288,13 @@ const PricingPlans: React.FC = () => {
     // If free plan and user is subscribed - make it look clickable
     if (plan.name.toLowerCase() === 'free' && subscription?.active === true) {
       return {
-        border: '2px solid #1890ff',  // Blue border
-        color: '#1890ff',             // Blue text
+        border: '2px solid #595959',
+        color: '#fff',
         height: '48px',
         fontSize: '16px',
         fontWeight: 600,
         borderRadius: '8px',
-        background: 'rgba(24, 144, 255, 0.1)', // Light blue background
+        background: '#595959',
         cursor: 'pointer',
       };
     }
