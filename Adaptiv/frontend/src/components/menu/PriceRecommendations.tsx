@@ -420,13 +420,50 @@ const PriceRecommendations: React.FC = () => {
   }, []);
 
   return (
-    <div style={{ position: 'relative' }}>
-      <Title level={2}>Your Items</Title>
-      <Title level={5} type="secondary" style={{ marginTop: 0 }}>
-        Optimize your product pricing strategy with AI-driven insights
-      </Title>
+    <div style={{ position: 'relative', maxWidth: '100%', margin: '0 auto'}}>
+      {/* Header with Re-sync Button on Right */}
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'flex-start',
+        marginBottom: 40 
+      }}>
+        <div>
+          <Title level={2} style={{ margin: 0, color: '#1f2937', fontWeight: 600 }}>
+            Your Items
+          </Title>
+          <Text style={{ color: '#6b7280', fontSize: '16px' }}>
+            Optimize your product pricing strategy with AI-driven insights
+          </Text>
+        </div>
+        
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center',
+          gap: '8px'
+        }}>
+          <Text type="secondary" style={{ fontSize: '13px' }}>
+            Refresh data
+          </Text>
+          <Button 
+            onClick={handleSyncOrders} 
+            disabled={syncingOrders} 
+            type="text"
+            size="small"
+            icon={syncingOrders ? <LoadingOutlined /> : <SyncOutlined />}
+            style={{
+              color: '#6b7280',
+              border: '1px solid #e5e7eb',
+              borderRadius: '6px',
+              height: '32px'
+            }}
+          >
+            {syncingOrders ? 'Syncing...' : 'Re-sync'}
+          </Button>
+        </div>
+      </div>
       
-      {/* Single conditional blur overlay for the entire component */}
+      {/* POS Connection Overlay */}
       {!isPosConnected && (
         <div style={{
           position: 'absolute',
@@ -434,8 +471,8 @@ const PriceRecommendations: React.FC = () => {
           left: 0,
           width: '100%',
           height: '100%',
-          backdropFilter: 'blur(5px)',
-          backgroundColor: 'rgba(255, 255, 255, 0.85)',
+          backdropFilter: 'blur(8px)',
+          backgroundColor: 'rgba(249, 250, 251, 0.95)',
           zIndex: 10,
           display: 'flex',
           flexDirection: 'column',
@@ -443,198 +480,326 @@ const PriceRecommendations: React.FC = () => {
           alignItems: 'center',
           textAlign: 'center',
           padding: '40px',
-          borderRadius: '8px'
+          borderRadius: '12px'
         }}>
-          <Title level={3}>Connect Your POS System</Title>
-          <Paragraph style={{ fontSize: '16px', maxWidth: '600px', margin: '20px 0' }}>
-            To access your product data, please connect your Square account.
-            This will allow us to import your sales data and menu items for personalized insights.
-          </Paragraph>
-          <Button 
-            type="primary" 
-            icon={<ShoppingOutlined />}
-            onClick={handleSquareIntegration}
-            size="large"
-            style={{ marginTop: '20px' }}
-          >
-            Connect Square Account
-          </Button>
-          <Paragraph style={{ marginTop: '20px', fontSize: '14px', opacity: 0.7 }}>
-            <Text type="secondary">After connecting, you'll have access to all price recommendation features</Text>
-          </Paragraph>
+          <div style={{
+            background: 'white',
+            padding: '48px',
+            borderRadius: '16px',
+            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            maxWidth: '500px'
+          }}>
+            <div style={{ 
+              width: '64px', 
+              height: '64px', 
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 24px'
+            }}>
+              <ShoppingOutlined style={{ fontSize: '28px', color: 'white' }} />
+            </div>
+            <Title level={3} style={{ marginBottom: 16, color: '#1f2937' }}>
+              Connect Your POS System
+            </Title>
+            <Text style={{ 
+              fontSize: '15px', 
+              color: '#6b7280', 
+              display: 'block', 
+              marginBottom: 32,
+              lineHeight: '1.6'
+            }}>
+              Connect your Square account to import sales data and menu items for personalized pricing insights.
+            </Text>
+            <Button 
+              type="primary" 
+              icon={<ShoppingOutlined />}
+              onClick={handleSquareIntegration}
+              size="large"
+              style={{
+                height: '48px',
+                paddingLeft: '24px',
+                paddingRight: '24px',
+                fontSize: '15px',
+                fontWeight: 500,
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                border: 'none',
+                borderRadius: '8px',
+                boxShadow: '0 4px 14px 0 rgba(102, 126, 234, 0.4)'
+              }}
+            >
+              Connect Square Account
+            </Button>
+            <Text style={{ 
+              marginTop: 16, 
+              fontSize: '13px', 
+              color: '#9ca3af',
+              display: 'block'
+            }}>
+              Access all price recommendation features after connecting
+            </Text>
+          </div>
         </div>
       )}
-      <Button 
-        onClick={handleSyncOrders} 
-        disabled={syncingOrders} 
-        type="default" 
-        size="small"
-        icon={syncingOrders ? <LoadingOutlined /> : <SyncOutlined />}
-      >
-        {syncingOrders ? 'Syncing Orders...' : 'Re-sync Orders'}
-      </Button>
-      <Text type="secondary" style={{ fontSize: '12px', marginLeft: 8, display: 'block', marginTop: 4 }}>
-        Refresh order data from Square
-      </Text>
-      
       {loading ? (
         <ShimmerPriceRecommendations />
       ) : usingMock ? (
         <div style={{ position: 'relative' }}>
-          {/* Blurred sample data in background */}
-          <div style={{ filter: 'blur(5px)', opacity: 0.5 }}>
-            {/* Summary Card with sample data */}
-            <Card style={{ marginTop: 24, marginBottom: 24 }}>
-              <Row gutter={24}>
-                {/*
-                <Col span={8}>
-                  <Statistic
-                    title="Net Revenue Impact"
-                    value={1250.00}
-                    precision={2}
-                    formatter={(value) => formatNumberWithCommas(Number(value))}
-                    valueStyle={{ color: '#3f8600' }}
-                    prefix="$"
-                  />
-                </Col>
-                */}
-                <Col span={8}>
-                  <Statistic
-                    title="Price Changes"
-                    value={10}
-                    valueStyle={{ color: '#9370DB' }}
-                    suffix="products"
-                  />
-                </Col>
-                <Col span={8}>
-                  <Statistic
-                    title="Analysis Period"
-                    value="Last 7 days"
-                    valueStyle={{ color: '#1890ff' }}
-                  />
-                </Col>
-              </Row>
-            </Card>
+          {/* Minimal blurred background */}
+          <div style={{ filter: 'blur(3px)', opacity: 0.3 }}>
+            {/* Clean Summary Stats */}
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
+              gap: '24px',
+              marginBottom: 32
+            }}>
+              <div style={{
+                background: 'white',
+                padding: '24px',
+                borderRadius: '12px',
+                border: '1px solid #f3f4f6'
+              }}>
+                <Text style={{ fontSize: '13px', color: '#6b7280', fontWeight: 500 }}>
+                  PRICE CHANGES
+                </Text>
+                <div style={{ fontSize: '24px', fontWeight: 600, color: '#1f2937', marginTop: '4px' }}>
+                  10 <span style={{ fontSize: '14px', fontWeight: 400, color: '#9ca3af' }}>products</span>
+                </div>
+              </div>
+              <div style={{
+                background: 'white',
+                padding: '24px',
+                borderRadius: '12px',
+                border: '1px solid #f3f4f6'
+              }}>
+                <Text style={{ fontSize: '13px', color: '#6b7280', fontWeight: 500 }}>
+                  ANALYSIS PERIOD
+                </Text>
+                <div style={{ fontSize: '24px', fontWeight: 600, color: '#1f2937', marginTop: '4px' }}>
+                  Last 7 days
+                </div>
+              </div>
+            </div>
             
-            {/* Sample recommendations table */}
-            <Card>
+            {/* Minimal Table */}
+            <div style={{
+              background: 'white',
+              borderRadius: '12px',
+              border: '1px solid #f3f4f6',
+              overflow: 'hidden'
+            }}>
               <Table
                 columns={columns}
                 dataSource={sampleRecommendations}
                 rowKey="id"
                 pagination={false}
+                showHeader={false}
               />
-            </Card>
+            </div>
           </div>
           
-          {/* Overlay with message */}
+          {/* Clean overlay message */}
           <div style={{ 
             position: 'absolute', 
-            top: 0, 
-            left: 0, 
-            width: '100%', 
-            height: '100%', 
-            display: 'flex', 
-            flexDirection: 'column', 
-            justifyContent: 'center', 
-            alignItems: 'center',
-            backgroundColor: 'rgba(255, 255, 255, 0.85)',
-            padding: '150px 0'
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            background: 'white',
+            padding: '40px',
+            borderRadius: '16px',
+            textAlign: 'center',
+            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            minWidth: '400px'
           }}>
             <div style={{ 
-              padding: '30px', 
-              borderRadius: '8px', 
-              textAlign: 'center',
-              maxWidth: '80%' 
+              width: '48px', 
+              height: '48px', 
+              background: '#f3f4f6',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 20px'
             }}>
-              <p style={{ fontSize: '24px', fontWeight: 500, marginBottom: '16px' }}>No price recommendation data available</p>
-              <p style={{ color: '#666', marginBottom: '30px', fontSize: '16px' }}>To view AI-powered price recommendations, please connect your POS provider</p>
-              <Button type="primary" size="large">
-                Connect POS Provider
-              </Button>
+              <ShoppingOutlined style={{ fontSize: '20px', color: '#6b7280' }} />
             </div>
+            <Title level={4} style={{ marginBottom: 12, fontWeight: 600 }}>
+              No data available
+            </Title>
+            <Text style={{ color: '#6b7280', marginBottom: 24, fontSize: '14px' }}>
+              Connect your POS provider to view AI-powered price recommendations
+            </Text>
+            <Button 
+              type="primary" 
+              style={{
+                background: '#1f2937',
+                border: 'none',
+                borderRadius: '8px',
+                height: '40px',
+                paddingLeft: '20px',
+                paddingRight: '20px'
+              }}
+            >
+              Connect POS Provider
+            </Button>
           </div>
         </div>
       ) : (
         <>
-          {/* Summary Card with real data */}
-          <Card style={{ marginTop: 24, marginBottom: 24 }}>
-            <Row gutter={24}>
-              <Col span={8}>
-                <Statistic
-                  title="Net Revenue Impact"
-                  value={netRevenueImpact}
-              precision={2}
-              formatter={(value) => {
-                // Handle both number and string cases safely
-                const numValue = typeof value === 'number' ? value : Number(value);
-                return formatNumberWithCommas(Number(numValue.toFixed(2)));
-              }}
-              valueStyle={{ color: netRevenueImpact > 0 ? '#3f8600' : netRevenueImpact < 0 ? '#cf1322' : 'inherit' }}
-              prefix="$"
-            />
-            <Text type="secondary">
-              Feature in development
-              {/*{netRevenueImpact > 0 ? 'Increase' : netRevenueImpact < 0 ? 'Decrease' : 'No change'} of {formatNumberWithCommas(Math.abs(Math.round(percentChange * 10) / 10))}%*/}
-            </Text>
-          </Col>
-          <Col span={8}>
-            <Statistic
-              title="Price Changes"
-              value={recommendations.length}
-              formatter={(value) => {
-                // Handle both number and string cases safely
-                const numValue = typeof value === 'number' ? value : Number(value);
-                return formatNumberWithCommas(numValue);
-              }}
-              valueStyle={{ color: '#9370DB' }}
-              suffix="products"
-            />
-          </Col>
-          <Col span={8}>
-            <Statistic
-              title="Analysis Period"
-              value={timeFrame === '1d' ? 'Last 24 hours' : 
-                     timeFrame === '7d' ? 'Last 7 days' : 
-                     timeFrame === '1m' ? 'Last 30 days' : 
-                     timeFrame === '6m' ? 'Last 6 months' : 'Last year'}
-              valueStyle={{ color: '#1890ff' }}
-            />
-            <div>
+          {/* Clean Summary Stats Grid */}
+          <div style={{ 
+            display: 'grid', 
+            gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', 
+            gap: '24px',
+            marginBottom: 32
+          }}>
+            <div style={{
+              background: 'white',
+              padding: '24px',
+              borderRadius: '12px',
+              border: '1px solid #f3f4f6',
+              boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)'
+            }}>
+              <Text style={{ fontSize: '13px', color: '#6b7280', fontWeight: 500, letterSpacing: '0.5px' }}>
+                NET REVENUE IMPACT
+              </Text>
+              <div style={{ 
+                fontSize: '28px', 
+                fontWeight: 700, 
+                color: netRevenueImpact > 0 ? '#059669' : netRevenueImpact < 0 ? '#dc2626' : '#1f2937',
+                marginTop: '8px',
+                marginBottom: '4px'
+              }}>
+                ${typeof netRevenueImpact === 'number' ? formatNumberWithCommas(Number(netRevenueImpact.toFixed(2))) : formatNumberWithCommas(Number(netRevenueImpact))}
+              </div>
+              <Text style={{ fontSize: '12px', color: '#9ca3af' }}>
+                Feature in development
+              </Text>
+            </div>
+
+            <div style={{
+              background: 'white',
+              padding: '24px',
+              borderRadius: '12px',
+              border: '1px solid #f3f4f6',
+              boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)'
+            }}>
+              <Text style={{ fontSize: '13px', color: '#6b7280', fontWeight: 500, letterSpacing: '0.5px' }}>
+                PRICE CHANGES
+              </Text>
+              <div style={{ fontSize: '28px', fontWeight: 700, color: '#1f2937', marginTop: '8px' }}>
+                {typeof recommendations.length === 'number' ? formatNumberWithCommas(recommendations.length) : formatNumberWithCommas(Number(recommendations.length))}
+                <span style={{ fontSize: '14px', fontWeight: 400, color: '#9ca3af', marginLeft: '8px' }}>
+                  products
+                </span>
+              </div>
+            </div>
+
+            <div style={{
+              background: 'white',
+              padding: '24px',
+              borderRadius: '12px',
+              border: '1px solid #f3f4f6',
+              boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)'
+            }}>
+              <Text style={{ fontSize: '13px', color: '#6b7280', fontWeight: 500, letterSpacing: '0.5px' }}>
+                ANALYSIS PERIOD
+              </Text>
+              <div style={{ fontSize: '28px', fontWeight: 700, color: '#1f2937', marginTop: '8px', marginBottom: '12px' }}>
+                {timeFrame === '1d' ? 'Last 24h' : 
+                 timeFrame === '7d' ? 'Last 7d' : 
+                 timeFrame === '1m' ? 'Last 30d' : 
+                 timeFrame === '6m' ? 'Last 6m' : 'Last year'}
+              </div>
               <Radio.Group 
                 value={timeFrame} 
                 onChange={(e: RadioChangeEvent) => handleTimeFrameChange(e.target.value)}
                 buttonStyle="solid"
-                style={{ marginTop: 8, marginBottom: 8 }}
                 size="small"
+                style={{
+                  background: '#f9fafb',
+                  borderRadius: '6px',
+                  padding: '0px',
+                  border: '0px solid #fff',
+                }}
               >
-                <Radio.Button value="1d">1D</Radio.Button>
-                <Radio.Button value="7d">7D</Radio.Button>
-                <Radio.Button value="1m">1M</Radio.Button>
-                <Radio.Button value="6m">6M</Radio.Button>
-                <Radio.Button value="1yr">1Y</Radio.Button>
+                <Radio.Button 
+                  value="1d" 
+                  style={{ 
+                    border: 'none', 
+                    height: '28px',
+                    fontSize: '12px'
+                  }}
+                >
+                  1D
+                </Radio.Button>
+                <Radio.Button 
+                  value="7d"
+                  style={{ 
+                    border: 'none', 
+                    height: '28px',
+                    fontSize: '12px'
+                  }}
+                >
+                  7D
+                </Radio.Button>
+                <Radio.Button 
+                  value="1m"
+                  style={{ 
+                    border: 'none', 
+                    height: '28px',
+                    fontSize: '12px'
+                  }}
+                >
+                  1M
+                </Radio.Button>
+                <Radio.Button 
+                  value="6m"
+                  style={{ 
+                    border: 'none', 
+                    height: '28px',
+                    fontSize: '12px'
+                  }}
+                >
+                  6M
+                </Radio.Button>
+                <Radio.Button 
+                  value="1yr"
+                  style={{ 
+                    border: 'none', 
+                    height: '28px',
+                    fontSize: '12px'
+                  }}
+                >
+                  1Y
+                </Radio.Button>
               </Radio.Group>
-              <br />
-              
             </div>
-          </Col>
-        </Row>
-      </Card>
+          </div>
       
-      {/* Recommendations Table */}
-      <Card>
-        <Table
-          columns={columns}
-          dataSource={recommendations}
-          rowKey="id"
-          loading={loading}
-          pagination={false}
-          onRow={(record) => ({
-            onClick: () => navigate(`/product/${record.id}`),
-            style: { cursor: 'pointer' }
-          })}
-        />
-      </Card>
+          {/* Minimal Table */}
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            border: '1px solid #f3f4f6',
+            boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)',
+            overflow: 'hidden'
+          }}>
+            <Table
+              columns={columns}
+              dataSource={recommendations}
+              rowKey="id"
+              loading={loading}
+              pagination={false}
+              onRow={(record) => ({
+                onClick: () => navigate(`/product/${record.id}`),
+                style: { cursor: 'pointer' }
+              })}
+            />
+          </div>
         </>
       )}
     </div>
