@@ -248,9 +248,9 @@ const PricingPlans: React.FC = () => {
       return 'Manage Subscription';
     }
     
-    // Default texts for non-subscribed state
-    if (plan.name.toLowerCase() === 'free') {
-      return 'Get Started Free';
+    // If free plan and subscription is not active
+    if (plan.name.toLowerCase() === 'free' && subscription?.active !== true) {
+      return 'Current Plan';
     }
     
     return 'Subscribe';
@@ -270,7 +270,7 @@ const PricingPlans: React.FC = () => {
   };
 
   const getButtonStyle = (plan: Plan) => {
-    // If premium plan and user is subscribed
+    // If premium plan and user is subscribed - not clickable
     if (plan.name.toLowerCase() === 'premium' && subscription?.active === true) {
       return {
         border: '2px solid #52c41a',  // Green border
@@ -299,7 +299,7 @@ const PricingPlans: React.FC = () => {
       };
     }
     
-    // For free plan in non-subscribed state
+    // For free plan in non-subscribed state - not clickable
     if (plan.name.toLowerCase() === 'free') {
       return {
         border: '2px solid #d9d9d9',
@@ -312,7 +312,7 @@ const PricingPlans: React.FC = () => {
       };
     }
     
-    // For premium plan in non-subscribed state
+    // For premium plan in non-subscribed state - clickable
     return {
       background: plan.gradient,
       border: 'none',
@@ -322,6 +322,7 @@ const PricingPlans: React.FC = () => {
       fontWeight: 600,
       borderRadius: '8px',
       boxShadow: '0 4px 14px 0 rgba(147, 112, 219, 0.4)',
+      cursor: 'pointer',
     };
   };
 
@@ -465,44 +466,46 @@ const PricingPlans: React.FC = () => {
                   </div>
 
                   {/* CTA Button */}
-                  <Button
-                    type={plan.recommended ? 'primary' : 'default'}
-                    size="large"
-                    block
-                    onClick={() => {
-                      // If subscribed and this is the free plan, go to customer portal
-                      if (subscription?.active && plan.name.toLowerCase() === 'free') {
-                        handleCustomerPortal();
-                      } else {
-                        handleSubscribe(plan.priceId, plan.name);
-                      }
-                    }}
-                    disabled={
-                      plan.disabled || 
-                      (loading !== null && loading !== plan.priceId) ||
-                      // Only disable the Premium button when already subscribed
-                      (subscription?.active === true && plan.name.toLowerCase() === 'premium')
-                    }
-                    style={getButtonStyle(plan)}
-                    loading={plan.name.toLowerCase() === 'free' && subscription?.active === true ? portalLoading : undefined}
-                    icon={plan.name.toLowerCase() === 'premium' && subscription?.active === true ? <CheckOutlined /> : null}
-                  >
-                    {getButtonText(plan)}
-                  </Button>
-
-                  {plan.name === 'Premium' && (
-                    <Text 
-                      style={{ 
-                        textAlign: 'center', 
-                        fontSize: '12px', 
-                        color: '#6b7280',
-                        marginTop: 12,
-                        display: 'block'
+                  <div style={{ marginTop: 'auto' }}>
+                    <Button 
+                      type={plan.name.toLowerCase() === 'premium' ? 'primary' : 'default'}
+                      block
+                      onClick={() => {
+                        if (plan.name.toLowerCase() === 'free' && subscription?.active === true) {
+                          // Free plan is clickable only when subscription is active
+                          handleCustomerPortal();
+                        } else if (plan.name.toLowerCase() === 'premium' && subscription?.active !== true) {
+                          // Premium plan is clickable only when subscription is not active
+                          handleSubscribe(plan.priceId, plan.name);
+                        }
+                        // Otherwise button does nothing
                       }}
+                      loading={loading === plan.priceId}
+                      disabled={
+                        plan.disabled || 
+                        loading !== null ||
+                        (plan.name.toLowerCase() === 'premium' && subscription?.active === true) ||
+                        (plan.name.toLowerCase() === 'free' && subscription?.active !== true)
+                      }
+                      style={getButtonStyle(plan)}
                     >
-                      Cancel anytime
-                    </Text>
-                  )}
+                      {getButtonText(plan)}
+                    </Button>
+                    
+                    {plan.name.toLowerCase() === 'premium' && (
+                      <Text 
+                        style={{ 
+                          textAlign: 'center', 
+                          fontSize: '12px', 
+                          color: '#6b7280',
+                          marginTop: 12,
+                          display: 'block'
+                        }}
+                      >
+                        Cancel anytime
+                      </Text>
+                    )}
+                  </div>
                 </Card>
               </Badge.Ribbon>
             </Col>
