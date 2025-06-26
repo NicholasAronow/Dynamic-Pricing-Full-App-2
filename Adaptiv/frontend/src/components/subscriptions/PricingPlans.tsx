@@ -238,7 +238,7 @@ const PricingPlans: React.FC = () => {
 
   const getButtonStyle = (plan: Plan) => {
     // If this is the current plan
-    if (isPlanActive(plan)) {
+    if (subscription?.active) {
       return {
         border: '2px solid rgb(170, 170, 170)',  // Gray border
         color: '#666666',             // Gray text
