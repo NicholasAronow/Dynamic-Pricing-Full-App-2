@@ -1182,6 +1182,7 @@ const Dashboard: React.FC = () => {
                   strokeWidth={2}
                   yAxisId="left"
                   fillOpacity={1}
+                  legendType="none"
                 />
                 <Line 
                   type="monotone"
@@ -1203,6 +1204,7 @@ const Dashboard: React.FC = () => {
                   activeDot={{ r: 0 }}
                   yAxisId="right"
                   connectNulls={true}
+                  legendType="none"
                 />
               </ComposedChart>
             </ResponsiveContainer>
