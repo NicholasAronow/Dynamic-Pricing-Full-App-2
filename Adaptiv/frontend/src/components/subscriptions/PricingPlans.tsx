@@ -109,15 +109,14 @@ const PricingPlans: React.FC = () => {
    */
   
   const fetchSubscription = async () => {
-      setLoading("true");
       try {
         const response = await api.get('/subscriptions/subscription-status');
         setSubscription(response.data);
       } catch (error) {
         console.error('Error fetching subscription status:', error);
         message.error('Failed to load subscription details');
-      } finally {
-        setLoading("false");
+        // If we can't get subscription status, set it to inactive
+        setSubscription({ active: false });
       }
     };
   
@@ -240,31 +239,39 @@ const PricingPlans: React.FC = () => {
     if (loading === plan.priceId) return <LoadingOutlined />;
     
     // If premium plan and user is subscribed
-    if (plan.name.toLowerCase() === 'premium' && subscription?.active) {
+    if (plan.name.toLowerCase() === 'premium' && subscription?.active === true) {
       return 'Current Plan';
     }
     
     // If free plan and user is subscribed
-    if (plan.name.toLowerCase() === 'free' && subscription?.active) {
+    if (plan.name.toLowerCase() === 'free' && subscription?.active === true) {
       return 'Manage Subscription';
     }
     
     // Default texts for non-subscribed state
     if (plan.name.toLowerCase() === 'free') {
-      return 'Current Plan';
+      return 'Get Started Free';
     }
     
     return 'Subscribe';
   };
 
   const isPlanActive = (plan: Plan): boolean => {
-    return (plan.name.toLowerCase() === 'free' && currentPlan === SUBSCRIPTION_TIERS.FREE) || 
-           (plan.name.toLowerCase() === 'premium' && currentPlan === SUBSCRIPTION_TIERS.PREMIUM);
+    if (plan.name.toLowerCase() === 'premium') {
+      return subscription?.active === true;
+    }
+    
+    // Free plan is active only when subscription is not active
+    if (plan.name.toLowerCase() === 'free') {
+      return subscription?.active !== true;
+    }
+    
+    return false;
   };
 
   const getButtonStyle = (plan: Plan) => {
     // If premium plan and user is subscribed
-    if (plan.name.toLowerCase() === 'premium' && subscription?.active) {
+    if (plan.name.toLowerCase() === 'premium' && subscription?.active === true) {
       return {
         border: '2px solid #52c41a',  // Green border
         color: '#52c41a',             // Green text
@@ -279,7 +286,7 @@ const PricingPlans: React.FC = () => {
     }
     
     // If free plan and user is subscribed - make it look clickable
-    if (plan.name.toLowerCase() === 'free' && subscription?.active) {
+    if (plan.name.toLowerCase() === 'free' && subscription?.active === true) {
       return {
         border: '2px solid #1890ff',  // Blue border
         color: '#1890ff',             // Blue text
@@ -474,11 +481,11 @@ const PricingPlans: React.FC = () => {
                       plan.disabled || 
                       (loading !== null && loading !== plan.priceId) ||
                       // Only disable the Premium button when already subscribed
-                      (subscription?.active && plan.name.toLowerCase() === 'premium')
+                      (subscription?.active === true && plan.name.toLowerCase() === 'premium')
                     }
                     style={getButtonStyle(plan)}
-                    loading={plan.name.toLowerCase() === 'free' && subscription?.active ? portalLoading : undefined}
-                    icon={plan.name.toLowerCase() === 'premium' && subscription?.active ? <CheckOutlined /> : null}
+                    loading={plan.name.toLowerCase() === 'free' && subscription?.active === true ? portalLoading : undefined}
+                    icon={plan.name.toLowerCase() === 'premium' && subscription?.active === true ? <CheckOutlined /> : null}
                   >
                     {getButtonText(plan)}
                   </Button>
