@@ -48,9 +48,9 @@ const SubscriptionRequired: React.FC<SubscriptionRequiredProps> = ({
     fetchSubscription();
   }, []);
   
-  const hasAccess = subscription?.active
-  
-  if (hasAccess) {
+  // Show children during loading or when subscription is active
+  // This prevents the subscription screen from flashing when user is actually subscribed
+  if (loading || subscription?.active) {
     return <>{children}</>;
   }
   

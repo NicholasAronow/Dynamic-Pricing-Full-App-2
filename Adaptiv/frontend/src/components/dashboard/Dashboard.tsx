@@ -1187,15 +1187,6 @@ const Dashboard: React.FC = () => {
 
       </Row>
       
-      {/* Premium Analytics Widget - Feature Gated */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
-        <Col xs={24} lg={24}>
-          <FeatureGate feature="advanced_analytics">
-            <PremiumAnalyticsWidget />
-          </FeatureGate>
-        </Col>
-      </Row>
-      
       {/* Main dashboard layout */}
       <Row gutter={[24, 24]} style={{ marginTop: 24 }}>
         {/* Left side - Best and Worst Performing Items */}
