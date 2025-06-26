@@ -1373,10 +1373,7 @@ const DynamicPricingAgentsContent: React.FC = () => {
 // Wrap the entire page with SubscriptionRequired to make it premium-only
 const DynamicPricingAgents: React.FC = () => {
   return (
-    <SubscriptionRequired
-      featureName="AI-powered dynamic pricing analysis"
-      feature="ai_recommendations" // Use the specific feature from SUBSCRIPTION_FEATURES
-    >
+    <SubscriptionRequired>
       <DynamicPricingAgentsContent />
     </SubscriptionRequired>
   );

@@ -1,16 +1,26 @@
-import React, { ReactNode } from 'react';
+import React, { ReactNode, useEffect } from 'react';
 import { Card, Typography, Button, Space } from 'antd';
 import { LockOutlined, CrownOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useSubscription, SUBSCRIPTION_TIERS } from '../../contexts/SubscriptionContext';
+import { useState } from 'react';
+import { api } from '../../services/api';
+import { message } from 'antd';
 
+interface SubscriptionStatus {
+    active: boolean;
+    subscription_id?: string;
+    current_period_end?: string;
+    plan?: string;
+  }
+
+const [loading, setLoading] = useState(true);
+const [portalLoading, setPortalLoading] = useState(false);
+const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
 const { Title, Text, Paragraph } = Typography;
 
 interface SubscriptionRequiredProps {
   children: ReactNode;
-  minTier?: string;
-  featureName?: string;
-  feature?: string; // Specific feature to check access for
 }
 
 /**
@@ -18,21 +28,31 @@ interface SubscriptionRequiredProps {
  * Shows the content normally if user has required subscription tier,
  * otherwise displays a blurred version with an upgrade CTA.
  */
+
+const fetchSubscription = async () => {
+    setLoading(true);
+    try {
+      const response = await api.get('/subscriptions/subscription-status');
+      setSubscription(response.data);
+    } catch (error) {
+      console.error('Error fetching subscription status:', error);
+      message.error('Failed to load subscription details');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+useEffect(() => {
+  fetchSubscription();
+}, []);
+  
 const SubscriptionRequired: React.FC<SubscriptionRequiredProps> = ({
   children,
-  minTier = SUBSCRIPTION_TIERS.PREMIUM,
-  featureName = 'This feature',
-  feature
 }) => {
   const navigate = useNavigate();
-  const { isSubscribed, currentPlan, hasAccess: checkFeatureAccess } = useSubscription();
+  const { isSubscribed, currentPlan } = useSubscription();
   
-  // Determine access based on subscription status
-  const hasAccess = feature ? 
-    // If specific feature is provided, use the context's hasAccess function
-    checkFeatureAccess(feature as any) : 
-    // Otherwise, check if the user is subscribed (premium user)
-    isSubscribed();
+  const hasAccess = subscription?.active
   
   if (hasAccess) {
     return <>{children}</>;
@@ -82,7 +102,7 @@ const SubscriptionRequired: React.FC<SubscriptionRequiredProps> = ({
             </div>
             
             <Paragraph style={{ fontSize: 16 }}>
-              {featureName} is available exclusively to premium subscribers.
+              This feature is available exclusively to premium subscribers.
               Upgrade today to access advanced AI-powered pricing recommendations
               and maximize your revenue.
             </Paragraph>
