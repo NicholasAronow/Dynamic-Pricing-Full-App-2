@@ -14,43 +14,39 @@ interface SubscriptionStatus {
     plan?: string;
   }
 
-const [loading, setLoading] = useState(true);
-const [portalLoading, setPortalLoading] = useState(false);
-const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
-const { Title, Text, Paragraph } = Typography;
+
 
 interface SubscriptionRequiredProps {
   children: ReactNode;
 }
 
-/**
- * A component that wraps content which requires a subscription.
- * Shows the content normally if user has required subscription tier,
- * otherwise displays a blurred version with an upgrade CTA.
- */
 
-const fetchSubscription = async () => {
-    setLoading(true);
-    try {
-      const response = await api.get('/subscriptions/subscription-status');
-      setSubscription(response.data);
-    } catch (error) {
-      console.error('Error fetching subscription status:', error);
-      message.error('Failed to load subscription details');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-useEffect(() => {
-  fetchSubscription();
-}, []);
   
 const SubscriptionRequired: React.FC<SubscriptionRequiredProps> = ({
   children,
 }) => {
   const navigate = useNavigate();
   const { isSubscribed, currentPlan } = useSubscription();
+  const [loading, setLoading] = useState(true);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
+  const { Title, Text, Paragraph } = Typography;
+  const fetchSubscription = async () => {
+      setLoading(true);
+      try {
+        const response = await api.get('/subscriptions/subscription-status');
+        setSubscription(response.data);
+      } catch (error) {
+        console.error('Error fetching subscription status:', error);
+        message.error('Failed to load subscription details');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+  useEffect(() => {
+    fetchSubscription();
+  }, []);
   
   const hasAccess = subscription?.active
   

@@ -90,6 +90,40 @@ const PricingPlans: React.FC = () => {
       loading: true
     }
   ]);
+
+  interface SubscriptionStatus {
+      active: boolean;
+      subscription_id?: string;
+      current_period_end?: string;
+      plan?: string;
+    }
+  
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
+  const { Title, Text, Paragraph } = Typography;
+  
+  /**
+   * A component that wraps content which requires a subscription.
+   * Shows the content normally if user has required subscription tier,
+   * otherwise displays a blurred version with an upgrade CTA.
+   */
+  
+  const fetchSubscription = async () => {
+      setLoading("true");
+      try {
+        const response = await api.get('/subscriptions/subscription-status');
+        setSubscription(response.data);
+      } catch (error) {
+        console.error('Error fetching subscription status:', error);
+        message.error('Failed to load subscription details');
+      } finally {
+        setLoading("false");
+      }
+    };
+  
+  useEffect(() => {
+    fetchSubscription();
+  }, []);
   
   useEffect(() => {
     const fetchPriceInfo = async () => {
