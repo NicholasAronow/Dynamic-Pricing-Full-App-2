@@ -239,11 +239,22 @@ const PricingPlans: React.FC = () => {
     // If this is loading state for this specific plan
     if (loading === plan.priceId) return <LoadingOutlined />;
     
-    // If this is the current plan
-    if (!subscription?.active) return 'Current Plan';
+    // If premium plan and user is subscribed
+    if (plan.name.toLowerCase() === 'premium' && subscription?.active) {
+      return 'Current Plan';
+    }
     
-    // Otherwise standard text
-    else return 'Get Started Free';
+    // If free plan and user is subscribed
+    if (plan.name.toLowerCase() === 'free' && subscription?.active) {
+      return 'Manage Subscription';
+    }
+    
+    // Default texts for non-subscribed state
+    if (plan.name.toLowerCase() === 'free') {
+      return 'Current Plan';
+    }
+    
+    return 'Subscribe';
   };
 
   const isPlanActive = (plan: Plan): boolean => {
@@ -252,43 +263,58 @@ const PricingPlans: React.FC = () => {
   };
 
   const getButtonStyle = (plan: Plan) => {
-    // If this is the current plan
-    if (subscription?.active) {
+    // If premium plan and user is subscribed
+    if (plan.name.toLowerCase() === 'premium' && subscription?.active) {
       return {
-        border: '2px solid rgb(170, 170, 170)',  // Gray border
-        color: '#666666',             // Gray text
+        border: '2px solid #52c41a',  // Green border
+        color: '#52c41a',             // Green text
         height: '48px',
         fontSize: '16px',
         fontWeight: 600,
         borderRadius: '8px',
-        background: 'rgba(197, 197, 197, 0.1)', // Light gray background
+        background: 'rgba(82, 196, 26, 0.1)', // Light green background
         cursor: 'default',
+        boxShadow: 'none'
       };
     }
     
-    // For recommended plan
-    else {
+    // If free plan and user is subscribed - make it look clickable
+    if (plan.name.toLowerCase() === 'free' && subscription?.active) {
       return {
-        background: plan.gradient,
-        border: 'none',
-        color: 'white',
+        border: '2px solid #1890ff',  // Blue border
+        color: '#1890ff',             // Blue text
         height: '48px',
         fontSize: '16px',
         fontWeight: 600,
         borderRadius: '8px',
-        boxShadow: '0 4px 14px 0 rgba(147, 112, 219, 0.4)',
+        background: 'rgba(24, 144, 255, 0.1)', // Light blue background
+        cursor: 'pointer',
       };
     }
     
-    // For other plans
+    // For free plan in non-subscribed state
+    if (plan.name.toLowerCase() === 'free') {
+      return {
+        border: '2px solid #d9d9d9',
+        color: '#595959',
+        height: '48px',
+        fontSize: '16px',
+        fontWeight: 600,
+        borderRadius: '8px',
+        background: 'white',
+      };
+    }
+    
+    // For premium plan in non-subscribed state
     return {
-      border: `2px solid ${plan.color}`,
-      color: plan.color,
+      background: plan.gradient,
+      border: 'none',
+      color: 'white',
       height: '48px',
       fontSize: '16px',
       fontWeight: 600,
       borderRadius: '8px',
-      background: 'white',
+      boxShadow: '0 4px 14px 0 rgba(147, 112, 219, 0.4)',
     };
   };
 
@@ -447,13 +473,14 @@ const PricingPlans: React.FC = () => {
                     disabled={
                       plan.disabled || 
                       (loading !== null && loading !== plan.priceId) ||
+                      // Only disable the Premium button when already subscribed
                       (subscription?.active && plan.name.toLowerCase() === 'premium')
                     }
                     style={getButtonStyle(plan)}
                     loading={plan.name.toLowerCase() === 'free' && subscription?.active ? portalLoading : undefined}
-                    icon={isPlanActive(plan) ? <CheckOutlined /> : null}
+                    icon={plan.name.toLowerCase() === 'premium' && subscription?.active ? <CheckOutlined /> : null}
                   >
-                    {subscription?.active && plan.name.toLowerCase() === 'free' ? 'Manage Subscription' : getButtonText(plan)}
+                    {getButtonText(plan)}
                   </Button>
 
                   {plan.name === 'Premium' && (
