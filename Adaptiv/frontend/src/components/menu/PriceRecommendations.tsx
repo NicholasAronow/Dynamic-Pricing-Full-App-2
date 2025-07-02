@@ -420,7 +420,7 @@ const PriceRecommendations: React.FC = () => {
   }, []);
 
   return (
-    <div style={{ position: 'relative', maxWidth: '100%', margin: '0 auto'}}>
+    <div style={{ position: 'relative', maxWidth: '100%', margin: '24px 0px'}}>
       {/* Header with Re-sync Button on Right */}
       <div style={{ 
         display: 'flex', 

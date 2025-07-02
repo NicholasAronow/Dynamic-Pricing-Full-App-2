@@ -1274,14 +1274,14 @@ const Dashboard: React.FC = () => {
               <div>
                 {/* Top Performers */}
                 <div>
-                  <Title level={4} style={{ color: '#3f8600', display: 'flex', alignItems: 'center', marginTop: -5, marginBottom: 16 }}>
+                  <Title level={4} style={{ color: '#3f8600', display: 'flex', alignItems: 'center', marginTop: -5, marginBottom: -2 }}>
                     Best Selling Items
                   </Title>
-                  <div style={{ marginBottom: 36 }}>
+                  <div style={{ marginBottom: 12 }}>
                   {!error && topProducts && topProducts.map((product: any, index: number) => (
                     <Card
                       key={product.id}
-                      style={{ marginBottom: 8, borderRadius: 0, border: 'none'}}
+                      style={{ marginBottom: -4, borderRadius: 0, border: 'none'}}
                       size="small"
                       className="dashboard-card-item"
                       onClick={() => navigate(`/product/${product.id}`)}
