@@ -804,56 +804,91 @@ const Costs: React.FC = () => {
   };
 
   return (
-    <div>
+    <div style={{ maxWidth: '100%', margin: '0 auto', padding: '24px 0px' }}>
       {renderLoadingSpinner()}
-      <Title level={2}>Costs</Title>
-      <Title level={5} type="secondary" style={{ marginTop: 0 }}>
-        Track ingredient costs for your menu items to optimize your margin
-      </Title>
-      <Tabs 
-        activeKey={activeTab} 
-        onChange={handleTabChange} 
-        style={{ marginBottom: 20 }}
-        className="custom-tabs"
-        type="card"
-        tabBarStyle={{
-          background: '#fafafa',
-          borderBottom: '2px solid #9370DB'
-        }}
-      >
-        <TabPane
-          tab={<span><AppstoreOutlined /> Recipes</span>}
-          key="1"
-        >
+      
+      {/* Clean Header */}
+      <div style={{ marginBottom: 40 }}>
+        <Title level={2} style={{ margin: 0, color: '#1f2937', fontWeight: 600 }}>
+          Costs
+        </Title>
+        <Text style={{ color: '#6b7280', fontSize: '16px' }}>
+          Track ingredient costs for your menu items to optimize your margin
+        </Text>
+      </div>
+      
+      {/* Minimal Tabs */}
+      <div style={{ marginBottom: 32 }}>
+        <div style={{
+          display: 'flex',
+          background: 'white',
+          borderRadius: '12px',
+          padding: '4px',
+          border: '1px solid #e5e7eb',
+          boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)',
+          marginBottom: 24
+        }}>
+          {[
+            { key: '1', label: 'Recipes', icon: <AppstoreOutlined /> },
+            { key: '2', label: 'Ingredients', icon: <CoffeeOutlined /> },
+            { key: '3', label: 'Others', icon: <TagsOutlined /> }
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => handleTabChange(tab.key)}
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                padding: '12px 16px',
+                background: activeTab === tab.key ? '#f3f4f6' : 'transparent',
+                border: 'none',
+                borderRadius: '8px',
+                color: activeTab === tab.key ? '#1f2937' : '#6b7280',
+                fontSize: '14px',
+                fontWeight: activeTab === tab.key ? 500 : 400,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              {React.cloneElement(tab.icon, { 
+                style: { fontSize: '16px' }
+              })}
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Tab Content */}
+        {activeTab === '1' && (
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            border: '1px solid #e5e7eb',
+            boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)',
+            overflow: 'hidden'
+          }}>
             {recipesLoading ? (
-              <div style={{ textAlign: 'center', padding: '50px' }}>
+              <div style={{ textAlign: 'center', padding: '80px' }}>
                 <Spin size="large" />
               </div>
             ) : recipes.length > 0 ? (
-              <Table 
-                dataSource={recipes} 
-                columns={recipeColumns} 
-                rowKey="item_id" 
-                pagination={{ pageSize: 10 }}
-                style={{ backgroundColor: 'white' }}
-                footer={() => (
-                  <Button 
-                    type="dashed" 
-                    block 
-                    icon={<PlusOutlined />} 
-                    onClick={handleAddRecipe}
-                    style={{ height: '60px' }}
-                  >
-                    Add Recipe
-                  </Button>
-                )}
-                expandable={{
-                  expandedRowRender: (record: RecipeItem) => (
-                    <div style={{ padding: '8px 0' }}>
-                      <div>
+              <>
+                <Table 
+                  dataSource={recipes} 
+                  columns={recipeColumns} 
+                  rowKey="item_id" 
+                  pagination={{ pageSize: 10 }}
+                  showHeader={true}
+                  expandable={{
+                    expandedRowRender: (record: RecipeItem) => (
+                      <div style={{ padding: '16px', background: '#f9fafb' }}>
                         <Table 
                           dataSource={record.ingredients.map((ing, idx) => ({ key: idx, ...ing }))} 
-                          style={{ backgroundColor: 'white' }}
+                          size="small"
+                          pagination={false}
                           columns={[
                             {
                               title: 'Ingredient',
@@ -877,39 +912,31 @@ const Costs: React.FC = () => {
                               title: 'Price',
                               key: 'calculated_price',
                               render: (_, record) => {
-                                // Find the base ingredient
                                 const ingredient = ingredients.find(ing => ing.ingredient_id === record.ingredient_id);
                                 if (!ingredient || !ingredient.price || !ingredient.quantity) return '$0.00';
                                 
-                                // Calculate the unit price for the base ingredient (price per unit)
                                 const baseUnitPrice = ingredient.price / ingredient.quantity;
                                 
                                 let finalPrice;
-                                // Check if units need conversion
                                 if (record.unit === ingredient.unit) {
-                                  // No conversion needed, simple multiplication
                                   finalPrice = baseUnitPrice * record.quantity;
                                 } else {
-                                  // Handle unit conversions
                                   const conversionFactor = getConversionFactor(ingredient.unit, record.unit);
-                                  // When converting from larger to smaller units, we divide by conversion factor
-                                  // e.g., if ingredient is in kg but recipe uses g, conversion factor is 1000/1 = 1000
-                                  // so we calculate: (price per kg) * (grams / 1000) = price for the grams used
                                   finalPrice = baseUnitPrice * record.quantity / conversionFactor;
                                 }
                                 
                                 return (
-                                  <span style={{ color: finalPrice > 0 ? 'inherit' : 'red' }}>
+                                  <span style={{ 
+                                    color: finalPrice > 0 ? '#1f2937' : '#ef4444',
+                                    fontWeight: 500
+                                  }}>
                                     ${finalPrice > 0 ? finalPrice.toFixed(2) : '0.00'}
                                   </span>
                                 );
                               }
                             }
                           ]}
-                          pagination={false}
-                          size="small"
                           summary={() => {
-                            // Calculate total ingredient cost
                             let totalCost = 0;
                             record.ingredients.forEach(ing => {
                               const ingredient = ingredients.find(i => i.ingredient_id === ing.ingredient_id);
@@ -928,343 +955,536 @@ const Costs: React.FC = () => {
                             return (
                               <Table.Summary.Row>
                                 <Table.Summary.Cell index={0} colSpan={3}>
-                                  Total Ingredient Cost:
+                                  <Text strong>Total Ingredient Cost:</Text>
                                 </Table.Summary.Cell>
                                 <Table.Summary.Cell index={1}>
-                                  ${totalCost.toFixed(2)}
+                                  <Text strong style={{ color: '#059669' }}>
+                                    ${totalCost.toFixed(2)}
+                                  </Text>
                                 </Table.Summary.Cell>
                               </Table.Summary.Row>
                             );
                           }}
                         />
                       </div>
-                    </div>
-                  ),
-                }}
-              />
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 20px' }}>
-                <Empty 
-                  image={<CoffeeOutlined style={{ fontSize: '64px', color: '#9370DB' }} />}
-                  imageStyle={{ height: 80 }}
-                  description={
-                    <div>
-                      <Text style={{ fontSize: '16px', marginBottom: '16px', display: 'block' }}>
-                        Track your recipes and ingredient costs to optimize your menu pricing
-                      </Text>
-                      <Text type="secondary" style={{ display: 'block', marginBottom: '24px' }}>
-                        Our AI assistant can help you set up all your recipes in just a few clicks
-                      </Text>
-                    </div>
-                  }
-                >
+                    ),
+                  }}
+                />
+                <div style={{ padding: '16px', borderTop: '1px solid #f3f4f6' }}>
                   <Button 
-                    type="primary" 
-                    size="large"
-                    onClick={handleQuickSetup}
-                    style={{ borderRadius: '4px', height: 'auto', padding: '8px 16px' }}
+                    type="text"
+                    block 
+                    icon={<PlusOutlined />} 
+                    onClick={handleAddRecipe}
+                    style={{ 
+                      height: '48px',
+                      color: '#6b7280',
+                      border: '2px dashed #e5e7eb',
+                      borderRadius: '8px'
+                    }}
                   >
-                    Quick Setup with AI
+                    Add Recipe
                   </Button>
-                </Empty>
+                </div>
+              </>
+            ) : (
+              <div style={{ 
+                display: 'flex', 
+                flexDirection: 'column', 
+                alignItems: 'center', 
+                padding: '80px 40px',
+                textAlign: 'center'
+              }}>
+                <div style={{
+                  width: '64px',
+                  height: '64px',
+                  background: '#f3f4f6',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: '24px'
+                }}>
+                  <CoffeeOutlined style={{ fontSize: '24px', color: '#6b7280' }} />
+                </div>
+                <Title level={4} style={{ marginBottom: 12, fontWeight: 600 }}>
+                  Track Your Recipes
+                </Title>
+                <Text style={{ 
+                  color: '#6b7280', 
+                  fontSize: '16px',
+                  marginBottom: 16,
+                  display: 'block',
+                  maxWidth: '400px'
+                }}>
+                  Track your recipes and ingredient costs to optimize your menu pricing
+                </Text>
+                <Text style={{ 
+                  color: '#9ca3af', 
+                  fontSize: '14px',
+                  display: 'block',
+                  marginBottom: 32
+                }}>
+                  Our AI assistant can help you set up all your recipes in just a few clicks
+                </Text>
+                <Button 
+                  type="primary" 
+                  size="large"
+                  onClick={handleQuickSetup}
+                  style={{
+                    height: '48px',
+                    paddingLeft: '24px',
+                    paddingRight: '24px',
+                    fontSize: '15px',
+                    fontWeight: 500,
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    border: 'none',
+                    borderRadius: '8px',
+                    boxShadow: '0 4px 14px 0 rgba(102, 126, 234, 0.4)'
+                  }}
+                >
+                  Quick Setup with AI
+                </Button>
               </div>
             )}
-        </TabPane>
+          </div>
+        )}
 
-        <TabPane
-          tab={<span><CoffeeOutlined /> Ingredients</span>}
-          key="2"
-        >
+        {activeTab === '2' && (
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            border: '1px solid #e5e7eb',
+            boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)',
+            overflow: 'hidden'
+          }}>
             {ingredientsLoading ? (
-              <div style={{ textAlign: 'center', padding: '50px' }}>
+              <div style={{ textAlign: 'center', padding: '80px' }}>
                 <Spin size="large" />
               </div>
             ) : ingredients.length > 0 ? (
-              <Table 
-                dataSource={ingredients} 
-                style={{ backgroundColor: 'white' }}
-                columns={ingredientColumns} 
-                rowKey="ingredient_id" 
-                pagination={{ pageSize: 10 }}
-                footer={() => (
+              <>
+                <Table 
+                  dataSource={ingredients} 
+                  columns={ingredientColumns} 
+                  rowKey="ingredient_id" 
+                  pagination={{ pageSize: 10 }}
+                  showHeader={true}
+                />
+                <div style={{ padding: '16px', borderTop: '1px solid #f3f4f6' }}>
                   <Button 
-                    type="dashed" 
+                    type="text"
                     block 
                     icon={<PlusOutlined />} 
                     onClick={handleAddIngredient}
-                    style={{ height: '60px' }}
+                    style={{ 
+                      height: '48px',
+                      color: '#6b7280',
+                      border: '2px dashed #e5e7eb',
+                      borderRadius: '8px'
+                    }}
                   >
                     Add Ingredient
                   </Button>
-                )}
-              />
+                </div>
+              </>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 20px' }}>
-                <Empty 
-                  image={<DollarOutlined style={{ fontSize: '64px', color: '#9370DB' }} />}
-                  imageStyle={{ height: 80 }}
-                  description={
-                    <div>
-                      <Text style={{ fontSize: '16px', marginBottom: '16px', display: 'block' }}>
-                        Add ingredients to start tracking your food costs
-                      </Text>
-                      <Text type="secondary" style={{ display: 'block', marginBottom: '24px' }}>
-                        Our AI can automatically set up ingredients based on your menu
-                      </Text>
-                    </div>
-                  }
+              <div style={{ 
+                display: 'flex', 
+                flexDirection: 'column', 
+                alignItems: 'center', 
+                padding: '80px 40px',
+                textAlign: 'center'
+              }}>
+                <div style={{
+                  width: '64px',
+                  height: '64px',
+                  background: '#f3f4f6',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: '24px'
+                }}>
+                  <DollarOutlined style={{ fontSize: '24px', color: '#6b7280' }} />
+                </div>
+                <Title level={4} style={{ marginBottom: 12, fontWeight: 600 }}>
+                  Add Your Ingredients
+                </Title>
+                <Text style={{ 
+                  color: '#6b7280', 
+                  fontSize: '16px',
+                  marginBottom: 16,
+                  display: 'block',
+                  maxWidth: '400px'
+                }}>
+                  Add ingredients to start tracking your food costs
+                </Text>
+                <Text style={{ 
+                  color: '#9ca3af', 
+                  fontSize: '14px',
+                  display: 'block',
+                  marginBottom: 32
+                }}>
+                  Our AI can automatically set up ingredients based on your menu
+                </Text>
+                <Button 
+                  type="primary" 
+                  size="large"
+                  icon={<ThunderboltOutlined />} 
+                  onClick={handleQuickSetup}
+                  style={{
+                    height: '48px',
+                    paddingLeft: '24px',
+                    paddingRight: '24px',
+                    fontSize: '15px',
+                    fontWeight: 500,
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    border: 'none',
+                    borderRadius: '8px',
+                    boxShadow: '0 4px 14px 0 rgba(102, 126, 234, 0.4)'
+                  }}
                 >
-                  <Button 
-                    type="primary" 
-                    size="large"
-                    icon={<ThunderboltOutlined />} 
-                    onClick={handleQuickSetup}
-                    style={{ borderRadius: '4px', height: 'auto', padding: '8px 16px' }}
-                  >
-                    Quick Setup with AI
-                  </Button>
-                </Empty>
+                  Quick Setup with AI
+                </Button>
               </div>
             )}
-        </TabPane>
+          </div>
+        )}
 
-        <TabPane
-          tab={<span><TagsOutlined /> Others</span>}
-          key="3"
-        >
-            <div style={{ padding: '20px' }}>
-              <Card 
-                title="Fixed Monthly Costs" 
-                style={{ marginBottom: '24px' }}
-                extra={
-                  <Button 
-                    type="primary" 
-                    icon={<SaveOutlined />} 
-                    onClick={saveAllCosts} 
-                    loading={savingAllCosts}
-                  >
-                    Save All Costs
-                  </Button>
-                }
-              >
+        {activeTab === '3' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            {/* Fixed Monthly Costs */}
+            <div style={{
+              background: 'white',
+              borderRadius: '12px',
+              border: '1px solid #e5e7eb',
+              boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)',
+              overflow: 'hidden'
+            }}>
+              <div style={{ 
+                padding: '24px',
+                borderBottom: '1px solid #f3f4f6',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}>
+                <Title level={4} style={{ margin: 0, color: '#1f2937' }}>
+                  Fixed Monthly Costs
+                </Title>
+                <Button 
+                  type="primary" 
+                  icon={<SaveOutlined />} 
+                  onClick={saveAllCosts} 
+                  loading={savingAllCosts}
+                  style={{
+                    background: '#9370DB',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontWeight: 500
+                  }}
+                >
+                  Save All Costs
+                </Button>
+              </div>
+              <div style={{ padding: '24px' }}>
                 <Spin spinning={otherCostsLoading}>
-                  <Form layout="vertical">
-                    <Row gutter={24}>
-                      <Col span={12}>
-                        <Form.Item label="Monthly Rent">
-                          <InputNumber
-                            style={{ width: '100%' }}
-                            prefix="$"
-                            min={0}
-                            value={rent}
-                            onChange={value => setRent(value)}
-                            formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                            parser={value => value ? Number(value.replace(/\$\s?|(,*)/g, '')) : 0}
-                          />
-                        </Form.Item>
-                      </Col>
-                      <Col span={12}>
-                        <Form.Item label="Monthly Utilities">
-                          <InputNumber
-                            style={{ width: '100%' }}
-                            prefix="$"
-                            min={0}
-                            value={utilities}
-                            onChange={value => setUtilities(value)}
-                            formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                            parser={value => value ? Number(value.replace(/\$\s?|(,*)/g, '')) : 0}
-                          />
-                        </Form.Item>
-                      </Col>
-                    </Row>
-                  </Form>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+                    <div>
+                      <Text strong style={{ color: '#374151', display: 'block', marginBottom: '8px' }}>
+                        Monthly Rent
+                      </Text>
+                      <InputNumber
+                        style={{ width: '100%', height: '40px' }}
+                        prefix="$"
+                        min={0}
+                        value={rent}
+                        onChange={value => setRent(value)}
+                        formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                        parser={value => value ? Number(value.replace(/\$\s?|(,*)/g, '')) : 0}
+                        placeholder="0"
+                      />
+                    </div>
+                    <div>
+                      <Text strong style={{ color: '#374151', display: 'block', marginBottom: '8px' }}>
+                        Monthly Utilities
+                      </Text>
+                      <InputNumber
+                        style={{ width: '100%', height: '40px' }}
+                        prefix="$"
+                        min={0}
+                        value={utilities}
+                        onChange={value => setUtilities(value)}
+                        formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                        parser={value => value ? Number(value.replace(/\$\s?|(,*)/g, '')) : 0}
+                        placeholder="0"
+                      />
+                    </div>
+                  </div>
                 </Spin>
-              </Card>
-            
-              <Card 
-                title="Employee Costs" 
-                style={{ marginBottom: '24px' }}
-              >
+              </div>
+            </div>
+
+            {/* Employee Costs */}
+            <div style={{
+              background: 'white',
+              borderRadius: '12px',
+              border: '1px solid #e5e7eb',
+              boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)',
+              overflow: 'hidden'
+            }}>
+              <div style={{ 
+                padding: '24px',
+                borderBottom: '1px solid #f3f4f6'
+              }}>
+                <Title level={4} style={{ margin: 0, color: '#1f2937' }}>
+                  Employee Costs
+                </Title>
+              </div>
+              <div style={{ padding: '24px' }}>
                 <Spin spinning={otherCostsLoading}>
                   {employees.length === 0 ? (
-                    <Empty
-                      image={<UserOutlined style={{ fontSize: '64px', color: '#9370DB' }} />}
-                      description="No employees added yet"
-                    />
+                    <div style={{ 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      alignItems: 'center', 
+                      padding: '40px',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{
+                        width: '48px',
+                        height: '48px',
+                        background: '#f3f4f6',
+                        borderRadius: '50%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginBottom: '16px'
+                      }}>
+                        <UserOutlined style={{ fontSize: '20px', color: '#6b7280' }} />
+                      </div>
+                      <Text style={{ color: '#6b7280' }}>No employees added yet</Text>
+                    </div>
                   ) : (
-                    employees.map((employee, index) => (
-                    <Card
-                      key={index}
-                      style={{ marginBottom: '16px' }}
-                      title={`Employee ${index + 1}${employee.name ? ': ' + employee.name : ''}`}
-                      extra={
-                        <Button 
-                          type="text" 
-                          danger 
-                          icon={<DeleteOutlined />} 
-                          onClick={() => handleDeleteEmployee(employee.id)}
-                        />
-                      }
-                    >
-                      <Form layout="vertical">
-                        <Form.Item label="Employee Name">
-                          <Input 
-                            placeholder="Enter employee name"
-                            value={employee.name}
-                            onChange={(e) => {
-                              const newEmployees = [...employees];
-                              newEmployees[index] = { ...employee, name: e.target.value };
-                              setEmployees(newEmployees);
-                            }}
-                          />
-                        </Form.Item>
-                        
-                        <Form.Item label="Pay Type">
-                          <Radio.Group 
-                            value={employee.pay_type}
-                            onChange={e => {
-                              const newEmployees = [...employees];
-                              newEmployees[index] = { ...employee, pay_type: e.target.value };
-                              setEmployees(newEmployees);
-                            }}
-                          >
-                            <Radio value="salary">Yearly Salary</Radio>
-                            <Radio value="hourly">Hourly Rate</Radio>
-                          </Radio.Group>
-                        </Form.Item>
-                        
-                        {employee.pay_type === 'salary' ? (
-                          <Form.Item label="Yearly Salary">
-                            <InputNumber
-                              style={{ width: '100%' }}
-                              placeholder="Enter yearly salary"
-                              prefix="$"
-                              min={0}
-                              value={employee.salary}
-                              onChange={value => {
-                                const newEmployees = [...employees];
-                                newEmployees[index] = { ...employee, salary: value as number };
-                                setEmployees(newEmployees);
-                              }}
-                              formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                              parser={value => value ? Number(value.replace(/\$\s?|(,*)/g, '')) : 0}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      {employees.map((employee, index) => (
+                        <div
+                          key={index}
+                          style={{
+                            border: '1px solid #e5e7eb',
+                            borderRadius: '8px',
+                            padding: '20px'
+                          }}
+                        >
+                          <div style={{ 
+                            display: 'flex', 
+                            justifyContent: 'space-between', 
+                            alignItems: 'center',
+                            marginBottom: '16px'
+                          }}>
+                            <Text strong style={{ fontSize: '16px' }}>
+                              Employee {index + 1}{employee.name ? ': ' + employee.name : ''}
+                            </Text>
+                            <Button 
+                              type="text" 
+                              danger 
+                              icon={<DeleteOutlined />} 
+                              onClick={() => handleDeleteEmployee(employee.id)}
+                              style={{ color: '#ef4444' }}
                             />
-                          </Form.Item>
-                        ) : (
-                          <Row gutter={16}>
-                            <Col span={12}>
-                              <Form.Item label="Hourly Rate">
+                          </div>
+                          
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                            <div>
+                              <Text strong style={{ color: '#374151', display: 'block', marginBottom: '8px' }}>
+                                Employee Name
+                              </Text>
+                              <Input 
+                                placeholder="Enter employee name"
+                                value={employee.name}
+                                onChange={(e) => {
+                                  const newEmployees = [...employees];
+                                  newEmployees[index] = { ...employee, name: e.target.value };
+                                  setEmployees(newEmployees);
+                                }}
+                                style={{ height: '40px' }}
+                              />
+                            </div>
+                            
+                            <div>
+                              <Text strong style={{ color: '#374151', display: 'block', marginBottom: '8px' }}>
+                                Pay Type
+                              </Text>
+                              <Radio.Group 
+                                value={employee.pay_type}
+                                onChange={e => {
+                                  const newEmployees = [...employees];
+                                  newEmployees[index] = { ...employee, pay_type: e.target.value };
+                                  setEmployees(newEmployees);
+                                }}
+                                style={{ display: 'flex', gap: '16px' }}
+                              >
+                                <Radio value="salary">Yearly Salary</Radio>
+                                <Radio value="hourly">Hourly Rate</Radio>
+                              </Radio.Group>
+                            </div>
+                            
+                            {employee.pay_type === 'salary' ? (
+                              <div>
+                                <Text strong style={{ color: '#374151', display: 'block', marginBottom: '8px' }}>
+                                  Yearly Salary
+                                </Text>
                                 <InputNumber
-                                  style={{ width: '100%' }}
-                                  placeholder="Enter hourly rate"
+                                  style={{ width: '100%', height: '40px' }}
+                                  placeholder="Enter yearly salary"
                                   prefix="$"
                                   min={0}
-                                  value={employee.hourly_rate}
+                                  value={employee.salary}
                                   onChange={value => {
                                     const newEmployees = [...employees];
-                                    newEmployees[index] = { ...employee, hourly_rate: value as number };
+                                    newEmployees[index] = { ...employee, salary: value as number };
                                     setEmployees(newEmployees);
                                   }}
                                   formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
                                   parser={value => value ? Number(value.replace(/\$\s?|(,*)/g, '')) : 0}
                                 />
-                              </Form.Item>
-                            </Col>
-                            <Col span={12}>
-                              <Form.Item label="Weekly Hours">
-                                <InputNumber
-                                  style={{ width: '100%' }}
-                                  placeholder="Enter weekly hours"
-                                  min={0}
-                                  max={168}
-                                  value={employee.weekly_hours}
-                                  onChange={value => {
-                                    const newEmployees = [...employees];
-                                    newEmployees[index] = { ...employee, weekly_hours: value as number };
-                                    setEmployees(newEmployees);
-                                  }}
-                                />
-                              </Form.Item>
-                            </Col>
-                          </Row>
-                        )}
-                        
-                        {employee.pay_type === 'hourly' && employee.hourly_rate && employee.weekly_hours && (
-                          <Alert
-                            message={
-                              <>
-                                <Text strong>Estimated Monthly Cost: </Text>
-                                <Text>${((employee.hourly_rate * employee.weekly_hours * 52) / 12).toFixed(2)}</Text>
-                              </>
-                            }
-                            type="info"
-                            showIcon
-                          />
-                        )}
-                        
-                        {employee.pay_type === 'salary' && employee.salary && (
-                          <Alert
-                            message={
-                              <>
-                                <Text strong>Monthly Cost: </Text>
-                                <Text>${(employee.salary / 12).toFixed(2)}</Text>
-                              </>
-                            }
-                            type="info"
-                            showIcon
-                          />
-                        )}
-                      </Form>
-                    </Card>
-                  )))
-                  }
+                              </div>
+                            ) : (
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                                <div>
+                                  <Text strong style={{ color: '#374151', display: 'block', marginBottom: '8px' }}>
+                                    Hourly Rate
+                                  </Text>
+                                  <InputNumber
+                                    style={{ width: '100%', height: '40px' }}
+                                    placeholder="Enter hourly rate"
+                                    prefix="$"
+                                    min={0}
+                                    value={employee.hourly_rate}
+                                    onChange={value => {
+                                      const newEmployees = [...employees];
+                                      newEmployees[index] = { ...employee, hourly_rate: value as number };
+                                      setEmployees(newEmployees);
+                                    }}
+                                    formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                                    parser={value => value ? Number(value.replace(/\$\s?|(,*)/g, '')) : 0}
+                                  />
+                                </div>
+                                <div>
+                                  <Text strong style={{ color: '#374151', display: 'block', marginBottom: '8px' }}>
+                                    Weekly Hours
+                                  </Text>
+                                  <InputNumber
+                                    style={{ width: '100%', height: '40px' }}
+                                    placeholder="Enter weekly hours"
+                                    min={0}
+                                    max={168}
+                                    value={employee.weekly_hours}
+                                    onChange={value => {
+                                      const newEmployees = [...employees];
+                                      newEmployees[index] = { ...employee, weekly_hours: value as number };
+                                      setEmployees(newEmployees);
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            )}
+                            
+                            {employee.pay_type === 'hourly' && employee.hourly_rate && employee.weekly_hours && (
+                              <div style={{ 
+                                padding: '12px',
+                                background: '#f0f9ff',
+                                borderRadius: '6px',
+                                border: '1px solid #bae6fd'
+                              }}>
+                                <Text strong style={{ color: '#0c4a6e' }}>Estimated Monthly Cost: </Text>
+                                <Text style={{ color: '#0c4a6e' }}>
+                                  ${((employee.hourly_rate * employee.weekly_hours * 52) / 12).toFixed(2)}
+                                </Text>
+                              </div>
+                            )}
+                            
+                            {employee.pay_type === 'salary' && employee.salary && (
+                              <div style={{ 
+                                padding: '12px',
+                                background: '#f0f9ff',
+                                borderRadius: '6px',
+                                border: '1px solid #bae6fd'
+                              }}>
+                                <Text strong style={{ color: '#0c4a6e' }}>Monthly Cost: </Text>
+                                <Text style={{ color: '#0c4a6e' }}>
+                                  ${(employee.salary / 12).toFixed(2)}
+                                </Text>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </Spin>
                 
-                <Card
-                  hoverable
-                  style={{ 
-                    marginTop: '16px', 
-                    borderStyle: 'dashed', 
-                    borderWidth: '2px',
-                    borderColor: '#d9d9d9',
+                <button
+                  onClick={handleAddEmployee}
+                  style={{
+                    width: '100%',
+                    marginTop: '16px',
+                    padding: '20px',
+                    background: 'transparent',
+                    border: '2px dashed #e5e7eb',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    height: '100px',
-                    cursor: 'pointer'
+                    gap: '8px',
+                    color: '#6b7280',
+                    fontSize: '14px',
+                    transition: 'all 0.2s ease'
                   }}
-                  onClick={handleAddEmployee}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = '#9ca3af';
+                    e.currentTarget.style.background = '#f9fafb';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = '#e5e7eb';
+                    e.currentTarget.style.background = 'transparent';
+                  }}
                 >
-                  <Space>
-                    <PlusOutlined style={{ fontSize: '18px' }} />
-                    <span style={{ fontSize: '16px' }}>Add New Employee</span>
-                  </Space>
-                </Card>
+                  <PlusOutlined style={{ fontSize: '16px' }} />
+                  Add New Employee
+                </button>
                 
                 {employees.length > 0 && (
-                  <div style={{ marginTop: '20px' }}>
-                    <Divider>Summary</Divider>
-                    <Statistic 
-                      title="Total Monthly Employee Costs" 
-                      value={employees.reduce((sum, emp) => {
+                  <div style={{ 
+                    marginTop: '24px',
+                    padding: '20px',
+                    background: '#f9fafb',
+                    borderRadius: '8px',
+                    border: '1px solid #e5e7eb'
+                  }}>
+                    <Text strong style={{ fontSize: '16px', color: '#1f2937', display: 'block', marginBottom: '8px' }}>
+                      Total Monthly Employee Costs
+                    </Text>
+                    <Text style={{ fontSize: '24px', fontWeight: 600, color: '#059669' }}>
+                      ${employees.reduce((sum, emp) => {
                         if (emp.pay_type === 'salary' && emp.salary) {
                           return sum + (emp.salary / 12);
                         } else if (emp.pay_type === 'hourly' && emp.hourly_rate && emp.weekly_hours) {
                           return sum + ((emp.hourly_rate * emp.weekly_hours * 52) / 12);
                         }
                         return sum;
-                      }, 0)}
-                      precision={2}
-                      prefix="$"
-                    />
+                      }, 0).toFixed(2)}
+                    </Text>
                   </div>
                 )}
-              </Card>
+              </div>
             </div>
-          </TabPane>
-      </Tabs>
+          </div>
+        )}
+      </div>
       
-      {/* Recipe Modal */}
+      {/* All Modals - keeping original functionality */}
       <RecipeModal
         visible={recipeModalVisible}
         onCancel={() => setRecipeModalVisible(false)}
@@ -1275,7 +1495,6 @@ const Costs: React.FC = () => {
         isNew={isNewRecipe}
       />
       
-      {/* View Recipe Details Modal */}
       <Modal
         title={`Recipe Details: ${selectedRecipe?.item_name || ''}`}
         open={recipeDetailsVisible}
@@ -1305,7 +1524,6 @@ const Costs: React.FC = () => {
         )}
       </Modal>
       
-      {/* Ingredient Modal */}
       <IngredientModal
         visible={ingredientModalVisible}
         onCancel={() => setIngredientModalVisible(false)}
@@ -1314,7 +1532,6 @@ const Costs: React.FC = () => {
         isNew={isNewIngredient}
       />
       
-      {/* Quick Setup Modal */}
       <Modal
         title={`Quick Setup - ${currentStep === 1 ? 'Enter Menu Items' : currentStep === 2 ? 'Review Suggestions' : 'Finalizing Setup'}`}
         open={quickSetupVisible}
@@ -1358,6 +1575,7 @@ const Costs: React.FC = () => {
         ].filter(Boolean)}
         width={1000}
       >
+        {/* All the modal content exactly as before */}
         {currentStep === 1 && (
           <>
             <div className="menu-input-container">
@@ -1482,7 +1700,6 @@ const Costs: React.FC = () => {
                         type="link" 
                         onClick={() => {
                           const updatedSuggestions = {...suggestions};
-                          // Get all unique ingredients already in use
                           const existingIngredients = Array.from(
                             new Set(
                               suggestions.recipes.flatMap(r => 
@@ -1517,14 +1734,13 @@ const Costs: React.FC = () => {
                           key: 'ingredient',
                           width: '50%',
                           render: (text: string, record: any, index: number) => {
-                            // Get all unique ingredients from all recipes
                             const allIngredients = Array.from(
                               new Set(
                                 suggestions.recipes.flatMap(r => 
                                   r.ingredients.map(ing => ing.ingredient)
                                 )
                               )
-                            ).filter(Boolean); // Filter out any null or empty strings
+                            ).filter(Boolean);
                             
                             return (
                               <AutoComplete
@@ -1569,7 +1785,6 @@ const Costs: React.FC = () => {
                           key: 'unit',
                           width: '20%',
                           render: (unitValue: string, record: any, rowIndex: number) => {
-                             // Define units for dropdown selection
                             const units = [
                               'g', 'kg', 'oz', 'lb', 'ml', 'l', 'cup', 'tbsp', 'tsp', 'ea', 'pieces', 'bunch', 'pinch'
                             ];
@@ -1656,7 +1871,6 @@ const Costs: React.FC = () => {
                 <Table
                   dataSource={
                     (() => {
-                      // Initialize base ingredients if they don't exist yet
                       if (suggestions && baseIngredients.length === 0) {
                         const uniqueIngredients = Array.from(
                           new Map(
@@ -1666,22 +1880,20 @@ const Costs: React.FC = () => {
                                 { 
                                   ingredient_name: ing.ingredient, 
                                   unit: ing.unit,
-                                  quantity: ing.quantity || 100, // Default quantity
-                                  price: ing.price || 0, // Default price
-                                  unit_price: 0 // Will be calculated on the backend
+                                  quantity: ing.quantity || 100,
+                                  price: ing.price || 0,
+                                  unit_price: 0
                                 }
                               ])
                             )
                           ).values()
                         );
                         
-                        // Set the base ingredients once
                         if (uniqueIngredients.length > 0 && baseIngredients.length === 0) {
                           setBaseIngredients(uniqueIngredients);
                         }
                       }
                       
-                      // Always return the current state of baseIngredients for rendering
                       return baseIngredients.map((ing, idx) => ({ key: idx, ...ing }));
                     })()
                   }
@@ -1694,7 +1906,6 @@ const Costs: React.FC = () => {
                         <Input
                           value={text}
                           onChange={(e) => {
-                            // Update the ingredient name in baseIngredients
                             const updatedBaseIngredients = baseIngredients.map(ing => 
                               ing.ingredient_name === text 
                                 ? { ...ing, ingredient_name: e.target.value }
@@ -1702,7 +1913,6 @@ const Costs: React.FC = () => {
                             );
                             setBaseIngredients(updatedBaseIngredients);
                             
-                            // Also update in recipes for display purposes (the recipes use ingredient names from baseIngredients)
                             const updatedSuggestions = {...suggestions};
                             updatedSuggestions.recipes = updatedSuggestions.recipes.map(recipe => ({
                               ...recipe,
@@ -1729,12 +1939,9 @@ const Costs: React.FC = () => {
                           defaultValue={price || 0}
                           prefix="$"
                           onChange={(e) => {
-                            // Get the current input value
                             let inputVal = e.target.value;
-                            // Allow empty input for user to type
                             const newPrice = inputVal === '' ? 0 : parseFloat(inputVal) || 0;
                             
-                            // Only update this specific base ingredient's price
                             const updatedBaseIngredients = baseIngredients.map(ing => 
                               ing.ingredient_name === record.ingredient_name 
                                 ? { ...ing, price: newPrice }
@@ -1756,12 +1963,9 @@ const Costs: React.FC = () => {
                           step={0.01}
                           defaultValue={quantity || 100}
                           onChange={(e) => {
-                            // Get the current input value
                             let inputVal = e.target.value;
-                            // Allow empty input for user to type
                             const newQuantity = inputVal === '' ? 0 : parseFloat(inputVal) || 0;
                             
-                            // Only update this specific base ingredient's quantity
                             const updatedBaseIngredients = baseIngredients.map(ing => 
                               ing.ingredient_name === record.ingredient_name 
                                 ? { ...ing, quantity: newQuantity }
@@ -1777,7 +1981,6 @@ const Costs: React.FC = () => {
                       dataIndex: 'unit',
                       key: 'unit',
                       render: (text: string, record: any) => {
-                        // Common units for cooking/food
                         const commonUnits = [
                           'each', 'gram', 'kg', 'oz', 'lb', 'cup', 'tbsp', 'tsp', 
                           'ml', 'l', 'gallon', 'quart', 'pint', 'slice', 'piece', 
@@ -1789,7 +1992,6 @@ const Costs: React.FC = () => {
                             value={text}
                             style={{ width: '100%' }}
                             onChange={(value) => {
-                              // Only update this specific base ingredient's unit
                               const updatedBaseIngredients = baseIngredients.map(ing => 
                                 ing.ingredient_name === record.ingredient_name 
                                   ? { ...ing, unit: value }

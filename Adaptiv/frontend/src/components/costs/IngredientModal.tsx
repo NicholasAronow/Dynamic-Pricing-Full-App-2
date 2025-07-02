@@ -122,6 +122,7 @@ const IngredientModal: React.FC<IngredientModalProps> = ({
             <Option value="cup">cup</Option>
             <Option value="gal">gal (gallon)</Option>
             <Option value="lb">lb (pound)</Option>
+            <Option value="whole">whole item</Option>
           </Select>
         </Form.Item>
 

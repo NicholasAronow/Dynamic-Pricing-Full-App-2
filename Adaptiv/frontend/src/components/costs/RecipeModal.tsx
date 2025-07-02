@@ -247,6 +247,7 @@ const RecipeModal: React.FC<RecipeModalProps> = ({
                       <Option value="tsp">tsp (teaspoon)</Option>
                       <Option value="cup">cup</Option>
                       <Option value="gal">gal (gallon)</Option>
+                      <Option value="whole">whole item</Option>
                     </Select>
                   </Form.Item>
                   <MinusCircleOutlined onClick={() => remove(name)} />
