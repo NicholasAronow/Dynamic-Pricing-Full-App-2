@@ -7,9 +7,12 @@ import axios from 'axios';
 import { api } from '../../services/api';
 import { API_BASE_URL } from 'config';
 import pricingService, { AgentPricingRecommendation } from '../../services/pricingService';
+import { Typography } from 'antd';
 
 const { TabPane } = Tabs;
 const { Option } = Select;
+const { Title, Text } = Typography;
+
 
 interface AgentStatus {
   name: string;
@@ -721,71 +724,24 @@ const DynamicPricingAgentsContent: React.FC = () => {
   };
 
   return (
+    
     <div style={{ 
       minHeight: '100vh', 
-      padding: '32px'
+      padding: '24px 0px'
     }}>
-      {/* Modern Header */}
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
-        marginBottom: '32px',
-        background: 'rgba(255, 255, 255, 0.9)',
-        backdropFilter: 'blur(10px)',
-        borderRadius: '16px',
-        padding: '24px 32px',
-        boxShadow: '0 4px 24px rgba(0, 0, 0, 0.06)'
-      }}>
-        <Space size="large" align="center">
-          <div style={{
+
+      <div style={{ marginBottom: 40 }}>
+        <Title level={2} style={{ margin: 0,               
             background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            borderRadius: '12px',
-            padding: '12px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}>
-            <RobotOutlined style={{ fontSize: '32px', color: '#fff' }} />
-          </div>
-          <div>
-            <h1 style={{ 
-              fontSize: '28px', 
-              margin: 0, 
-              fontWeight: '700',
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent'
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent' 
             }}>
-              Dynamic Pricing Agent
-            </h1>
-            <p style={{ margin: 0, color: '#8492a6', fontSize: '14px' }}>
-              AI-powered pricing optimization system
-            </p>
-          </div>
-        </Space>
-          <Button
-            type="primary"
-            icon={<PlayCircleOutlined />}
-            loading={loading}
-            onClick={runFullAnalysis}
-            disabled={analysisStatus === 'running'}
-            size="large"
-            style={{
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-              border: 'none',
-              height: '48px',
-              paddingLeft: '32px',
-              paddingRight: '32px',
-              borderRadius: '12px',
-              fontWeight: '600',
-              boxShadow: '0 4px 12px rgba(102, 126, 234, 0.4)'
-            }}
-          >
-            {analysisStatus === 'running' ? 'Analysis Running...' : 'Run Full Analysis'}
-          </Button>
+          Price Optimization
+        </Title>
+        <Text style={{ color: '#6b7280', fontSize: '16px' }}>
+          Track ingredient costs for your menu items to optimize your margin
+        </Text>
       </div>
-      
       {/* Main Content Area */}
       <div style={{ 
         background: 'rgba(255, 255, 255, 0.95)',
@@ -804,20 +760,15 @@ const DynamicPricingAgentsContent: React.FC = () => {
           paddingBottom: '24px'
         }}>
           <div>
-            <h2 style={{ 
-              margin: 0, 
-              fontSize: '24px', 
-              fontWeight: '600',
-              color: '#1a202c'
-            }}>
+            <Text style={{ fontSize: '24px', color: '#6b7280', fontWeight: 600, letterSpacing: '0.5px' }}>
               Pricing Analysis Report
-            </h2>
+            </Text>
             <div style={{ 
               color: '#718096', 
               marginTop: '8px',
               fontSize: '14px'
             }}>
-              <span style={{ fontWeight: '500' }}>Report Date:</span> {analysisDate ? new Date(analysisDate).toLocaleDateString('en-US', { 
+              <span style={{ fontSize: '14px', color: '#6b7280', fontWeight: 600, letterSpacing: '0.5px' }}>Report Date:</span> {analysisDate ? new Date(analysisDate).toLocaleDateString('en-US', { 
                 weekday: 'long', 
                 year: 'numeric', 
                 month: 'long', 
@@ -1073,10 +1024,31 @@ const DynamicPricingAgentsContent: React.FC = () => {
                   ))}
                 </div>
               ) : (
-                <Empty 
-                  description="No pending pricing recommendations"
-                  style={{ padding: '60px 0' }}
-                />
+                <div style={{ padding: '60px 0', textAlign: 'center' }}>
+                  <Empty 
+                    description="No pending pricing recommendations"
+                    style={{ marginBottom: '24px' }}
+                  />
+                  <Button
+                    type="primary"
+                    loading={loading}
+                    onClick={runFullAnalysis}
+                    disabled={analysisStatus === 'running'}
+                    size="large"
+                    style={{
+                      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                      border: 'none',
+                      height: '48px',
+                      paddingLeft: '32px',
+                      paddingRight: '32px',
+                      borderRadius: '12px',
+                      fontWeight: '600',
+                      boxShadow: '0 4px 12px rgba(102, 126, 234, 0.4)'
+                    }}
+                  >
+                    {analysisStatus === 'running' ? 'Analysis Running...' : 'Run Full Analysis'}
+                  </Button>
+                </div>
               )}
             </TabPane>
             <TabPane 
@@ -1326,7 +1298,6 @@ const DynamicPricingAgentsContent: React.FC = () => {
             <Button
               type="primary"
               size="large"
-              icon={<PlayCircleOutlined />}
               onClick={runFullAnalysis}
               style={{
                 background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
@@ -1373,9 +1344,9 @@ const DynamicPricingAgentsContent: React.FC = () => {
 // Wrap the entire page with SubscriptionRequired to make it premium-only
 const DynamicPricingAgents: React.FC = () => {
   return (
-    <SubscriptionRequired>
+    // <SubscriptionRequired>
       <DynamicPricingAgentsContent />
-    </SubscriptionRequired>
+    // </SubscriptionRequired>
   );
 };
 
