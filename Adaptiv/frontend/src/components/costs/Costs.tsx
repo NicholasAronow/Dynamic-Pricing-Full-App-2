@@ -64,7 +64,8 @@ const Costs: React.FC = () => {
       'quart': 946.353,
       'quarts': 946.353,
       'pint': 473.176,
-      'pints': 473.176
+      'pints': 473.176,
+      'oz': 29.574
     };
     
     // Check if both units are in the same category
