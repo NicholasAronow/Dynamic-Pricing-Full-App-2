@@ -385,22 +385,30 @@ const DynamicPricingAgentsContent: React.FC = () => {
       if (result) {
         message.success(`Successfully ${action}ed the price recommendation`);
         
-        // If approved, also update the price in Square
+        // If approved, also update the price in Square and local database
         if (action === 'accept') {
           try {
-            // Call an API to update the price in Square
-            // Use the centralized api service instead of direct axios
+            // First, update the price in our local database
+            await api.put(
+              `items/${recommendation.item_id}`,
+              {
+                current_price: recommendation.recommended_price
+              }
+            );
+            
+            // Then update the price in Square
             await api.post(
               `integrations/square/update-price`,
               {
                 item_id: recommendation.item_id,
                 new_price: recommendation.recommended_price
               }
-            )
-            message.success(`Price updated to $${Number(recommendation.recommended_price).toFixed(2)} in Square`);
-          } catch (squareError) {
-            console.error('Error updating price in Square:', squareError);
-            message.error('Failed to update price in Square');
+            );
+            
+            message.success(`Price updated to $${Number(recommendation.recommended_price).toFixed(2)} in both database and Square`);
+          } catch (error) {
+            console.error('Error updating price:', error);
+            message.error('Failed to update price');
           }
         }
         
