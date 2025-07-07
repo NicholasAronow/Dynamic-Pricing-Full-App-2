@@ -18,7 +18,8 @@ import {
   BankOutlined,
   FileTextOutlined,
   CoffeeOutlined,
-  ReadOutlined
+  ReadOutlined,
+  QuestionCircleOutlined
 } from '@ant-design/icons';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -43,6 +44,9 @@ const MainLayout: React.FC = () => {
     <Menu>
       <Menu.Item key="profile" icon={<UserOutlined style={{ fontSize: '16px', color: '#7546C9' }} />}>
         <Link to="/profile">Profile</Link>
+      </Menu.Item>
+      <Menu.Item key="support" icon={<QuestionCircleOutlined style={{ fontSize: '16px', color: '#7546C9' }} />}>
+        <Link to="/support">Support</Link>
       </Menu.Item>
       <Menu.Divider />
       <Menu.Item key="logout" icon={<LogoutOutlined style={{ fontSize: '16px', color: '#7546C9' }} />} onClick={handleLogout}>

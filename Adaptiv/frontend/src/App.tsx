@@ -24,6 +24,9 @@ import SubscriptionSuccess from './components/subscriptions/SubscriptionSuccess'
 import SubscriptionCancel from './components/subscriptions/SubscriptionCancel';
 import SubscriptionManagement from './components/subscriptions/SubscriptionManagement';
 
+// Support component
+import Support from './components/support/Support';
+
 
 // Integration components
 import SquareCallback from './components/integrations/Square/SquareCallback';
@@ -94,6 +97,9 @@ function App() {
               {/* Subscription Management Routes */}
               <Route path="subscription-plans" element={<PricingPlans />} />
               <Route path="subscription-management" element={<SubscriptionManagement />} />
+              
+              {/* Support Route */}
+              <Route path="support" element={<Support />} />
               
               <Route path="square-test" element={<SquareOrderTester />} />
               <Route path="integrations/square" element={<SquareIntegrationPage />} />
