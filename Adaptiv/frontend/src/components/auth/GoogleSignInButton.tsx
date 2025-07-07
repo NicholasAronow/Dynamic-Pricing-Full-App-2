@@ -41,7 +41,7 @@ const GoogleSignInButton: React.FC<GoogleSignInButtonProps> = ({ onSuccess, onEr
     const initializeGoogleSignIn = () => {
       if (window.google && googleButtonRef.current) {
         // Get client ID from environment or use the one we know works for localhost
-        const clientId = process.env.GOOGLE_CLIENT_ID || '';
+        const clientId = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
         console.log('Initializing Google Sign-In with client ID:', clientId);
         
         window.google.accounts.id.initialize({

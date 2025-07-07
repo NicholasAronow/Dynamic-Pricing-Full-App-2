@@ -972,12 +972,12 @@ const Dashboard: React.FC = () => {
       {!isPosConnected && (
         <div style={{
           position: 'absolute',
-          top: 0,
-          left: 0,
+          top: -10,
+          left: -10,
           width: '100%',
           height: '100%',
           backdropFilter: 'blur(5px)',
-          backgroundColor: 'rgba(255, 255, 255, 0.85)',
+          backgroundColor: 'rgba(255, 255, 255, 0.75)',
           zIndex: 10,
           display: 'flex',
           flexDirection: 'column',
@@ -985,25 +985,67 @@ const Dashboard: React.FC = () => {
           alignItems: 'center',
           textAlign: 'center',
           padding: '40px',
-          borderRadius: '8px'
+          borderRadius: '12px'
         }}>
-          <Title level={3}>Connect Your POS System</Title>
-          <Paragraph style={{ fontSize: '16px', maxWidth: '600px', margin: '20px 0' }}>
-            To access your dynamic pricing dashboard, please connect your Square account.
-            This will allow us to import your sales data and menu items for personalized insights.
-          </Paragraph>
-          <Button 
-            type="primary" 
-            icon={<ShoppingOutlined />}
-            onClick={handleSquareIntegration}
-            size="large"
-            style={{ marginTop: '20px' }}
-          >
-            Connect Square Account
-          </Button>
-          <Paragraph style={{ marginTop: '20px', fontSize: '14px', opacity: 0.7 }}>
-            <Text type="secondary">After connecting, you'll have access to all dashboard features</Text>
-          </Paragraph>
+          <div style={{
+            background: 'white',
+            padding: '48px',
+            borderRadius: '16px',
+            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            maxWidth: '500px'
+          }}>
+            <div style={{ 
+              width: '64px', 
+              height: '64px', 
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 24px'
+            }}>
+              <ShoppingOutlined style={{ fontSize: '28px', color: 'white' }} />
+            </div>
+            <Title level={3} style={{ marginBottom: 16, color: '#1f2937' }}>
+              Connect Your POS System
+            </Title>
+            <Text style={{ 
+              fontSize: '15px', 
+              color: '#6b7280', 
+              display: 'block', 
+              marginBottom: 32,
+              lineHeight: '1.6'
+            }}>
+              Connect your Square account to import sales data and menu items for personalized pricing insights.
+            </Text>
+            <Button 
+              type="primary" 
+              icon={<ShoppingOutlined />}
+              onClick={handleSquareIntegration}
+              size="large"
+              style={{
+                height: '48px',
+                paddingLeft: '24px',
+                paddingRight: '24px',
+                fontSize: '15px',
+                fontWeight: 500,
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                border: 'none',
+                borderRadius: '8px',
+                boxShadow: '0 4px 14px 0 rgba(102, 126, 234, 0.4)'
+              }}
+            >
+              Connect Square Account
+            </Button>
+            <Text style={{ 
+              marginTop: 16, 
+              fontSize: '13px', 
+              color: '#9ca3af',
+              display: 'block'
+            }}>
+              Access all price recommendation features after connecting
+            </Text>
+          </div>
         </div>
       )}
       
