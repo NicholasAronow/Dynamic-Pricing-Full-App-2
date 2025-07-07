@@ -19,7 +19,9 @@ import {
   FileTextOutlined,
   CoffeeOutlined,
   ReadOutlined,
-  QuestionCircleOutlined
+  QuestionCircleOutlined,
+  MenuOutlined,
+  DollarOutlined
 } from '@ant-design/icons';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -171,7 +173,7 @@ const MainLayout: React.FC = () => {
                       alignItems: 'center',
                       justifyContent: 'center'
                     }}>
-                      <CoffeeOutlined style={{ 
+                      <MenuOutlined style={{ 
                         fontSize: '16px', 
                         color: location.pathname === '/price-recommendations' ? '#667eea' : '#6b7280'
                       }} />
@@ -186,7 +188,7 @@ const MainLayout: React.FC = () => {
                         textDecoration: 'none'
                       }}
                     >
-                      Products
+                      Menu & Pricing
                     </Link>
                   ),
                   style: {
@@ -208,7 +210,7 @@ const MainLayout: React.FC = () => {
                       alignItems: 'center',
                       justifyContent: 'center'
                     }}>
-                      <CalculatorOutlined style={{ 
+                      <DollarOutlined style={{ 
                         fontSize: '16px', 
                         color: location.pathname === '/costs' ? '#667eea' : '#6b7280'
                       }} />
@@ -223,7 +225,7 @@ const MainLayout: React.FC = () => {
                         textDecoration: 'none'
                       }}
                     >
-                      Costs
+                      Cost Management
                     </Link>
                   ),
                   style: {
