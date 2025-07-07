@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Form, Input, Button, Typography, Alert, Card } from 'antd';
+import { Form, Input, Button, Typography, Alert, Card, Divider } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import GoogleSignInButton from './GoogleSignInButton';
 
 const { Title } = Typography;
 
@@ -84,6 +85,13 @@ const Login: React.FC = () => {
               Log in
             </Button>
           </Form.Item>
+          
+          <Divider>Or</Divider>
+          
+          <GoogleSignInButton 
+            onSuccess={() => navigate('/')}
+            onError={(err) => setError('Failed to login with Google. Please try again.')}
+          />
           
           <div className="auth-form-register">
             Don't have an account? <Link to="/register">Register now!</Link>

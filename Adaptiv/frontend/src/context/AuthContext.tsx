@@ -7,6 +7,7 @@ interface AuthContextType {
   user: any;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  googleLogin: (credentialResponse: any) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
   logout: () => void;
   fetchUserData: () => Promise<any>;
@@ -17,6 +18,7 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   login: async () => {},
+  googleLogin: async () => {},
   register: async () => {},
   logout: () => {},
   fetchUserData: async () => null,
@@ -301,12 +303,61 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     console.log('Logout complete, auth state reset');
   };
 
+    // Add Google login function
+  const googleLogin = async (credentialResponse: string) => {
+    try {
+      // Import api from services to ensure we use the backend URL
+      const api = (await import('../services/api')).default;
+      
+      console.log('Processing Google authentication response');
+      
+      // Send the credential to our backend endpoint
+      const response = await api.post('auth/google-auth', {
+        credential: credentialResponse
+      });
+      
+      console.log('Google login response:', response.data);
+      
+      // Get the token
+      const access_token = response.data.access_token;
+      
+      if (!access_token) {
+        throw new Error('No token received from server');
+      }
+      
+      // Store token in localStorage
+      localStorage.setItem('token', access_token);
+      
+      // Set auth headers
+      api.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
+      axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
+      
+      setIsAuthenticated(true);
+      
+      // Set user data if returned from the API
+      if (response.data.user) {
+        setUser(response.data.user);
+      } else {
+        // Otherwise fetch user data
+        try {
+          await fetchUserData();
+        } catch (userError) {
+          console.warn('Could not fetch user data after Google login, but login successful', userError);
+        }
+      }
+    } catch (error) {
+      console.error('Google login error:', error);
+      throw error;
+    }
+  };
+
   return (
     <AuthContext.Provider value={{
       isAuthenticated,
       user,
       loading,
       login,
+      googleLogin,
       register,
       logout,
       fetchUserData,

@@ -10,6 +10,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
+    name = Column(String, nullable=True)  # Added name field for Google auth users
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -17,6 +18,7 @@ class User(Base):
     pos_connected = Column(Boolean, default=False)
     stripe_customer_id = Column(String, nullable=True)  # For Stripe subscription integration
     subscription_tier = Column(String, nullable=True, default="free")  # free, basic, premium
+    is_google_user = Column(Boolean, default=False)  # Flag to identify users who sign in with Google
     
     # Relationship to BusinessProfile
     business = relationship("BusinessProfile", back_populates="owner", uselist=False)

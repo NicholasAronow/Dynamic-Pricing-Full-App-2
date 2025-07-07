@@ -15,6 +15,7 @@ import models, schemas
 from auth import auth_router
 from login_endpoint import login_router
 from register_endpoint import register_router
+from authentication.google_auth import google_auth_router
 from profile import profile_router
 from items import items_router
 from price_history import price_history_router
@@ -62,6 +63,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(login_router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(register_router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(google_auth_router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(profile_router, prefix="/api/profile", tags=["Profile"])
 app.include_router(items_router, prefix="/api/items", tags=["Items"])
 app.include_router(price_history_router, prefix="/api/price-history", tags=["Price History"])
