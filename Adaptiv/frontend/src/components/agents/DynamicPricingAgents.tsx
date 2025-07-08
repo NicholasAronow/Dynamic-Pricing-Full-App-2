@@ -57,6 +57,7 @@ const DynamicPricingAgentsContent: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [analysisStatus, setAnalysisStatus] = useState<'idle' | 'running' | 'completed' | 'error'>('idle');
+  const [statusMessage, setStatusMessage] = useState<string>('');
   const [results, setResults] = useState<AnalysisResults | null>(null);
   const [recommendations, setRecommendations] = useState<AgentPricingRecommendation[]>([]);
   const [pendingRecommendations, setPendingRecommendations] = useState<AgentPricingRecommendation[]>([]);
@@ -517,8 +518,12 @@ const DynamicPricingAgentsContent: React.FC = () => {
     try {
       setLoading(true);
       setAnalysisStatus('running');
-      
-      // Update all agents to running
+      // Clear previous results when starting new analysis
+      setResults(null);
+      setRecommendations([]);
+      setPendingRecommendations([]);
+      setCompletedRecommendations([]);
+      setStatusMessage('Starting analysis...');
       setAgentStatuses(prev => prev.map(agent => ({ ...agent, status: 'running' })));
       
       // Debug logging
@@ -535,23 +540,16 @@ const DynamicPricingAgentsContent: React.FC = () => {
         }
       );
       
-      // Debug logging
-      console.log('Task initiation response:', response.data);
-
-      if (response.data && response.data.success && response.data.task_id) {
-        // Get task ID from response
-        const newTaskId = response.data.task_id;
-        setTaskId(newTaskId);
-        
-        message.info('Analysis started. This may take a few minutes...');
+      console.log('Analysis started, response:', response.data);
+      
+      if (response.data.task_id) {
+        setTaskId(response.data.task_id);
+        console.log('Task ID set:', response.data.task_id);
         
         // Start polling for results
-        pollForResults(newTaskId);
+        await pollForResults(response.data.task_id);
       } else {
-        // Handle error response
-        message.warning(`Analysis started. This may take a few minutes...`);
-        setAnalysisStatus('error');
-        setAgentStatuses(prev => prev.map(agent => ({ ...agent, status: 'error' })));
+        throw new Error('No task ID received from server');
       }
     } catch (error) {
       console.error('Error starting analysis:', error);
@@ -582,7 +580,7 @@ const DynamicPricingAgentsContent: React.FC = () => {
 
         // Update status message if available
         if (response.data.status_message) {
-          setAnalysisStatus(response.data.status_message);
+          setStatusMessage(response.data.status_message);
           console.log('Updated status message:', response.data.status_message);
           
           // Update agent statuses based on task progress
@@ -794,9 +792,27 @@ const DynamicPricingAgentsContent: React.FC = () => {
               }}
             />
           )}
+          <Button
+              type="primary"
+              size="large"
+              onClick={runFullAnalysis}
+              style={{
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                border: 'none',
+                height: '48px',
+                paddingLeft: '32px',
+                paddingRight: '32px',
+                borderRadius: '12px',
+                fontWeight: '600',
+                boxShadow: '0 4px 12px rgba(102, 126, 234, 0.4)'
+              }}
+            >
+              Start Analysis
+            </Button>
         </div>
 
-        {results && (
+        {/* Show results only when analysis is completed and we have results */}
+        {results && analysisStatus === 'completed' && (
           <Tabs 
             defaultActiveKey="agent-recommendations"
             style={{
@@ -1037,25 +1053,6 @@ const DynamicPricingAgentsContent: React.FC = () => {
                     description="No pending pricing recommendations"
                     style={{ marginBottom: '24px' }}
                   />
-                  <Button
-                    type="primary"
-                    loading={loading}
-                    onClick={runFullAnalysis}
-                    disabled={analysisStatus === 'running'}
-                    size="large"
-                    style={{
-                      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                      border: 'none',
-                      height: '48px',
-                      paddingLeft: '32px',
-                      paddingRight: '32px',
-                      borderRadius: '12px',
-                      fontWeight: '600',
-                      boxShadow: '0 4px 12px rgba(102, 126, 234, 0.4)'
-                    }}
-                  >
-                    {analysisStatus === 'running' ? 'Analysis Running...' : 'Run Full Analysis'}
-                  </Button>
                 </div>
               )}
             </TabPane>
@@ -1334,6 +1331,16 @@ const DynamicPricingAgentsContent: React.FC = () => {
             }}>
               AI Agents Analyzing Your Data
             </h3>
+            {statusMessage && (
+              <p style={{ 
+                marginTop: '8px',
+                color: '#667eea',
+                fontSize: '16px',
+                fontWeight: '500'
+              }}>
+                {statusMessage}
+              </p>
+            )}
             <p style={{ 
               marginTop: '12px',
               color: '#718096',
@@ -1341,6 +1348,47 @@ const DynamicPricingAgentsContent: React.FC = () => {
             }}>
               This may take a few moments...
             </p>
+          </div>
+        )}
+
+        {/* Show error state */}
+        {analysisStatus === 'error' && (
+          <div style={{ textAlign: 'center', padding: '80px 0' }}>
+            <div style={{
+              width: '80px',
+              height: '80px',
+              margin: '0 auto 24px',
+              background: 'linear-gradient(135deg, #f56565 0%, #e53e3e 100%)',
+              borderRadius: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <WarningOutlined style={{ fontSize: '40px', color: '#fff' }} />
+            </div>
+            <h3 style={{ fontSize: '20px', color: '#1a202c', marginBottom: '12px' }}>
+              Analysis Failed
+            </h3>
+            <p style={{ color: '#718096', fontSize: '16px', marginBottom: '32px' }}>
+              {statusMessage || 'An error occurred during the analysis. Please try again.'}
+            </p>
+            <Button
+              type="primary"
+              size="large"
+              onClick={runFullAnalysis}
+              style={{
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                border: 'none',
+                height: '48px',
+                paddingLeft: '32px',
+                paddingRight: '32px',
+                borderRadius: '12px',
+                fontWeight: '600',
+                boxShadow: '0 4px 12px rgba(102, 126, 234, 0.4)'
+              }}
+            >
+              Try Again
+            </Button>
           </div>
         )}
       </div>
