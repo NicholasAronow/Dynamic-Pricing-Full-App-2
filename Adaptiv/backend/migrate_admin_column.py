@@ -16,7 +16,7 @@ import sys
 import os
 from sqlalchemy import create_engine, text, inspect, MetaData, Table, Column, Boolean
 from sqlalchemy.exc import SQLAlchemyError
-from database import get_database_url
+from database import DATABASE_URL
 import logging
 
 # Set up logging
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 def get_engine():
     """Get database engine"""
-    database_url = get_database_url()
+    database_url = DATABASE_URL
     if not database_url:
         logger.error("DATABASE_URL not found. Please set your database connection string.")
         sys.exit(1)
