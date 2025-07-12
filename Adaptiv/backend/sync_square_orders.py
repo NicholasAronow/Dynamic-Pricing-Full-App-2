@@ -45,10 +45,9 @@ def get_user_by_email(db: Session, email: str) -> Optional[models.User]:
 def list_users_with_square_integration(db: Session):
     """List all users who have Square integration set up"""
     users_with_square = db.query(models.User).join(
-        models.Integration, models.User.id == models.Integration.user_id
+        models.POSIntegration, models.User.id == models.POSIntegration.user_id
     ).filter(
-        models.Integration.provider == "square",
-        models.Integration.is_active == True
+        models.POSIntegration.provider == "square"
     ).all()
     
     if not users_with_square:
@@ -78,10 +77,9 @@ async def sync_user_orders(user_id: int, force_sync: bool = False):
             return False
         
         # Check if user has Square integration
-        integration = db.query(models.Integration).filter(
-            models.Integration.user_id == user_id,
-            models.Integration.provider == "square",
-            models.Integration.is_active == True
+        integration = db.query(models.POSIntegration).filter(
+            models.POSIntegration.user_id == user_id,
+            models.POSIntegration.provider == "square"
         ).first()
         
         if not integration:
