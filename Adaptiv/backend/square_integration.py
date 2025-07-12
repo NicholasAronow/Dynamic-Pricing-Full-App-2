@@ -764,7 +764,7 @@ async def get_square_orders(
                 
                 # Fetch additional pages until no more cursor is returned or we hit our result limit
                 page_count = 1
-                max_pages = 10
+                max_pages = 1000
                 total_results = len(all_orders)
                 
                 while cursor and page_count < max_pages and total_results < max_results:
@@ -1205,7 +1205,7 @@ async def sync_initial_data(user_id: int, db: Session, force_sync: bool = False)
             # Handle pagination to fetch all orders
             cursor = orders_data.get("cursor")
             page_count = 1
-            max_pages = 100  # Increased max pages to ensure we get all orders
+            max_pages = 1000  # Increased max pages to ensure we get all orders
             
             logger.info(f"Initial page has {len(orders)} orders, cursor present: {cursor is not None}")
             
