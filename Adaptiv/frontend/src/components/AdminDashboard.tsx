@@ -182,44 +182,92 @@ const AdminDashboard: React.FC = () => {
 
   const exportUserData = async (userId: number, dataType: string) => {
     try {
-      // Show loading message
-      const hideLoading = message.loading('Preparing export...', 0);
-      
-      const response = await apiService.get(`/admin/users/${userId}/export?data_type=${dataType}`, {
-        responseType: 'blob'
-      });
-      
-      hideLoading();
-      
-      // Extract filename from response headers if available
-      const contentDisposition = response.headers['content-disposition'];
-      let filename = `user_${userId}_${dataType}_${new Date().toISOString().split('T')[0]}.csv`;
-      
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
-        if (filenameMatch) {
-          filename = filenameMatch[1];
-        }
-      }
-      
-      // Create and trigger download
-      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/csv' }));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-      
-      // Show success message with data type info
       const dataTypeLabel = dataType === 'menu_items' ? 'Menu Items' : 
                            dataType === 'orders' ? 'Orders' : 'All Data';
-      message.success(`${dataTypeLabel} exported successfully as CSV`);
+      
+      // Start the background export task
+      message.loading(`Starting ${dataTypeLabel} export...`, 0.5);
+      
+      const startResponse = await apiService.post(`/admin/users/${userId}/export?data_type=${dataType}`);
+      const taskId = startResponse.data.task_id;
+      
+      if (!taskId) {
+        throw new Error('No task ID received from server');
+      }
+      
+      message.success(`${dataTypeLabel} export started. Processing in background...`);
+      
+      // Poll for completion
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusResponse = await apiService.get(`/admin/users/${userId}/export/status/${taskId}`);
+          const status = statusResponse.data;
+          
+          if (status.task_status === 'COMPLETED') {
+            clearInterval(pollInterval);
+            
+            // Download the completed CSV
+            try {
+              const downloadResponse = await apiService.get(`/admin/users/${userId}/export/download/${taskId}`, {
+                responseType: 'blob'
+              });
+              
+              // Extract filename from response headers
+              const contentDisposition = downloadResponse.headers['content-disposition'];
+              let filename = `user_${userId}_${dataType}_${new Date().toISOString().split('T')[0]}.csv`;
+              
+              if (contentDisposition) {
+                const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+                if (filenameMatch) {
+                  filename = filenameMatch[1];
+                }
+              }
+              
+              // Create and trigger download
+              const url = window.URL.createObjectURL(new Blob([downloadResponse.data], { type: 'text/csv' }));
+              const link = document.createElement('a');
+              link.href = url;
+              link.setAttribute('download', filename);
+              document.body.appendChild(link);
+              link.click();
+              link.remove();
+              window.URL.revokeObjectURL(url);
+              
+              message.success(`${dataTypeLabel} exported successfully!`);
+              
+            } catch (downloadError: any) {
+              console.error('Error downloading CSV:', downloadError);
+              message.error('Export completed but download failed. Please try again.');
+            }
+            
+          } else if (status.task_status === 'ERROR') {
+            clearInterval(pollInterval);
+            const errorMsg = status.error || 'Export failed';
+            message.error(`Export failed: ${errorMsg}`);
+            
+          } else if (status.task_status === 'PROGRESS') {
+            // Show progress update
+            const progress = status.progress || 0;
+            const statusMsg = status.status_message || 'Processing...';
+            message.loading(`${dataTypeLabel} export: ${progress}% - ${statusMsg}`, 0.5);
+          }
+          
+        } catch (pollError: any) {
+          console.error('Error checking export status:', pollError);
+          clearInterval(pollInterval);
+          message.error('Failed to check export status. Please try again.');
+        }
+      }, 2000); // Poll every 2 seconds
+      
+      // Set timeout to stop polling after 10 minutes
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        message.warning('Export is taking longer than expected. Please check back later.');
+      }, 600000);
       
     } catch (error: any) {
-      console.error('Error exporting data:', error);
-      const errorMsg = error.response?.data?.detail || 'Failed to export data';
+      console.error('Error starting export:', error);
+      const errorMsg = error.response?.data?.detail || 'Failed to start export';
       message.error(`Export failed: ${errorMsg}`);
     }
   };
