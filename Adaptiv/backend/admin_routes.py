@@ -497,42 +497,65 @@ async def export_user_data(
             writer.writerow([])  # Empty row for spacing
     
     if data_type == "orders" or data_type == "all":
-        # Export orders with detailed information
-        writer.writerow(["ORDERS"])
+        # Export orders with detailed information including individual items
+        writer.writerow(["ORDERS WITH INDIVIDUAL ITEMS"])
         writer.writerow([
-            "Order ID", "Order Date", "Total Amount ($)", "Total Cost ($)", 
-            "Gross Margin ($)", "Margin %", "Items Count", "Avg Item Price ($)", 
-            "POS ID", "Order Status"
+            "Order ID", "Order Date", "Order Total ($)", "Order Cost ($)", 
+            "Order Margin ($)", "Order Margin %", "POS ID", 
+            "Item Name", "Item Category", "Item Quantity", "Item Unit Price ($)", 
+            "Item Subtotal ($)", "Item Unit Cost ($)", "Item Subtotal Cost ($)"
         ])
         
-        # Get orders with item counts
-        orders_query = db.query(
-            models.Order,
-            func.count(models.OrderItem.id).label('items_count'),
-            func.avg(models.OrderItem.unit_price).label('avg_item_price')
-        ).outerjoin(
-            models.OrderItem, models.Order.id == models.OrderItem.order_id
-        ).filter(
+        # Get orders with their items
+        orders_query = db.query(models.Order).filter(
             models.Order.user_id == user_id
-        ).group_by(models.Order.id).order_by(desc(models.Order.order_date)).all()
+        ).order_by(desc(models.Order.order_date)).all()
         
-        for order, items_count, avg_item_price in orders_query:
-            items_count = items_count or 0
-            avg_item_price = avg_item_price or 0.0
-            margin_pct = ((order.gross_margin or 0) / order.total_amount * 100) if order.total_amount > 0 else 0
+        for order in orders_query:
+            # Calculate order-level metrics
+            order_margin_pct = ((order.gross_margin or 0) / order.total_amount * 100) if order.total_amount > 0 else 0
             
-            writer.writerow([
-                order.id,
-                order.order_date.strftime("%Y-%m-%d %H:%M:%S"),
-                f"{order.total_amount:.2f}",
-                f"{order.total_cost:.2f}" if order.total_cost else "0.00",
-                f"{order.gross_margin:.2f}" if order.gross_margin else "0.00",
-                f"{margin_pct:.1f}%",
-                items_count,
-                f"{avg_item_price:.2f}",
-                order.pos_id or "N/A",
-                "Completed"  # Could be enhanced with actual status field
-            ])
+            # Get order items for this order
+            order_items = db.query(models.OrderItem).join(
+                models.Item, models.OrderItem.item_id == models.Item.id
+            ).filter(
+                models.OrderItem.order_id == order.id
+            ).all()
+            
+            if not order_items:
+                # If no items found, still show the order with empty item fields
+                writer.writerow([
+                    order.id,
+                    order.order_date.strftime("%Y-%m-%d %H:%M:%S"),
+                    f"{order.total_amount:.2f}",
+                    f"{order.total_cost:.2f}" if order.total_cost else "0.00",
+                    f"{order.gross_margin:.2f}" if order.gross_margin else "0.00",
+                    f"{order_margin_pct:.1f}%",
+                    order.pos_id or "N/A",
+                    "No items found", "", "", "", "", "", ""
+                ])
+            else:
+                # Show each item in the order
+                for item in order_items:
+                    item_subtotal = item.quantity * item.unit_price
+                    item_subtotal_cost = (item.quantity * item.unit_cost) if item.unit_cost else 0.0
+                    
+                    writer.writerow([
+                        order.id,
+                        order.order_date.strftime("%Y-%m-%d %H:%M:%S"),
+                        f"{order.total_amount:.2f}",
+                        f"{order.total_cost:.2f}" if order.total_cost else "0.00",
+                        f"{order.gross_margin:.2f}" if order.gross_margin else "0.00",
+                        f"{order_margin_pct:.1f}%",
+                        order.pos_id or "N/A",
+                        item.item.name if item.item else "Unknown Item",
+                        item.item.category if item.item else "Unknown",
+                        item.quantity,
+                        f"{item.unit_price:.2f}",
+                        f"{item_subtotal:.2f}",
+                        f"{item.unit_cost:.2f}" if item.unit_cost else "0.00",
+                        f"{item_subtotal_cost:.2f}"
+                    ])
     
     # Add summary statistics at the end
     if data_type == "all":

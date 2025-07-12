@@ -707,7 +707,7 @@ async def get_square_orders(
                             "sort_order": "DESC"  # Get newest orders first
                         }
                     },
-                    "limit": 100
+                    "limit": 1000
                 },
                 timeout=30  # Increase timeout for potentially larger response
             )
@@ -783,7 +783,7 @@ async def get_square_orders(
                                     "sort_order": "ASC"
                                 }
                             },
-                            "limit": 100,
+                            "limit": 1000,
                             "cursor": cursor
                         }
                         
@@ -1065,7 +1065,7 @@ async def sync_initial_data(user_id: int, db: Session, force_sync: bool = False)
                         "sort_order": "ASC"
                     }
                 },
-                "limit": 100  # Square limits to 100 orders per request
+                "limit": 1000  # Square limits to 100 orders per request
             }
             
             # Get orders from Square with date filter
