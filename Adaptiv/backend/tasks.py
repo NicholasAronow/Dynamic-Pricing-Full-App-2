@@ -1006,3 +1006,768 @@ def get_dynamic_pricing_task_status(task_id: str, user_id: int) -> Dict[str, Any
             "task_status": "ERROR",
             "status_message": "Error checking task status"
         }
+
+
+@celery_app.task(name="adaptiv.tasks.sync_square_data_task", bind=True)
+def sync_square_data_task(self, user_id: int, force_sync: bool = False) -> Dict[str, Any]:
+    """
+    Celery task to sync Square catalog items and orders in the background
+    
+    This prevents RAM issues by running the potentially memory-intensive
+    Square API sync operations in a background worker process.
+    
+    Args:
+        user_id: ID of the user to sync Square data for
+        force_sync: Whether to force a full sync regardless of recent sync status
+        
+    Returns:
+        Dictionary with sync results including items/orders created/updated
+    """
+    import requests
+    from square_integration import SQUARE_API_BASE
+    
+    db = None
+    try:
+        logger.info(f"Starting Square sync task {self.request.id} for user {user_id}")
+        
+        # Create database session
+        db = SessionLocal()
+        
+        # Get Square integration for user
+        integration = db.query(models.POSIntegration).filter(
+            models.POSIntegration.user_id == user_id,
+            models.POSIntegration.provider == "square"
+        ).first()
+        
+        if not integration:
+            return {
+                "success": False,
+                "error": "No Square integration found for user",
+                "task_status": "COMPLETED"
+            }
+        
+        # Update task progress
+        self.update_state(state='PROGRESS', meta={'progress': 10, 'status': 'Getting locations...'})
+        
+        # Get merchant's locations
+        logger.info("Square API: Fetching locations for sync")
+        locations_response = requests.get(
+            f"{SQUARE_API_BASE}/v2/locations",
+            headers={
+                "Authorization": f"Bearer {integration.access_token}",
+                "Content-Type": "application/json"
+            },
+            timeout=30
+        )
+        
+        locations_data = locations_response.json()
+        
+        if locations_response.status_code != 200 or "locations" not in locations_data:
+            return {
+                "success": False,
+                "error": "Failed to get locations",
+                "task_status": "COMPLETED"
+            }
+        
+        if not locations_data.get("locations"):
+            return {
+                "success": False,
+                "error": "No locations found",
+                "task_status": "COMPLETED"
+            }
+        
+        locations = locations_data.get("locations", [])
+        catalog_mapping = {}  # Maps Square catalog IDs to local item IDs
+        
+        # Update progress
+        self.update_state(state='PROGRESS', meta={'progress': 20, 'status': 'Syncing catalog items...'})
+        
+        # Sync catalog items
+        items_created = 0
+        items_updated = 0
+        
+        # Get catalog from Square
+        logger.info("Square API: Fetching catalog items")
+        catalog_response = requests.get(
+            f"{SQUARE_API_BASE}/v2/catalog/list?types=ITEM",
+            headers={
+                "Authorization": f"Bearer {integration.access_token}",
+                "Content-Type": "application/json"
+            },
+            timeout=30
+        )
+        
+        if catalog_response.status_code != 200:
+            return {
+                "success": False,
+                "error": "Failed to get catalog",
+                "task_status": "COMPLETED"
+            }
+            
+        catalog_data = catalog_response.json()
+        items = catalog_data.get("objects", [])
+        
+        logger.info(f"Found {len(items)} items in Square catalog")
+        
+        # Process each catalog item
+        for i, item_obj in enumerate(items):
+            if i % 10 == 0:  # Update progress every 10 items
+                progress = 20 + (i / len(items)) * 30  # 20-50% for catalog sync
+                self.update_state(state='PROGRESS', meta={
+                    'progress': int(progress), 
+                    'status': f'Processing catalog item {i+1}/{len(items)}...'
+                })
+            
+            if item_obj.get("type") != "ITEM":
+                continue
+                
+            square_item_id = item_obj.get("id")
+            item_data = item_obj.get("item_data", {})
+            name = item_data.get("name", "")
+            description = item_data.get("description", "")
+            
+            # Skip items without name
+            if not name:
+                continue
+                
+            # Get price from first variation
+            variations = item_data.get("variations", [])
+            price = None
+            square_variation_id = None
+            
+            if variations:
+                variation = variations[0]
+                square_variation_id = variation.get("id")
+                variation_data = variation.get("item_variation_data", {})
+                price_money = variation_data.get("price_money", {})
+                if price_money:
+                    # Convert cents to dollars
+                    price = price_money.get("amount", 0) / 100.0
+            
+            # Skip items without price
+            if price is None:
+                continue
+                
+            # Check if item already exists by Square ID first
+            existing_item = db.query(models.Item).filter(
+                models.Item.pos_id == square_item_id,
+                models.Item.user_id == user_id
+            ).first()
+            
+            if existing_item:
+                # Update existing item
+                existing_item.name = name
+                existing_item.description = description
+                existing_item.current_price = price
+                existing_item.updated_at = datetime.utcnow()
+                items_updated += 1
+                catalog_mapping[square_item_id] = existing_item.id
+            else:
+                # Create new item
+                new_item = models.Item(
+                    user_id=user_id,
+                    name=name,
+                    description=description,
+                    current_price=price,
+                    pos_id=square_item_id,
+                    category="Square Import",
+                    created_at=datetime.utcnow()
+                )
+                db.add(new_item)
+                db.flush()  # Get the ID
+                items_created += 1
+                catalog_mapping[square_item_id] = new_item.id
+        
+        # Commit catalog changes
+        db.commit()
+        
+        # Update progress
+        self.update_state(state='PROGRESS', meta={'progress': 50, 'status': 'Syncing orders...'})
+        
+        # Sync orders for each location
+        orders_created = 0
+        orders_updated = 0
+        orders_failed = 0
+        
+        for loc_idx, location in enumerate(locations):
+            location_id = location.get("id")
+            if not location_id:
+                continue
+                
+            logger.info(f"Processing orders for location {location_id}")
+            
+            # Update progress
+            loc_progress = 50 + (loc_idx / len(locations)) * 40  # 50-90% for orders
+            self.update_state(state='PROGRESS', meta={
+                'progress': int(loc_progress),
+                'status': f'Processing orders for location {loc_idx+1}/{len(locations)}...'
+            })
+            
+            try:
+                # Get orders for this location with pagination
+                cursor = None
+                page_count = 0
+                max_pages = 50 if force_sync else 10  # Limit pages to prevent memory issues
+                
+                while page_count < max_pages:
+                    page_count += 1
+                    
+                    # Build request payload
+                    request_payload = {
+                        "location_ids": [location_id],
+                        "query": {
+                            "filter": {
+                                "state_filter": {"states": ["COMPLETED", "OPEN"]}
+                            },
+                            "sort": {
+                                "sort_field": "CREATED_AT",
+                                "sort_order": "DESC"
+                            }
+                        },
+                        "limit": 100  # Process in smaller batches
+                    }
+                    
+                    if cursor:
+                        request_payload["cursor"] = cursor
+                    
+                    # Make API request
+                    orders_response = requests.post(
+                        f"{SQUARE_API_BASE}/v2/orders/search",
+                        headers={
+                            "Authorization": f"Bearer {integration.access_token}",
+                            "Content-Type": "application/json"
+                        },
+                        json=request_payload,
+                        timeout=30
+                    )
+                    
+                    if orders_response.status_code != 200:
+                        logger.error(f"Failed to get orders for location {location_id}: {orders_response.text}")
+                        orders_failed += 1
+                        break
+                    
+                    orders_data = orders_response.json()
+                    orders = orders_data.get("orders", [])
+                    
+                    if not orders:
+                        break  # No more orders
+                    
+                    # Process orders in this batch
+                    for order in orders:
+                        try:
+                            square_order_id = order.get("id")
+                            if not square_order_id:
+                                continue
+                            
+                            # Check if order already exists
+                            existing_order = db.query(models.Order).filter(
+                                models.Order.pos_id == square_order_id,
+                                models.Order.user_id == user_id
+                            ).first()
+                            
+                            if existing_order and not force_sync:
+                                continue  # Skip existing orders unless force sync
+                            
+                            # Extract order data
+                            order_date_str = order.get("created_at", "")
+                            order_date = datetime.fromisoformat(order_date_str.replace('Z', '+00:00')) if order_date_str else datetime.utcnow()
+                            
+                            # Calculate total from line items
+                            line_items = order.get("line_items", [])
+                            total_amount = 0
+                            total_cost = 0
+                            
+                            for line_item in line_items:
+                                quantity = int(line_item.get("quantity", "1"))
+                                
+                                # Get price from line item
+                                total_money = line_item.get("total_money", {})
+                                item_total = total_money.get("amount", 0) / 100.0  # Convert cents to dollars
+                                total_amount += item_total
+                                
+                                # Try to get cost from catalog mapping
+                                catalog_object_id = line_item.get("catalog_object_id")
+                                if catalog_object_id and catalog_object_id in catalog_mapping:
+                                    local_item_id = catalog_mapping[catalog_object_id]
+                                    local_item = db.query(models.Item).filter(models.Item.id == local_item_id).first()
+                                    if local_item and local_item.cost:
+                                        total_cost += quantity * local_item.cost
+                            
+                            if existing_order:
+                                # Update existing order
+                                existing_order.order_date = order_date
+                                existing_order.total_amount = total_amount
+                                existing_order.total_cost = total_cost
+                                existing_order.gross_margin = total_amount - total_cost
+                                existing_order.updated_at = datetime.utcnow()
+                                orders_updated += 1
+                                order_id = existing_order.id
+                            else:
+                                # Create new order
+                                new_order = models.Order(
+                                    user_id=user_id,
+                                    pos_id=square_order_id,
+                                    order_date=order_date,
+                                    total_amount=total_amount,
+                                    total_cost=total_cost,
+                                    gross_margin=total_amount - total_cost,
+                                    created_at=datetime.utcnow()
+                                )
+                                db.add(new_order)
+                                db.flush()  # Get the ID
+                                orders_created += 1
+                                order_id = new_order.id
+                            
+                            # Process line items
+                            if not existing_order or force_sync:
+                                # Delete existing order items if updating
+                                if existing_order:
+                                    db.query(models.OrderItem).filter(
+                                        models.OrderItem.order_id == order_id
+                                    ).delete()
+                                
+                                # Add line items
+                                for line_item in line_items:
+                                    catalog_object_id = line_item.get("catalog_object_id")
+                                    if catalog_object_id and catalog_object_id in catalog_mapping:
+                                        local_item_id = catalog_mapping[catalog_object_id]
+                                        quantity = int(line_item.get("quantity", "1"))
+                                        
+                                        # Get unit price
+                                        total_money = line_item.get("total_money", {})
+                                        item_total = total_money.get("amount", 0) / 100.0
+                                        unit_price = item_total / quantity if quantity > 0 else 0
+                                        
+                                        # Get unit cost
+                                        local_item = db.query(models.Item).filter(models.Item.id == local_item_id).first()
+                                        unit_cost = local_item.cost if local_item else None
+                                        
+                                        order_item = models.OrderItem(
+                                            order_id=order_id,
+                                            item_id=local_item_id,
+                                            quantity=quantity,
+                                            unit_price=unit_price,
+                                            unit_cost=unit_cost
+                                        )
+                                        db.add(order_item)
+                        
+                        except Exception as e:
+                            logger.error(f"Error processing order {square_order_id}: {str(e)}")
+                            orders_failed += 1
+                            continue
+                    
+                    # Check for next page
+                    cursor = orders_data.get("cursor")
+                    if not cursor:
+                        break  # No more pages
+                    
+                    # Commit batch to prevent memory buildup
+                    db.commit()
+                    
+            except Exception as e:
+                logger.error(f"Error processing location {location_id}: {str(e)}")
+                orders_failed += 1
+                continue
+        
+        # Final commit
+        db.commit()
+        
+        # Update final progress
+        self.update_state(state='PROGRESS', meta={'progress': 100, 'status': 'Sync completed!'})
+        
+        result = {
+            "success": True,
+            "task_status": "COMPLETED",
+            "items_created": items_created,
+            "items_updated": items_updated,
+            "orders_created": orders_created,
+            "orders_updated": orders_updated,
+            "orders_failed": orders_failed,
+            "locations_processed": len(locations)
+        }
+        
+        logger.info(f"Square sync task completed: {result}")
+        return result
+        
+    except Exception as e:
+        logger.exception(f"Error in Square sync task: {str(e)}")
+        if db:
+            db.rollback()
+        return {
+            "success": False,
+            "error": str(e),
+            "task_status": "ERROR"
+        }
+    finally:
+        if db:
+            db.close()
+
+
+@celery_app.task(name="adaptiv.tasks.get_square_sync_status", bind=True)
+def get_square_sync_status(self, task_id: str, user_id: int) -> Dict[str, Any]:
+    """
+    Check the status of a Square sync task
+    
+    Args:
+        task_id: The Celery task ID to check
+        user_id: ID of the user making the request
+        
+    Returns:
+        Dictionary with task status information
+    """
+    try:
+        # Get task result
+        result = celery_app.AsyncResult(task_id)
+        
+        if result.state == 'PENDING':
+            return {
+                "task_id": task_id,
+                "task_status": "PENDING",
+                "status_message": "Task is waiting to be processed",
+                "progress": 0
+            }
+        elif result.state == 'PROGRESS':
+            return {
+                "task_id": task_id,
+                "task_status": "PROGRESS",
+                "status_message": result.info.get('status', 'Processing...'),
+                "progress": result.info.get('progress', 0)
+            }
+        elif result.state == 'SUCCESS':
+            return {
+                "task_id": task_id,
+                "task_status": "COMPLETED",
+                "status_message": "Square sync completed successfully",
+                "progress": 100,
+                "result": result.result
+            }
+        elif result.state == 'FAILURE':
+            return {
+                "task_id": task_id,
+                "task_status": "ERROR",
+                "status_message": f"Task failed: {str(result.info)}",
+                "progress": 0,
+                "error": str(result.info)
+            }
+        else:
+            return {
+                "task_id": task_id,
+                "task_status": result.state,
+                "status_message": f"Task state: {result.state}",
+                "progress": 0
+            }
+            
+    except Exception as e:
+        logger.exception(f"Error checking Square sync task status: {str(e)}")
+        return {
+            "task_id": task_id,
+            "task_status": "ERROR",
+            "status_message": f"Error checking task status: {str(e)}",
+            "progress": 0,
+            "error": str(e)
+        }
+
+
+@celery_app.task(bind=True)
+def generate_user_csv_task(self, user_id: int, data_type: str):
+    """
+    Background task to generate user CSV export to prevent timeouts
+    """
+    import csv
+    import io
+    import os
+    import tempfile
+    from datetime import datetime
+    from sqlalchemy import func, desc
+    from sqlalchemy.orm import joinedload
+    
+    logger.info(f"Starting CSV generation for user {user_id}, type: {data_type}")
+    
+    try:
+        # Update task state
+        self.update_state(
+            state='PROGRESS',
+            meta={'progress': 10, 'status': 'Initializing CSV generation...'}
+        )
+        
+        # Create database session
+        db = SessionLocal()
+        
+        try:
+            # Get user information
+            user = db.query(models.User).options(joinedload(models.User.business)).filter(
+                models.User.id == user_id
+            ).first()
+            
+            if not user:
+                raise Exception(f"User {user_id} not found")
+            
+            # Create temporary file for CSV
+            temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+            writer = csv.writer(temp_file)
+            
+            # Add user summary header
+            writer.writerow(["USER INFORMATION"])
+            writer.writerow(["User ID", "Email", "Name", "Business", "Subscription", "Status"])
+            writer.writerow([
+                user.id,
+                user.email,
+                user.name,
+                user.business.business_name if user.business else "N/A",
+                user.subscription_tier,
+                "Active" if user.is_active else "Inactive"
+            ])
+            writer.writerow([])  # Empty row for spacing
+            
+            self.update_state(
+                state='PROGRESS',
+                meta={'progress': 20, 'status': 'Processing user data...'}
+            )
+            
+            if data_type == "menu_items" or data_type == "all":
+                logger.info(f"Generating menu items CSV for user {user_id}")
+                
+                # Export menu items with order statistics
+                writer.writerow(["MENU ITEMS"])
+                writer.writerow([
+                    "Item ID", "Name", "Description", "Category", "Current Price ($)", 
+                    "Cost ($)", "Profit Margin ($)", "Profit Margin (%)", "Total Orders", 
+                    "Total Revenue ($)", "Avg Order Value ($)", "Created Date", "Last Updated"
+                ])
+                
+                # Process menu items in batches
+                batch_size = 1000
+                offset = 0
+                
+                while True:
+                    menu_items_batch = db.query(
+                        models.Item,
+                        func.count(models.OrderItem.id).label('total_orders'),
+                        func.sum(models.OrderItem.quantity * models.OrderItem.unit_price).label('total_revenue')
+                    ).outerjoin(
+                        models.OrderItem, models.Item.id == models.OrderItem.item_id
+                    ).filter(
+                        models.Item.user_id == user_id
+                    ).group_by(models.Item.id).offset(offset).limit(batch_size).all()
+                    
+                    if not menu_items_batch:
+                        break
+                    
+                    for item, total_orders, total_revenue in menu_items_batch:
+                        total_orders = total_orders or 0
+                        total_revenue = total_revenue or 0.0
+                        profit_margin = (item.current_price - (item.cost or 0))
+                        profit_margin_pct = ((profit_margin / item.current_price) * 100) if item.current_price > 0 else 0
+                        avg_order_value = (total_revenue / total_orders) if total_orders > 0 else 0
+                        
+                        writer.writerow([
+                            item.id,
+                            item.name,
+                            item.description or "",
+                            item.category,
+                            f"{item.current_price:.2f}",
+                            f"{item.cost:.2f}" if item.cost else "0.00",
+                            f"{profit_margin:.2f}",
+                            f"{profit_margin_pct:.1f}%",
+                            total_orders,
+                            f"{total_revenue:.2f}",
+                            f"{avg_order_value:.2f}",
+                            item.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                            item.updated_at.strftime("%Y-%m-%d %H:%M:%S") if item.updated_at else ""
+                        ])
+                    
+                    offset += batch_size
+                    
+                    # Update progress
+                    progress = min(40, 20 + (offset // batch_size) * 2)
+                    self.update_state(
+                        state='PROGRESS',
+                        meta={'progress': progress, 'status': f'Processed {offset} menu items...'}
+                    )
+                
+                if data_type == "all":
+                    writer.writerow([])  # Empty row for spacing
+            
+            if data_type == "orders" or data_type == "all":
+                logger.info(f"Generating orders CSV for user {user_id}")
+                
+                self.update_state(
+                    state='PROGRESS',
+                    meta={'progress': 50, 'status': 'Processing orders data...'}
+                )
+                
+                # Export orders with detailed information
+                writer.writerow(["ORDERS WITH INDIVIDUAL ITEMS"])
+                writer.writerow([
+                    "Order ID", "Order Date", "Order Total ($)", "Order Cost ($)", 
+                    "Order Margin ($)", "Order Margin %", "POS ID", 
+                    "Item Name", "Item Category", "Item Quantity", "Item Unit Price ($)", 
+                    "Item Subtotal ($)", "Item Unit Cost ($)", "Item Subtotal Cost ($)"
+                ])
+                
+                # Process orders in batches to prevent memory issues
+                batch_size = 500
+                offset = 0
+                total_orders_processed = 0
+                
+                while True:
+                    orders_batch = db.query(models.Order).filter(
+                        models.Order.user_id == user_id
+                    ).order_by(desc(models.Order.order_date)).offset(offset).limit(batch_size).all()
+                    
+                    if not orders_batch:
+                        break
+                    
+                    for order in orders_batch:
+                        # Calculate order-level metrics
+                        order_margin_pct = ((order.gross_margin or 0) / order.total_amount * 100) if order.total_amount > 0 else 0
+                        
+                        # Get order items for this order
+                        order_items = db.query(models.OrderItem).join(
+                            models.Item, models.OrderItem.item_id == models.Item.id
+                        ).filter(
+                            models.OrderItem.order_id == order.id
+                        ).all()
+                        
+                        if not order_items:
+                            # If no items found, still show the order
+                            writer.writerow([
+                                order.id,
+                                order.order_date.strftime("%Y-%m-%d %H:%M:%S"),
+                                f"{order.total_amount:.2f}",
+                                f"{order.total_cost:.2f}" if order.total_cost else "0.00",
+                                f"{order.gross_margin:.2f}" if order.gross_margin else "0.00",
+                                f"{order_margin_pct:.1f}%",
+                                order.pos_id or "N/A",
+                                "No items found", "", "", "", "", "", ""
+                            ])
+                        else:
+                            # Show each item in the order
+                            for item in order_items:
+                                item_subtotal = item.quantity * item.unit_price
+                                item_subtotal_cost = item.quantity * (item.unit_cost or 0)
+                                
+                                writer.writerow([
+                                    order.id,
+                                    order.order_date.strftime("%Y-%m-%d %H:%M:%S"),
+                                    f"{order.total_amount:.2f}",
+                                    f"{order.total_cost:.2f}" if order.total_cost else "0.00",
+                                    f"{order.gross_margin:.2f}" if order.gross_margin else "0.00",
+                                    f"{order_margin_pct:.1f}%",
+                                    order.pos_id or "N/A",
+                                    item.item.name,
+                                    item.item.category,
+                                    item.quantity,
+                                    f"{item.unit_price:.2f}",
+                                    f"{item_subtotal:.2f}",
+                                    f"{item.unit_cost:.2f}" if item.unit_cost else "0.00",
+                                    f"{item_subtotal_cost:.2f}"
+                                ])
+                        
+                        total_orders_processed += 1
+                    
+                    offset += batch_size
+                    
+                    # Update progress
+                    progress = min(90, 50 + (offset // batch_size) * 5)
+                    self.update_state(
+                        state='PROGRESS',
+                        meta={'progress': progress, 'status': f'Processed {total_orders_processed} orders...'}
+                    )
+            
+            # Close the file
+            temp_file.close()
+            
+            self.update_state(
+                state='PROGRESS',
+                meta={'progress': 95, 'status': 'Finalizing CSV file...'}
+            )
+            
+            # Read the file content
+            with open(temp_file.name, 'r', encoding='utf-8') as f:
+                csv_content = f.read()
+            
+            # Clean up temporary file
+            os.unlink(temp_file.name)
+            
+            # Generate filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"user_{user_id}_{data_type}_{timestamp}.csv"
+            
+            logger.info(f"CSV generation completed for user {user_id}")
+            
+            return {
+                "success": True,
+                "filename": filename,
+                "csv_content": csv_content,
+                "total_orders_processed": total_orders_processed if data_type in ["orders", "all"] else 0,
+                "message": f"CSV export completed successfully"
+            }
+            
+        finally:
+            db.close()
+            
+    except Exception as e:
+        logger.exception(f"Error generating CSV for user {user_id}: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "message": f"Failed to generate CSV: {str(e)}"
+        }
+
+
+@celery_app.task
+def get_csv_generation_status(task_id: str):
+    """
+    Get the status of a CSV generation task
+    """
+    try:
+        result = celery_app.AsyncResult(task_id)
+        
+        if result.state == 'PENDING':
+            return {
+                "task_id": task_id,
+                "task_status": "PENDING",
+                "status_message": "CSV generation is waiting to start...",
+                "progress": 0
+            }
+        elif result.state == 'PROGRESS':
+            return {
+                "task_id": task_id,
+                "task_status": "PROGRESS",
+                "status_message": result.info.get('status', 'Processing...'),
+                "progress": result.info.get('progress', 0)
+            }
+        elif result.state == 'SUCCESS':
+            return {
+                "task_id": task_id,
+                "task_status": "COMPLETED",
+                "status_message": "CSV generation completed successfully",
+                "progress": 100,
+                "result": result.result
+            }
+        elif result.state == 'FAILURE':
+            return {
+                "task_id": task_id,
+                "task_status": "ERROR",
+                "status_message": f"CSV generation failed: {str(result.info)}",
+                "progress": 0,
+                "error": str(result.info)
+            }
+        else:
+            return {
+                "task_id": task_id,
+                "task_status": result.state,
+                "status_message": f"Task state: {result.state}",
+                "progress": 0
+            }
+            
+    except Exception as e:
+        logger.exception(f"Error checking CSV generation task status: {str(e)}")
+        return {
+            "task_id": task_id,
+            "task_status": "ERROR",
+            "status_message": f"Error checking task status: {str(e)}",
+            "progress": 0,
+            "error": str(e)
+        }

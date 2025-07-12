@@ -29,7 +29,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from sqlalchemy.orm import Session
 from database import get_db
 import models
-from square_integration import sync_initial_data
+from tasks import sync_square_data_task
 
 
 def get_user_by_id(db: Session, user_id: int) -> Optional[models.User]:
@@ -90,29 +90,52 @@ async def sync_user_orders(user_id: int, force_sync: bool = False):
         if force_sync:
             print("   Force sync enabled - will re-sync all data")
         
-        # Call the sync function
-        result = await sync_initial_data(user_id, db, force_sync=force_sync)
+        # Use background task for sync to prevent RAM issues
+        logger.info(f"Starting background sync task for user {user_id}...")
+        print(f"🚀 Starting Square sync in background for user {user_id}...")
         
-        if result.get("success", False):
-            print("✅ Square sync completed successfully!")
+        # Start the background task
+        task = sync_square_data_task.delay(user_id, force_sync)
+        print(f"📋 Task ID: {task.id}")
+        print(f"⏳ Monitoring progress...")
+        
+        # Poll for completion
+        import time
+        max_wait_time = 600  # 10 minutes
+        start_time = time.time()
+        last_progress = -1
+        
+        while time.time() - start_time < max_wait_time:
+            task_result = task.AsyncResult(task.id)
             
-            # Display sync results
-            if "items_created" in result:
-                print(f"   📦 Items created: {result['items_created']}")
-            if "items_updated" in result:
-                print(f"   🔄 Items updated: {result['items_updated']}")
-            if "orders_synced" in result:
-                print(f"   📋 Orders synced: {result['orders_synced']}")
-            if "total_orders" in result:
-                print(f"   📊 Total orders: {result['total_orders']}")
-            if "message" in result:
-                print(f"   💬 Message: {result['message']}")
-                
-            return True
-        else:
-            error_msg = result.get("error", "Unknown error occurred")
-            print(f"❌ Square sync failed: {error_msg}")
-            return False
+            if task_result.state == 'PENDING':
+                print("⏳ Task is waiting to be processed...")
+            elif task_result.state == 'PROGRESS':
+                progress = task_result.info.get('progress', 0)
+                status = task_result.info.get('status', 'Processing...')
+                if progress != last_progress:
+                    print(f"📊 Progress: {progress}% - {status}")
+                    last_progress = progress
+            elif task_result.state == 'SUCCESS':
+                result = task_result.result
+                print(f"✅ Sync completed successfully!")
+                print(f"   Items created: {result.get('items_created', 0)}")
+                print(f"   Items updated: {result.get('items_updated', 0)}")
+                print(f"   Orders created: {result.get('orders_created', 0)}")
+                print(f"   Orders updated: {result.get('orders_updated', 0)}")
+                if result.get('orders_failed', 0) > 0:
+                    print(f"   Orders failed: {result.get('orders_failed', 0)}")
+                print(f"   Locations processed: {result.get('locations_processed', 0)}")
+                return True
+            elif task_result.state == 'FAILURE':
+                print(f"❌ Sync failed: {str(task_result.info)}")
+                return False
+            
+            time.sleep(5)  # Wait 5 seconds before checking again
+        
+        print(f"⏰ Sync task timed out after {max_wait_time} seconds")
+        print(f"   Task ID {task.id} may still be running in the background")
+        return False
             
     except Exception as e:
         print(f"❌ Error during sync: {str(e)}")

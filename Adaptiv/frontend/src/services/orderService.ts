@@ -150,8 +150,8 @@ export const orderService = {
     };
   },
 
-  // Sync Square orders with pagination support
-  syncSquareOrders: async (): Promise<{success: boolean, message: string, total_orders?: number}> => {
+  // Start Square sync as background task
+  syncSquareOrders: async (force_sync: boolean = false): Promise<{success: boolean, message: string, task_id?: string}> => {
     try {
       const currentUser = authService.getCurrentUser();
       if (!currentUser) {
@@ -159,27 +159,115 @@ export const orderService = {
         return { success: false, message: 'User not authenticated' };
       }
       
-      try {
-        // First try with user_id which seems to be expected in production
-        // Call the backend endpoint that triggers the Square order sync with pagination
-        const response = await api.post('/integrations/square/sync', {
-          user_id: currentUser.id
-        });
-        return orderService.processOrderSyncResponse(response);
-      } catch (userIdError) {
-        console.error(`Error with user_id parameter, trying fallback with account_id:`, userIdError);
-        
-        // Try again with account_id as fallback
-        const response = await api.post('/integrations/square/sync', {
-          account_id: currentUser.id
-        });
-        return orderService.processOrderSyncResponse(response);
+      // Start the background sync task
+      const response = await api.post('/integrations/square/sync', {
+        force_sync: force_sync
+      });
+      
+      if (response.data.success) {
+        return {
+          success: true,
+          message: response.data.message || 'Square sync started in background',
+          task_id: response.data.task_id
+        };
+      } else {
+        return {
+          success: false,
+          message: response.data.error || 'Failed to start sync'
+        };
       }
     } catch (error: any) {
-      console.error('Error syncing Square orders:', error);
+      console.error('Error starting Square sync:', error);
       return { 
         success: false, 
-        message: error.response?.data?.detail || 'Failed to sync orders. Please try again.'
+        message: error.response?.data?.detail || 'Failed to start sync. Please try again.'
+      };
+    }
+  },
+
+  // Check status of Square sync background task
+  getSquareSyncStatus: async (task_id: string): Promise<{success: boolean, status: string, progress?: number, result?: any, error?: string}> => {
+    try {
+      const response = await api.get(`/integrations/square/sync/status/${task_id}`);
+      
+      return {
+        success: true,
+        status: response.data.task_status,
+        progress: response.data.progress,
+        result: response.data.result,
+        error: response.data.error
+      };
+    } catch (error: any) {
+      console.error('Error getting sync status:', error);
+      return {
+        success: false,
+        status: 'ERROR',
+        error: error.response?.data?.detail || 'Failed to get sync status'
+      };
+    }
+  },
+
+  // Poll sync status until completion
+  pollSquareSyncStatus: async (task_id: string, onProgress?: (progress: number, status: string) => void): Promise<{success: boolean, result?: any, error?: string}> => {
+    const maxAttempts = 60; // 5 minutes with 5-second intervals
+    let attempts = 0;
+    
+    while (attempts < maxAttempts) {
+      const statusResponse = await orderService.getSquareSyncStatus(task_id);
+      
+      if (!statusResponse.success) {
+        return { success: false, error: statusResponse.error };
+      }
+      
+      // Update progress if callback provided
+      if (onProgress && statusResponse.progress !== undefined) {
+        onProgress(statusResponse.progress, statusResponse.status);
+      }
+      
+      // Check if task is completed
+      if (statusResponse.status === 'COMPLETED') {
+        return { success: true, result: statusResponse.result };
+      } else if (statusResponse.status === 'ERROR') {
+        return { success: false, error: statusResponse.error || 'Sync task failed' };
+      }
+      
+      // Wait 5 seconds before next check
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      attempts++;
+    }
+    
+    return { success: false, error: 'Sync task timed out' };
+  },
+
+  // Legacy method for backward compatibility - now uses background task
+  syncSquareOrdersLegacy: async (): Promise<{success: boolean, message: string, total_orders?: number}> => {
+    try {
+      // Start sync
+      const syncStart = await orderService.syncSquareOrders(false);
+      if (!syncStart.success || !syncStart.task_id) {
+        return { success: false, message: syncStart.message };
+      }
+      
+      // Poll for completion
+      const result = await orderService.pollSquareSyncStatus(syncStart.task_id);
+      
+      if (result.success && result.result) {
+        return {
+          success: true,
+          message: `Sync completed! Created ${result.result.orders_created} orders, updated ${result.result.orders_updated} orders`,
+          total_orders: (result.result.orders_created || 0) + (result.result.orders_updated || 0)
+        };
+      } else {
+        return {
+          success: false,
+          message: result.error || 'Sync failed'
+        };
+      }
+    } catch (error: any) {
+      console.error('Error in legacy sync:', error);
+      return { 
+        success: false, 
+        message: 'Failed to sync orders. Please try again.'
       };
     }
   }

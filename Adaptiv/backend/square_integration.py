@@ -876,15 +876,48 @@ async def sync_square_data(
     db: Session = Depends(get_db),
     force_sync: bool = False  # Add force_sync parameter
 ):
-    """Sync menu items and orders from Square to local database"""
+    """Start Square sync as background task to prevent RAM issues"""
     try:
-        logger.info(f"Starting Square sync for user {current_user.id}, force_sync={force_sync}")
-        return await sync_initial_data(current_user.id, db, force_sync=force_sync)
+        from tasks import sync_square_data_task
+        
+        logger.info(f"Starting Square sync background task for user {current_user.id}, force_sync={force_sync}")
+        
+        # Start the background task
+        task = sync_square_data_task.delay(current_user.id, force_sync)
+        
+        return {
+            "success": True,
+            "message": "Square sync started in background",
+            "task_id": task.id,
+            "status": "PENDING"
+        }
+        
     except Exception as e:
-        logger.exception(f"Error syncing Square data: {str(e)}")
+        logger.exception(f"Error starting Square sync task: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to sync data: {str(e)}"
+            detail=f"Failed to start sync task: {str(e)}"
+        )
+
+
+@square_router.get("/sync/status/{task_id}")
+async def get_sync_status(
+    task_id: str,
+    current_user: models.User = Depends(get_current_user)
+):
+    """Get the status of a Square sync background task"""
+    try:
+        from tasks import get_square_sync_status
+        
+        # Get task status
+        status_result = get_square_sync_status(task_id, current_user.id)
+        return status_result
+        
+    except Exception as e:
+        logger.exception(f"Error getting sync status: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get sync status: {str(e)}"
         )
 
 async def sync_initial_data(user_id: int, db: Session, force_sync: bool = False):

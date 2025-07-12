@@ -420,175 +420,112 @@ async def get_user_details(
         recent_orders=recent_orders
     )
 
-@admin_router.get("/users/{user_id}/export")
-async def export_user_data(
+@admin_router.post("/users/{user_id}/export")
+async def start_user_data_export(
     user_id: int,
     data_type: str = Query(..., description="Type of data to export: 'menu_items', 'orders', or 'all'"),
     current_admin: models.User = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
-    """Export user data as comprehensive CSV matching UI tables"""
-    user = db.query(models.User).options(joinedload(models.User.business)).filter(
-        models.User.id == user_id
-    ).first()
+    """Start background CSV export task to prevent timeouts"""
+    from tasks import generate_user_csv_task
+    
+    # Validate user exists
+    user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    output = io.StringIO()
-    writer = csv.writer(output)
+    # Validate data_type
+    if data_type not in ["menu_items", "orders", "all"]:
+        raise HTTPException(status_code=400, detail="Invalid data_type. Must be 'menu_items', 'orders', or 'all'")
     
-    # Add user summary header for all exports
-    writer.writerow(["USER INFORMATION"])
-    writer.writerow(["User ID", "Email", "Name", "Business", "Subscription", "Status"])
-    writer.writerow([
-        user.id,
-        user.email,
-        user.name,
-        user.business.business_name if user.business else "N/A",
-        user.subscription_tier,
-        "Active" if user.is_active else "Inactive"
-    ])
-    writer.writerow([])  # Empty row for spacing
+    try:
+        # Start the background CSV generation task
+        task = generate_user_csv_task.delay(user_id, data_type)
+        
+        return {
+            "success": True,
+            "task_id": task.id,
+            "message": f"CSV export started for user {user_id}. Use the task_id to check progress.",
+            "status": "PENDING"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start CSV export: {str(e)}")
+
+
+@admin_router.get("/users/{user_id}/export/status/{task_id}")
+async def get_csv_export_status(
+    user_id: int,
+    task_id: str,
+    current_admin: models.User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Check the status of a CSV export task"""
+    from tasks import get_csv_generation_status
     
-    if data_type == "menu_items" or data_type == "all":
-        # Export menu items with order statistics
-        writer.writerow(["MENU ITEMS"])
-        writer.writerow([
-            "Item ID", "Name", "Description", "Category", "Current Price ($)", 
-            "Cost ($)", "Profit Margin ($)", "Profit Margin (%)", "Total Orders", 
-            "Total Revenue ($)", "Avg Order Value ($)", "Created Date", "Last Updated"
-        ])
-        
-        # Get menu items with order statistics
-        menu_items_query = db.query(
-            models.Item,
-            func.count(models.OrderItem.id).label('total_orders'),
-            func.sum(models.OrderItem.quantity * models.OrderItem.unit_price).label('total_revenue')
-        ).outerjoin(
-            models.OrderItem, models.Item.id == models.OrderItem.item_id
-        ).filter(
-            models.Item.user_id == user_id
-        ).group_by(models.Item.id).all()
-        
-        for item, total_orders, total_revenue in menu_items_query:
-            total_orders = total_orders or 0
-            total_revenue = total_revenue or 0.0
-            profit_margin = (item.current_price - (item.cost or 0))
-            profit_margin_pct = ((profit_margin / item.current_price) * 100) if item.current_price > 0 else 0
-            avg_order_value = (total_revenue / total_orders) if total_orders > 0 else 0
-            
-            writer.writerow([
-                item.id,
-                item.name,
-                item.description or "",
-                item.category,
-                f"{item.current_price:.2f}",
-                f"{item.cost:.2f}" if item.cost else "0.00",
-                f"{profit_margin:.2f}",
-                f"{profit_margin_pct:.1f}%",
-                total_orders,
-                f"{total_revenue:.2f}",
-                f"{avg_order_value:.2f}",
-                item.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                item.updated_at.strftime("%Y-%m-%d %H:%M:%S") if item.updated_at else ""
-            ])
-        
-        if data_type == "all":
-            writer.writerow([])  # Empty row for spacing
+    # Validate user exists
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
     
-    if data_type == "orders" or data_type == "all":
-        # Export orders with detailed information including individual items
-        writer.writerow(["ORDERS WITH INDIVIDUAL ITEMS"])
-        writer.writerow([
-            "Order ID", "Order Date", "Order Total ($)", "Order Cost ($)", 
-            "Order Margin ($)", "Order Margin %", "POS ID", 
-            "Item Name", "Item Category", "Item Quantity", "Item Unit Price ($)", 
-            "Item Subtotal ($)", "Item Unit Cost ($)", "Item Subtotal Cost ($)"
-        ])
+    try:
+        # Get task status
+        status_result = get_csv_generation_status(task_id)
+        return status_result
         
-        # Get orders with their items
-        orders_query = db.query(models.Order).filter(
-            models.Order.user_id == user_id
-        ).order_by(desc(models.Order.order_date)).all()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get task status: {str(e)}")
+
+
+@admin_router.get("/users/{user_id}/export/download/{task_id}")
+async def download_csv_export(
+    user_id: int,
+    task_id: str,
+    current_admin: models.User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Download the completed CSV export"""
+    from tasks import get_csv_generation_status
+    
+    # Validate user exists
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    try:
+        # Get task status and result
+        status_result = get_csv_generation_status(task_id)
         
-        for order in orders_query:
-            # Calculate order-level metrics
-            order_margin_pct = ((order.gross_margin or 0) / order.total_amount * 100) if order.total_amount > 0 else 0
-            
-            # Get order items for this order
-            order_items = db.query(models.OrderItem).join(
-                models.Item, models.OrderItem.item_id == models.Item.id
-            ).filter(
-                models.OrderItem.order_id == order.id
-            ).all()
-            
-            if not order_items:
-                # If no items found, still show the order with empty item fields
-                writer.writerow([
-                    order.id,
-                    order.order_date.strftime("%Y-%m-%d %H:%M:%S"),
-                    f"{order.total_amount:.2f}",
-                    f"{order.total_cost:.2f}" if order.total_cost else "0.00",
-                    f"{order.gross_margin:.2f}" if order.gross_margin else "0.00",
-                    f"{order_margin_pct:.1f}%",
-                    order.pos_id or "N/A",
-                    "No items found", "", "", "", "", "", ""
-                ])
-            else:
-                # Show each item in the order
-                for item in order_items:
-                    item_subtotal = item.quantity * item.unit_price
-                    item_subtotal_cost = (item.quantity * item.unit_cost) if item.unit_cost else 0.0
-                    
-                    writer.writerow([
-                        order.id,
-                        order.order_date.strftime("%Y-%m-%d %H:%M:%S"),
-                        f"{order.total_amount:.2f}",
-                        f"{order.total_cost:.2f}" if order.total_cost else "0.00",
-                        f"{order.gross_margin:.2f}" if order.gross_margin else "0.00",
-                        f"{order_margin_pct:.1f}%",
-                        order.pos_id or "N/A",
-                        item.item.name if item.item else "Unknown Item",
-                        item.item.category if item.item else "Unknown",
-                        item.quantity,
-                        f"{item.unit_price:.2f}",
-                        f"{item_subtotal:.2f}",
-                        f"{item.unit_cost:.2f}" if item.unit_cost else "0.00",
-                        f"{item_subtotal_cost:.2f}"
-                    ])
-    
-    # Add summary statistics at the end
-    if data_type == "all":
-        writer.writerow([])  # Empty row for spacing
-        writer.writerow(["SUMMARY STATISTICS"])
+        if status_result["task_status"] != "COMPLETED":
+            raise HTTPException(
+                status_code=400, 
+                detail=f"CSV export is not ready. Current status: {status_result['task_status']}"
+            )
         
-        # Calculate summary stats
-        total_orders = db.query(models.Order).filter(models.Order.user_id == user_id).count()
-        total_revenue = db.query(func.sum(models.Order.total_amount)).filter(
-            models.Order.user_id == user_id
-        ).scalar() or 0.0
-        total_items = db.query(models.Item).filter(models.Item.user_id == user_id).count()
-        avg_order_value = (total_revenue / total_orders) if total_orders > 0 else 0.0
+        if not status_result.get("result", {}).get("success"):
+            raise HTTPException(
+                status_code=500,
+                detail=f"CSV export failed: {status_result.get('result', {}).get('error', 'Unknown error')}"
+            )
         
-        writer.writerow(["Metric", "Value"])
-        writer.writerow(["Total Menu Items", total_items])
-        writer.writerow(["Total Orders", total_orders])
-        writer.writerow(["Total Revenue", f"${total_revenue:.2f}"])
-        writer.writerow(["Average Order Value", f"${avg_order_value:.2f}"])
-        writer.writerow(["Export Date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
-    
-    output.seek(0)
-    
-    # Create more descriptive filename
-    user_name = user.name.replace(" ", "_") if user.name else f"user_{user_id}"
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f"{user_name}_{data_type}_export_{timestamp}.csv"
-    
-    return StreamingResponse(
-        io.BytesIO(output.getvalue().encode('utf-8')),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
-    )
+        # Get CSV content and filename from task result
+        result = status_result["result"]
+        csv_content = result["csv_content"]
+        filename = result["filename"]
+        
+        # Return CSV as downloadable file
+        return StreamingResponse(
+            io.BytesIO(csv_content.encode('utf-8')),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to download CSV: {str(e)}")
+
 
 @admin_router.get("/system-health", response_model=SystemHealth)
 async def get_system_health(

@@ -83,18 +83,55 @@ const PriceRecommendations: React.FC = () => {
     (netRevenueImpact / (totalRevenue - netRevenueImpact)) * 100 : 0;
 
   // Fetch recommendations from the API
-  // Function to handle re-syncing Square orders
+  // Function to handle re-syncing Square orders with background task
   const handleSyncOrders = async () => {
     setSyncingOrders(true);
+    
     try {
-      const result = await orderService.syncSquareOrders();
-      if (result.success) {
-        message.success(`${result.message}${result.total_orders ? ` (${result.total_orders} orders)` : ''}`);
+      // Start the background sync task
+      const syncStart = await orderService.syncSquareOrders(false);
+      
+      if (!syncStart.success || !syncStart.task_id) {
+        message.error(syncStart.message);
+        setSyncingOrders(false);
+        return;
+      }
+      
+      // Show initial success message
+      message.info('Square sync started in background. This may take a few minutes...');
+      
+      // Poll for completion with progress updates
+      const result = await orderService.pollSquareSyncStatus(
+        syncStart.task_id,
+        (progress: number, status: string) => {
+          // Update progress in the UI if needed
+          console.log(`Sync progress: ${progress}% - ${status}`);
+        }
+      );
+      
+      if (result.success && result.result) {
+        const { items_created, items_updated, orders_created, orders_updated, orders_failed } = result.result;
+        const totalItems = (items_created || 0) + (items_updated || 0);
+        const totalOrders = (orders_created || 0) + (orders_updated || 0);
+        
+        let successMessage = 'Square sync completed!';
+        if (totalItems > 0) {
+          successMessage += ` Items: ${items_created || 0} created, ${items_updated || 0} updated.`;
+        }
+        if (totalOrders > 0) {
+          successMessage += ` Orders: ${orders_created || 0} created, ${orders_updated || 0} updated.`;
+        }
+        if (orders_failed && orders_failed > 0) {
+          successMessage += ` (${orders_failed} orders failed)`;
+        }
+        
+        message.success(successMessage);
+        
         // Reload recommendations to reflect any newly synced orders
-        const recommendations = await pricingService.getPriceRecommendations(timeFrame);
-        setRecommendations(recommendations);
+        const updatedRecommendations = await pricingService.getPriceRecommendations(timeFrame);
+        setRecommendations(updatedRecommendations);
       } else {
-        message.error(result.message);
+        message.error(result.error || 'Sync failed');
       }
     } catch (error) {
       console.error('Error syncing orders:', error);
