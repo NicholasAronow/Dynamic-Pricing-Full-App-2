@@ -19,6 +19,7 @@ class User(Base):
     stripe_customer_id = Column(String, nullable=True)  # For Stripe subscription integration
     subscription_tier = Column(String, nullable=True, default="free")  # free, basic, premium
     is_google_user = Column(Boolean, default=False)  # Flag to identify users who sign in with Google
+    is_admin = Column(Boolean, default=False)  # Flag to identify admin users
     
     # Relationship to BusinessProfile
     business = relationship("BusinessProfile", back_populates="owner", uselist=False)

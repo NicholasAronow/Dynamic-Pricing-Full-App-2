@@ -311,6 +311,44 @@ const MainLayout: React.FC = () => {
                     border: 'none'
                   }
                 },
+                // Admin Dashboard - only show for admin users
+                ...(user?.is_admin ? [{
+                  key: '/admin',
+                  icon: (
+                    <div style={{
+                      width: '20px',
+                      height: '20px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      <SettingOutlined style={{ 
+                        fontSize: '16px', 
+                        color: location.pathname === '/admin' ? '#667eea' : '#6b7280'
+                      }} />
+                    </div>
+                  ),
+                  label: (
+                    <Link 
+                      to="/admin" 
+                      style={{ 
+                        color: location.pathname === '/admin' ? '#1f2937' : '#6b7280',
+                        fontWeight: location.pathname === '/admin' ? 500 : 400,
+                        textDecoration: 'none'
+                      }}
+                    >
+                      Admin Dashboard
+                    </Link>
+                  ),
+                  style: {
+                    height: '44px',
+                    margin: '2px 9px',
+                    borderRadius: '0px',
+                    padding: '0 12px',
+                    background: location.pathname === '/admin' ? '#f0f4ff' : 'transparent',
+                    border: 'none'
+                  }
+                }] : []),
                 {
                   key: '/profile',
                   icon: (

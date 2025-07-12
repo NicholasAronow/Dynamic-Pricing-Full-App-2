@@ -17,6 +17,7 @@ import Competitors from './components/competitor/Competitors';
 import ProductDetail from './components/products/ProductDetail';
 import DynamicPricingAgents from './components/agents/DynamicPricingAgents';
 import Costs from './components/costs/Costs';
+import AdminDashboard from './components/AdminDashboard';
 
 // Subscription components
 import PricingPlans from './components/subscriptions/PricingPlans';
@@ -93,6 +94,7 @@ function App() {
               <Route path="competitor/:competitorId" element={<CompetitorDetail />} />
               <Route path="product/:productId" element={<ProductDetail />} />
               <Route path="agents" element={<DynamicPricingAgents />} />
+              <Route path="admin" element={<AdminDashboard />} />
               
               {/* Subscription Management Routes */}
               <Route path="subscription-plans" element={<PricingPlans />} />
