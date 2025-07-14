@@ -1534,7 +1534,73 @@ def generate_user_csv_task(self, user_id: int, data_type: str):
                 meta={'progress': 60, 'status': 'Processing orders...'}
             )
             
-            if data_type == "orders" or data_type == "all":
+            if data_type == "order_items":
+                # Dedicated OrderItem export with all fields
+                writer.writerow(["ORDER ITEMS - COMPLETE DATA"])
+                writer.writerow([
+                    "Order Item ID", "Order ID", "Order Date", "Order Total", "POS ID",
+                    "Item ID", "Item Name", "Item Category", "Item Description",
+                    "Quantity", "Unit Price", "Unit Cost", "Subtotal Cost",
+                    "Line Total (Qty × Price)", "Line Profit (Qty × (Price - Cost))",
+                    "Order Created At", "Item Created At"
+                ])
+                
+                # Get all order items with complete related data
+                order_items = db.query(
+                    models.OrderItem.id.label('order_item_id'),
+                    models.OrderItem.order_id,
+                    models.OrderItem.item_id,
+                    models.OrderItem.quantity,
+                    models.OrderItem.unit_price,
+                    models.OrderItem.unit_cost,
+                    models.OrderItem.subtotal_cost,
+                    models.Order.order_date,
+                    models.Order.total_amount,
+                    models.Order.pos_id,
+                    models.Order.created_at.label('order_created_at'),
+                    models.Item.name.label('item_name'),
+                    models.Item.category,
+                    models.Item.description,
+                    models.Item.created_at.label('item_created_at')
+                ).join(
+                    models.Order, models.OrderItem.order_id == models.Order.id
+                ).outerjoin(
+                    models.Item, models.OrderItem.item_id == models.Item.id
+                ).filter(
+                    models.Order.user_id == user_id
+                ).order_by(
+                    models.Order.order_date.desc(),
+                    models.OrderItem.id
+                ).all()
+                
+                for item in order_items:
+                    quantity = item.quantity or 0
+                    unit_price = item.unit_price or 0
+                    unit_cost = item.unit_cost or 0
+                    line_total = quantity * unit_price
+                    line_profit = quantity * (unit_price - unit_cost)
+                    
+                    writer.writerow([
+                        item.order_item_id,
+                        item.order_id,
+                        item.order_date.strftime("%Y-%m-%d %H:%M:%S") if item.order_date else "",
+                        item.total_amount or 0,
+                        item.pos_id or "",
+                        item.item_id or "",
+                        item.item_name or "Unknown Item",
+                        item.category or "",
+                        item.description or "",
+                        quantity,
+                        unit_price,
+                        unit_cost,
+                        item.subtotal_cost or 0,
+                        line_total,
+                        line_profit,
+                        item.order_created_at.strftime("%Y-%m-%d %H:%M:%S") if item.order_created_at else "",
+                        item.item_created_at.strftime("%Y-%m-%d %H:%M:%S") if item.item_created_at else ""
+                    ])
+            
+            elif data_type == "orders" or data_type == "all":
                 # Enhanced orders export with itemized details
                 writer.writerow(["ORDERS SUMMARY"])
                 writer.writerow([

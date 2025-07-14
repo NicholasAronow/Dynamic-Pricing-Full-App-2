@@ -183,7 +183,8 @@ const AdminDashboard: React.FC = () => {
   const exportUserData = async (userId: number, dataType: string) => {
     try {
       const dataTypeLabel = dataType === 'menu_items' ? 'Menu Items' : 
-                           dataType === 'orders' ? 'Orders' : 'All Data';
+                           dataType === 'orders' ? 'Orders' :
+                           dataType === 'order_items' ? 'Order Items (Detailed)' : 'All Data';
       
       // Start the background export task
       message.loading(`Starting ${dataTypeLabel} export...`, 0.5);
@@ -214,7 +215,8 @@ const AdminDashboard: React.FC = () => {
               
               // Extract filename from response headers
               const contentDisposition = downloadResponse.headers['content-disposition'];
-              let filename = `user_${userId}_${dataType}_${new Date().toISOString().split('T')[0]}.csv`;
+              const typeForFilename = dataType === 'order_items' ? 'order_items' : dataType;
+              let filename = `user_${userId}_${typeForFilename}_${new Date().toISOString().split('T')[0]}.csv`;
               
               if (contentDisposition) {
                 const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
@@ -621,6 +623,14 @@ const AdminDashboard: React.FC = () => {
                 onClick={() => selectedUser && exportUserData(selectedUser.id, 'orders')}
               >
                 Orders CSV
+              </Button>
+            </Tooltip>
+            <Tooltip title="Export detailed order items with all fields from OrderItem table">
+              <Button 
+                icon={<DownloadOutlined />} 
+                onClick={() => selectedUser && exportUserData(selectedUser.id, 'order_items')}
+              >
+                Order Items CSV
               </Button>
             </Tooltip>
             <Tooltip title="Export comprehensive report with all user data and summary statistics">
