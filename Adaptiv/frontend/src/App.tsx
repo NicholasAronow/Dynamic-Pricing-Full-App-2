@@ -97,6 +97,7 @@ function App() {
               {/* Subscription Management Routes */}
               <Route path="subscription-plans" element={<PricingPlans />} />
               <Route path="subscription-management" element={<SubscriptionManagement />} />
+              <Route path="admin" element={<AdminDashboard />} />
               
               {/* Support Route */}
               <Route path="support" element={<Support />} />
