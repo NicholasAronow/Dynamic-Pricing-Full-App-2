@@ -518,6 +518,11 @@ async def download_csv_export(
         print(f"Attempting to download CSV: {filename}")
         print(f"File path: {file_path}")
         print(f"File exists: {os.path.exists(file_path) if file_path else 'No file path'}")
+        print(f"Task result keys: {list(result.keys())}")
+        print(f"Has csv_content: {'csv_content' in result}")
+        if 'csv_content' in result:
+            content_len = len(result['csv_content']) if result['csv_content'] else 0
+            print(f"CSV content length: {content_len} chars")
         
         # Check if file exists
         if not file_path or not os.path.exists(file_path):

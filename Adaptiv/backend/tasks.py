@@ -1601,16 +1601,16 @@ def generate_user_csv_task(self, user_id: int, data_type: str):
                 meta={'progress': 90, 'status': 'Finalizing file...'}
             )
             
-            # Try to save file to disk, but also keep content as fallback
+            # Generate filename
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"user_{user_id}_{data_type}_simple_{timestamp}.csv"
             
-            # Read CSV content as fallback (for smaller files)
+            # Read CSV content as fallback (now that file is closed)
             csv_content = None
             file_path = None
             
             try:
-                # Try to read content for fallback (limit to reasonable size)
+                # Read content for fallback (limit to reasonable size)
                 with open(temp_file.name, 'r', encoding='utf-8') as f:
                     content = f.read()
                     # Only store content if it's not too large (< 1MB)
@@ -1619,6 +1619,9 @@ def generate_user_csv_task(self, user_id: int, data_type: str):
                         logger.info(f"CSV content stored as fallback ({len(content)} chars)")
                     else:
                         logger.info(f"CSV too large for content fallback ({len(content)} chars)")
+                        # For large files, still try to store first 50KB as preview
+                        csv_content = content[:50000] + "\n\n[FILE TRUNCATED - Download may be incomplete]"
+                        logger.info(f"Storing truncated CSV content as fallback")
             except Exception as e:
                 logger.warning(f"Could not read CSV content for fallback: {str(e)}")
             
@@ -1627,12 +1630,19 @@ def generate_user_csv_task(self, user_id: int, data_type: str):
                 exports_dir = "/tmp/csv_exports"
                 os.makedirs(exports_dir, exist_ok=True)
                 final_path = os.path.join(exports_dir, filename)
-                os.rename(temp_file.name, final_path)
+                
+                # Copy file instead of rename to keep original as backup
+                import shutil
+                shutil.copy2(temp_file.name, final_path)
                 file_path = final_path
                 logger.info(f"CSV saved to disk: {final_path}")
+                
+                # Clean up temp file after successful copy
+                os.unlink(temp_file.name)
+                
             except Exception as e:
                 logger.error(f"Failed to save CSV to disk: {str(e)}")
-                # Clean up temp file if we couldn't move it
+                # Clean up temp file
                 try:
                     os.unlink(temp_file.name)
                 except:
