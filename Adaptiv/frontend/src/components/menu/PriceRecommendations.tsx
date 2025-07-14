@@ -167,8 +167,10 @@ const PriceRecommendations: React.FC = () => {
         
         // Fetch all net margins in a single batch request (calculates labor/rent costs only once!)
         if (batchRequests.length > 0) {
+          console.log('🚀 Making BATCH net margin request for', batchRequests.length, 'recipes');
           try {
             const batchMargins = await recipeService.getBatchRecipeNetMargins(batchRequests);
+            console.log('✅ Batch net margins received:', Object.keys(batchMargins).length, 'results');
             
             // Convert from recipe_id-keyed to recipe_name-keyed for component compatibility
             const margins: {[key: string]: any} = {};
@@ -180,11 +182,12 @@ const PriceRecommendations: React.FC = () => {
             
             setNetMargins(margins);
           } catch (err) {
-            console.error('Error fetching batch net margins:', err);
+            console.error('❌ Error fetching batch net margins:', err);
             // Fallback to empty margins if batch fails
             setNetMargins({});
           }
         } else {
+          console.log('⚠️ No batch requests to make (no recipes with prices)');
           setNetMargins({});
         }
       } catch (error) {
