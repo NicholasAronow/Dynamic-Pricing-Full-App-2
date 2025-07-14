@@ -296,6 +296,29 @@ export const getRecipeNetMargin = async (recipeId: string, sellingPrice: number)
   }
 };
 
+// Batch fetch net margin data for multiple recipes (more efficient)
+export const getBatchRecipeNetMargins = async (requests: Array<{recipe_id: string, selling_price: number}>): Promise<{[key: string]: any}> => {
+  try {
+    const payload = requests.map(req => ({
+      recipe_id: parseInt(req.recipe_id),
+      selling_price: req.selling_price
+    }));
+    
+    const response = await api.post('/api/recipes/batch-net-margin', payload);
+    
+    // Convert the response array to a map keyed by recipe_id for easy lookup
+    const marginsMap: {[key: string]: any} = {};
+    response.data.forEach((item: any) => {
+      marginsMap[item.recipe_id.toString()] = item.margin_data;
+    });
+    
+    return marginsMap;
+  } catch (error: any) {
+    console.error('Error fetching batch net margins:', error.response?.data || error.message);
+    throw error;
+  }
+};
+
 // Batch fetch recipes by item IDs for efficiency
 export const getRecipesByItemIds = async (itemIds: string[]): Promise<Map<string, RecipeItem>> => {
   try {
@@ -357,6 +380,7 @@ const recipeService = {
   generateSuggestionsFromMenu,
   pollTaskUntilComplete,
   getRecipeNetMargin,
+  getBatchRecipeNetMargins,
   getRecipesByItemIds
 };
 

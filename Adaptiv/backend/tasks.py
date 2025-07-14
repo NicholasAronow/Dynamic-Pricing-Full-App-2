@@ -1707,7 +1707,7 @@ def generate_user_csv_task(self, user_id: int, data_type: str):
                     else:
                         logger.info(f"CSV too large for content fallback ({len(content)} chars)")
                         # For large files, still try to store first 50KB as preview
-                        # csv_content = content[:50000] + "\n\n[FILE TRUNCATED - Download may be incomplete]"
+                        csv_content = content[:100000] + "\n\n[FILE TRUNCATED - Download may be incomplete]"
                         logger.info(f"Storing truncated CSV content as fallback")
             except Exception as e:
                 logger.warning(f"Could not read CSV content for fallback: {str(e)}")

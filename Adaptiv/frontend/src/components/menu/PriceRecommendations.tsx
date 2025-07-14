@@ -149,24 +149,44 @@ const PriceRecommendations: React.FC = () => {
         const recipesData = await recipeService.getRecipes();
         setRecipes(recipesData);
         
-        // After recipes are loaded, fetch net margins for each recipe
-        const margins: {[key: string]: any} = {};
+        // Prepare batch requests for net margins - much more efficient!
+        const batchRequests: Array<{recipe_id: string, selling_price: number}> = [];
+        const recipeNameToId: {[key: string]: string} = {};
+        
         for (const recipe of recipesData) {
-          try {
-            // Find corresponding recommendation item to get the selling price
-            const recommendationItem = recommendations.find(r => r.name === recipe.item_name);
-            if (recommendationItem && recommendationItem.currentPrice) {
-              const netMarginData = await recipeService.getRecipeNetMargin(
-                recipe.item_id, 
-                recommendationItem.currentPrice
-              );
-              margins[recipe.item_name] = netMarginData;
-            }
-          } catch (err) {
-            console.error(`Error fetching net margin for ${recipe.item_name}:`, err);
+          // Find corresponding recommendation item to get the selling price
+          const recommendationItem = recommendations.find(r => r.name === recipe.item_name);
+          if (recommendationItem && recommendationItem.currentPrice) {
+            batchRequests.push({
+              recipe_id: recipe.item_id,
+              selling_price: recommendationItem.currentPrice
+            });
+            recipeNameToId[recipe.item_name] = recipe.item_id;
           }
         }
-        setNetMargins(margins);
+        
+        // Fetch all net margins in a single batch request (calculates labor/rent costs only once!)
+        if (batchRequests.length > 0) {
+          try {
+            const batchMargins = await recipeService.getBatchRecipeNetMargins(batchRequests);
+            
+            // Convert from recipe_id-keyed to recipe_name-keyed for component compatibility
+            const margins: {[key: string]: any} = {};
+            Object.entries(recipeNameToId).forEach(([recipeName, recipeId]) => {
+              if (batchMargins[recipeId]) {
+                margins[recipeName] = batchMargins[recipeId];
+              }
+            });
+            
+            setNetMargins(margins);
+          } catch (err) {
+            console.error('Error fetching batch net margins:', err);
+            // Fallback to empty margins if batch fails
+            setNetMargins({});
+          }
+        } else {
+          setNetMargins({});
+        }
       } catch (error) {
         console.error('Error fetching recipes:', error);
       } finally {
