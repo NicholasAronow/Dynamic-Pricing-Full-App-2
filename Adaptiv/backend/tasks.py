@@ -1535,8 +1535,8 @@ def generate_user_csv_task(self, user_id: int, data_type: str):
             )
             
             if data_type == "orders" or data_type == "all":
-                # Simple orders export
-                writer.writerow(["ORDERS"])
+                # Enhanced orders export with itemized details
+                writer.writerow(["ORDERS SUMMARY"])
                 writer.writerow([
                     "Order ID", "Order Date", "Total Amount", "Total Cost", 
                     "Gross Margin", "POS ID", "Created At"
@@ -1558,40 +1558,61 @@ def generate_user_csv_task(self, user_id: int, data_type: str):
                         order.created_at.strftime("%Y-%m-%d %H:%M:%S") if order.created_at else ""
                     ])
                 
-                # Add order items section
+                # Add comprehensive itemized order details
                 writer.writerow([])  # Empty row
-                writer.writerow(["ORDER ITEMS"])
+                writer.writerow(["ITEMIZED ORDER DETAILS"])
                 writer.writerow([
-                    "Order Item ID", "Order ID", "Item ID", "Item Name", 
-                    "Quantity", "Unit Price", "Unit Cost"
+                    "Order ID", "Order Date", "Order Total", "POS ID",
+                    "Item ID", "Item Name", "Item Category", 
+                    "Quantity", "Unit Price", "Unit Cost", "Line Total", "Line Profit",
+                    "Order Item ID"
                 ])
                 
-                # Get all order items with item names
+                # Get comprehensive order items data with order details
                 order_items = db.query(
-                    models.OrderItem.id,
-                    models.OrderItem.order_id,
+                    models.Order.id.label('order_id'),
+                    models.Order.order_date,
+                    models.Order.total_amount,
+                    models.Order.pos_id,
+                    models.OrderItem.id.label('order_item_id'),
                     models.OrderItem.item_id,
-                    models.Item.name,
+                    models.Item.name.label('item_name'),
+                    models.Item.category,
                     models.OrderItem.quantity,
                     models.OrderItem.unit_price,
                     models.OrderItem.unit_cost
                 ).join(
-                    models.Order, models.OrderItem.order_id == models.Order.id
+                    models.OrderItem, models.Order.id == models.OrderItem.order_id
                 ).outerjoin(
                     models.Item, models.OrderItem.item_id == models.Item.id
                 ).filter(
                     models.Order.user_id == user_id
+                ).order_by(
+                    models.Order.order_date.desc(),
+                    models.OrderItem.id
                 ).all()
                 
                 for item in order_items:
+                    quantity = item.quantity or 0
+                    unit_price = item.unit_price or 0
+                    unit_cost = item.unit_cost or 0
+                    line_total = quantity * unit_price
+                    line_profit = quantity * (unit_price - unit_cost)
+                    
                     writer.writerow([
-                        item.id,
                         item.order_id,
+                        item.order_date.strftime("%Y-%m-%d %H:%M:%S") if item.order_date else "",
+                        item.total_amount or 0,
+                        item.pos_id or "",
                         item.item_id or "",
-                        item.name or "Unknown Item",
-                        item.quantity or 0,
-                        item.unit_price or 0,
-                        item.unit_cost or 0
+                        item.item_name or "Unknown Item",
+                        item.category or "",
+                        quantity,
+                        unit_price,
+                        unit_cost,
+                        line_total,
+                        line_profit,
+                        item.order_item_id
                     ])
             
             temp_file.close()
