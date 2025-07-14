@@ -1628,9 +1628,9 @@ def generate_user_csv_task(self, user_id: int, data_type: str):
                 writer.writerow([])  # Empty row
                 writer.writerow(["ITEMIZED ORDER DETAILS"])
                 writer.writerow([
-                    "Order ID", "Order Date", "Order Total", "POS ID",
-                    "Item ID", "Item Name", "Item Category", 
-                    "Quantity", "Unit Price", "Unit Cost", "Line Total", "Line Profit",
+                    "Order ID", "Order Date",
+                    "Item ID", "Item Name",
+                    "Quantity", "Unit Price",
                     "Order Item ID"
                 ])
                 
@@ -1638,12 +1638,9 @@ def generate_user_csv_task(self, user_id: int, data_type: str):
                 order_items = db.query(
                     models.Order.id.label('order_id'),
                     models.Order.order_date,
-                    models.Order.total_amount,
-                    models.Order.pos_id,
                     models.OrderItem.id.label('order_item_id'),
                     models.OrderItem.item_id,
                     models.Item.name.label('item_name'),
-                    models.Item.category,
                     models.OrderItem.quantity,
                     models.OrderItem.unit_price,
                     models.OrderItem.unit_cost
@@ -1662,22 +1659,15 @@ def generate_user_csv_task(self, user_id: int, data_type: str):
                     quantity = item.quantity or 0
                     unit_price = item.unit_price or 0
                     unit_cost = item.unit_cost or 0
-                    line_total = quantity * unit_price
-                    line_profit = quantity * (unit_price - unit_cost)
                     
                     writer.writerow([
                         item.order_id,
                         item.order_date.strftime("%Y-%m-%d %H:%M:%S") if item.order_date else "",
-                        item.total_amount or 0,
-                        item.pos_id or "",
                         item.item_id or "",
                         item.item_name or "Unknown Item",
-                        item.category or "",
                         quantity,
                         unit_price,
                         unit_cost,
-                        line_total,
-                        line_profit,
                         item.order_item_id
                     ])
             
