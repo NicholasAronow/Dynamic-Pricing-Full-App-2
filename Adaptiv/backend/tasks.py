@@ -1601,23 +1601,27 @@ def generate_user_csv_task(self, user_id: int, data_type: str):
                 meta={'progress': 90, 'status': 'Finalizing file...'}
             )
             
-            # Read file content
-            with open(temp_file.name, 'r', encoding='utf-8') as f:
-                csv_content = f.read()
+            # Don't read the full CSV content into memory - Redis can't handle large files
+            # Instead, we'll store the file path temporarily and serve it directly
             
-            # Clean up
-            os.unlink(temp_file.name)
-            
-            # Generate filename
+            # Move temp file to a more permanent location
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"user_{user_id}_{data_type}_simple_{timestamp}.csv"
             
-            logger.info(f"Simple CSV export completed for user {user_id}")
+            # Create exports directory if it doesn't exist
+            exports_dir = "/tmp/csv_exports"
+            os.makedirs(exports_dir, exist_ok=True)
+            
+            # Move file to exports directory
+            final_path = os.path.join(exports_dir, filename)
+            os.rename(temp_file.name, final_path)
+            
+            logger.info(f"Simple CSV export completed for user {user_id}, saved to {final_path}")
             
             return {
                 "success": True,
                 "filename": filename,
-                "csv_content": csv_content,
+                "file_path": final_path,
                 "message": "CSV export completed successfully"
             }
             
@@ -1687,4 +1691,50 @@ def get_csv_generation_status(task_id: str):
             "status_message": f"Error checking task status: {str(e)}",
             "progress": 0,
             "error": str(e)
+        }
+
+
+@celery_app.task
+def cleanup_old_csv_files():
+    """
+    Clean up CSV files older than 24 hours to prevent disk space issues
+    """
+    import os
+    import time
+    from datetime import datetime, timedelta
+    
+    try:
+        exports_dir = "/tmp/csv_exports"
+        if not os.path.exists(exports_dir):
+            return {"message": "No exports directory found"}
+        
+        # Remove files older than 24 hours
+        cutoff_time = time.time() - (24 * 60 * 60)  # 24 hours ago
+        removed_count = 0
+        
+        for filename in os.listdir(exports_dir):
+            file_path = os.path.join(exports_dir, filename)
+            if os.path.isfile(file_path):
+                file_mtime = os.path.getmtime(file_path)
+                if file_mtime < cutoff_time:
+                    try:
+                        os.remove(file_path)
+                        removed_count += 1
+                        logger.info(f"Removed old CSV file: {filename}")
+                    except Exception as e:
+                        logger.error(f"Failed to remove CSV file {filename}: {str(e)}")
+        
+        logger.info(f"CSV cleanup completed. Removed {removed_count} old files.")
+        return {
+            "success": True,
+            "removed_count": removed_count,
+            "message": f"Cleaned up {removed_count} old CSV files"
+        }
+        
+    except Exception as e:
+        logger.exception(f"Error during CSV cleanup: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "message": f"CSV cleanup failed: {str(e)}"
         }

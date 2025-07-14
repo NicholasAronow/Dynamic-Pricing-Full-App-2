@@ -6,7 +6,7 @@ import sys
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, desc, text, and_, or_
 from pydantic import BaseModel
@@ -509,15 +509,20 @@ async def download_csv_export(
                 detail=f"CSV export failed: {status_result.get('result', {}).get('error', 'Unknown error')}"
             )
         
-        # Get CSV content and filename from task result
+        # Get file path and filename from task result
         result = status_result["result"]
-        csv_content = result["csv_content"]
+        file_path = result["file_path"]
         filename = result["filename"]
         
-        # Return CSV as downloadable file
-        return StreamingResponse(
-            io.BytesIO(csv_content.encode('utf-8')),
+        # Check if file exists
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="CSV file not found")
+        
+        # Return CSV file as download
+        return FileResponse(
+            path=file_path,
             media_type="text/csv",
+            filename=filename,
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
         
