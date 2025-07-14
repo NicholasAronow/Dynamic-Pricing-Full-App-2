@@ -436,8 +436,8 @@ async def start_user_data_export(
         raise HTTPException(status_code=404, detail="User not found")
     
     # Validate data_type
-    if data_type not in ["menu_items", "orders", "all"]:
-        raise HTTPException(status_code=400, detail="Invalid data_type. Must be 'menu_items', 'orders', or 'all'")
+    if data_type not in ["menu_items", "orders", "order_items", "all"]:
+        raise HTTPException(status_code=400, detail="Invalid data_type. Must be 'menu_items', 'orders', 'order_items', or 'all'")
     
     try:
         # Start the background CSV generation task

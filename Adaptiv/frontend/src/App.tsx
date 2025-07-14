@@ -93,9 +93,7 @@ function App() {
               <Route path="competitors" element={<Competitors />} />
               <Route path="competitor/:competitorId" element={<CompetitorDetail />} />
               <Route path="product/:productId" element={<ProductDetail />} />
-              <Route path="agents" element={<DynamicPricingAgents />} />
-              <Route path="admin" element={<AdminDashboard />} />
-              
+              <Route path="agents" element={<DynamicPricingAgents />} />              
               {/* Subscription Management Routes */}
               <Route path="subscription-plans" element={<PricingPlans />} />
               <Route path="subscription-management" element={<SubscriptionManagement />} />
