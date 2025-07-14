@@ -109,7 +109,7 @@ class DataCollectionAgent(BaseAgent):
                 elasticity_data = self._calculate_price_elasticity(db, item_id)
                 
                 # Find sales correlations
-                correlation_data = self._find_sales_correlations(db, item_id)
+                # correlation_data = self._find_sales_correlations(db, item_id)
                 
                 # Analyze seasonality 
                 seasonality_data = self._analyze_seasonality(db, item_id)
