@@ -511,14 +511,34 @@ async def download_csv_export(
         
         # Get file path and filename from task result
         result = status_result["result"]
-        file_path = result["file_path"]
+        file_path = result.get("file_path")
         filename = result["filename"]
         
+        # Log for debugging
+        print(f"Attempting to download CSV: {filename}")
+        print(f"File path: {file_path}")
+        print(f"File exists: {os.path.exists(file_path) if file_path else 'No file path'}")
+        
         # Check if file exists
-        if not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="CSV file not found")
+        if not file_path or not os.path.exists(file_path):
+            # If file doesn't exist, check if we have csv_content as fallback
+            csv_content = result.get("csv_content")
+            if csv_content:
+                print("File not found, serving CSV content directly")
+                return StreamingResponse(
+                    io.BytesIO(csv_content.encode('utf-8')),
+                    media_type="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename={filename}"}
+                )
+            else:
+                print(f"CSV file not found and no content available. File path: {file_path}")
+                raise HTTPException(
+                    status_code=404, 
+                    detail=f"CSV file not found at {file_path}. The file may have been cleaned up or failed to generate."
+                )
         
         # Return CSV file as download
+        print(f"Serving file from disk: {file_path}")
         return FileResponse(
             path=file_path,
             media_type="text/csv",

@@ -1601,29 +1601,60 @@ def generate_user_csv_task(self, user_id: int, data_type: str):
                 meta={'progress': 90, 'status': 'Finalizing file...'}
             )
             
-            # Don't read the full CSV content into memory - Redis can't handle large files
-            # Instead, we'll store the file path temporarily and serve it directly
-            
-            # Move temp file to a more permanent location
+            # Try to save file to disk, but also keep content as fallback
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"user_{user_id}_{data_type}_simple_{timestamp}.csv"
             
-            # Create exports directory if it doesn't exist
-            exports_dir = "/tmp/csv_exports"
-            os.makedirs(exports_dir, exist_ok=True)
+            # Read CSV content as fallback (for smaller files)
+            csv_content = None
+            file_path = None
             
-            # Move file to exports directory
-            final_path = os.path.join(exports_dir, filename)
-            os.rename(temp_file.name, final_path)
+            try:
+                # Try to read content for fallback (limit to reasonable size)
+                with open(temp_file.name, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    # Only store content if it's not too large (< 1MB)
+                    if len(content.encode('utf-8')) < 1024 * 1024:  # 1MB limit
+                        csv_content = content
+                        logger.info(f"CSV content stored as fallback ({len(content)} chars)")
+                    else:
+                        logger.info(f"CSV too large for content fallback ({len(content)} chars)")
+            except Exception as e:
+                logger.warning(f"Could not read CSV content for fallback: {str(e)}")
             
-            logger.info(f"Simple CSV export completed for user {user_id}, saved to {final_path}")
+            # Try to save to permanent location
+            try:
+                exports_dir = "/tmp/csv_exports"
+                os.makedirs(exports_dir, exist_ok=True)
+                final_path = os.path.join(exports_dir, filename)
+                os.rename(temp_file.name, final_path)
+                file_path = final_path
+                logger.info(f"CSV saved to disk: {final_path}")
+            except Exception as e:
+                logger.error(f"Failed to save CSV to disk: {str(e)}")
+                # Clean up temp file if we couldn't move it
+                try:
+                    os.unlink(temp_file.name)
+                except:
+                    pass
             
-            return {
+            logger.info(f"Simple CSV export completed for user {user_id}")
+            
+            result = {
                 "success": True,
                 "filename": filename,
-                "file_path": final_path,
                 "message": "CSV export completed successfully"
             }
+            
+            # Add file_path if we successfully saved to disk
+            if file_path:
+                result["file_path"] = file_path
+            
+            # Add csv_content if we have it as fallback
+            if csv_content:
+                result["csv_content"] = csv_content
+            
+            return result
             
         finally:
             db.close()
