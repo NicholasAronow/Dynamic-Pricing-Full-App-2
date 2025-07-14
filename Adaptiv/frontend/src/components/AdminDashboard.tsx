@@ -488,7 +488,7 @@ const AdminDashboard: React.FC = () => {
               value={stats?.total_revenue || 0}
               prefix={<DollarOutlined />}
               precision={2}
-              formatter={(value) => `$${value}`}
+              formatter={(value) => `$${typeof value === 'number' ? value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : value}`}
             />
           </Card>
         </Col>
@@ -499,7 +499,7 @@ const AdminDashboard: React.FC = () => {
               value={stats?.avg_order_value || 0}
               prefix={<BarChartOutlined />}
               precision={2}
-              formatter={(value) => `$${value}`}
+              formatter={(value) => `$${typeof value === 'number' ? value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : value}`}
             />
           </Card>
         </Col>
@@ -519,7 +519,7 @@ const AdminDashboard: React.FC = () => {
               value={stats?.revenue_today || 0}
               prefix={<DollarOutlined style={{ color: '#52c41a' }} />}
               precision={2}
-              formatter={(value) => `$${value}`}
+              formatter={(value) => `$${typeof value === 'number' ? value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : value}`}
             />
           </Card>
         </Col>
@@ -551,7 +551,7 @@ const AdminDashboard: React.FC = () => {
               value={stats?.revenue_last_30_days || 0}
               prefix={<DollarOutlined />}
               precision={2}
-              formatter={(value) => `$${value}`}
+              formatter={(value) => `$${typeof value === 'number' ? value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : value}`}
             />
           </Card>
         </Col>
