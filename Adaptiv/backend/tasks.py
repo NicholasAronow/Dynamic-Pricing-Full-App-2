@@ -1471,244 +1471,161 @@ def get_square_sync_status(self, task_id: str, user_id: int) -> Dict[str, Any]:
 @celery_app.task(bind=True)
 def generate_user_csv_task(self, user_id: int, data_type: str):
     """
-    Background task to generate user CSV export to prevent timeouts
+    Simple and efficient CSV export - just raw database data without complex processing
     """
     import csv
-    import io
-    import os
     import tempfile
+    import os
     from datetime import datetime
-    from sqlalchemy import func, desc
-    from sqlalchemy.orm import joinedload
     
-    logger.info(f"Starting CSV generation for user {user_id}, type: {data_type}")
+    logger.info(f"Starting simple CSV export for user {user_id}, type: {data_type}")
     
     try:
-        # Update task state
         self.update_state(
             state='PROGRESS',
-            meta={'progress': 10, 'status': 'Initializing CSV generation...'}
+            meta={'progress': 10, 'status': 'Starting export...'}
         )
         
-        # Create database session
         db = SessionLocal()
         
         try:
-            # Get user information
-            user = db.query(models.User).options(joinedload(models.User.business)).filter(
-                models.User.id == user_id
-            ).first()
-            
+            # Verify user exists
+            user = db.query(models.User).filter(models.User.id == user_id).first()
             if not user:
                 raise Exception(f"User {user_id} not found")
             
-            # Create temporary file for CSV
+            # Create temporary CSV file
             temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
             writer = csv.writer(temp_file)
             
-            # Add user summary header
-            writer.writerow(["USER INFORMATION"])
-            writer.writerow(["User ID", "Email", "Name", "Business", "Subscription", "Status"])
-            writer.writerow([
-                user.id,
-                user.email,
-                user.name,
-                user.business.business_name if user.business else "N/A",
-                user.subscription_tier,
-                "Active" if user.is_active else "Inactive"
-            ])
-            writer.writerow([])  # Empty row for spacing
-            
             self.update_state(
                 state='PROGRESS',
-                meta={'progress': 20, 'status': 'Processing user data...'}
+                meta={'progress': 20, 'status': 'Exporting data...'}
             )
             
             if data_type == "menu_items" or data_type == "all":
-                logger.info(f"Generating menu items CSV for user {user_id}")
-                
-                # Export menu items with order statistics
+                # Simple menu items export - just the raw data
                 writer.writerow(["MENU ITEMS"])
                 writer.writerow([
-                    "Item ID", "Name", "Description", "Category", "Current Price ($)", 
-                    "Cost ($)", "Profit Margin ($)", "Profit Margin (%)", "Total Orders", 
-                    "Total Revenue ($)", "Avg Order Value ($)", "Created Date", "Last Updated"
+                    "ID", "Name", "Description", "Category", "Current Price", 
+                    "Cost", "Created At", "Updated At"
                 ])
                 
-                # Process menu items in batches
-                batch_size = 1000
-                offset = 0
+                # Get all menu items in one simple query
+                items = db.query(models.Item).filter(models.Item.user_id == user_id).all()
                 
-                while True:
-                    menu_items_batch = db.query(
-                        models.Item,
-                        func.count(models.OrderItem.id).label('total_orders'),
-                        func.sum(models.OrderItem.quantity * models.OrderItem.unit_price).label('total_revenue')
-                    ).outerjoin(
-                        models.OrderItem, models.Item.id == models.OrderItem.item_id
-                    ).filter(
-                        models.Item.user_id == user_id
-                    ).group_by(models.Item.id).offset(offset).limit(batch_size).all()
-                    
-                    if not menu_items_batch:
-                        break
-                    
-                    for item, total_orders, total_revenue in menu_items_batch:
-                        total_orders = total_orders or 0
-                        total_revenue = total_revenue or 0.0
-                        profit_margin = (item.current_price - (item.cost or 0))
-                        profit_margin_pct = ((profit_margin / item.current_price) * 100) if item.current_price > 0 else 0
-                        avg_order_value = (total_revenue / total_orders) if total_orders > 0 else 0
-                        
-                        writer.writerow([
-                            item.id,
-                            item.name,
-                            item.description or "",
-                            item.category,
-                            f"{item.current_price:.2f}",
-                            f"{item.cost:.2f}" if item.cost else "0.00",
-                            f"{profit_margin:.2f}",
-                            f"{profit_margin_pct:.1f}%",
-                            total_orders,
-                            f"{total_revenue:.2f}",
-                            f"{avg_order_value:.2f}",
-                            item.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                            item.updated_at.strftime("%Y-%m-%d %H:%M:%S") if item.updated_at else ""
-                        ])
-                    
-                    offset += batch_size
-                    
-                    # Update progress
-                    progress = min(40, 20 + (offset // batch_size) * 2)
-                    self.update_state(
-                        state='PROGRESS',
-                        meta={'progress': progress, 'status': f'Processed {offset} menu items...'}
-                    )
+                for item in items:
+                    writer.writerow([
+                        item.id,
+                        item.name or "",
+                        item.description or "",
+                        item.category or "",
+                        item.current_price or 0,
+                        item.cost or 0,
+                        item.created_at.strftime("%Y-%m-%d %H:%M:%S") if item.created_at else "",
+                        item.updated_at.strftime("%Y-%m-%d %H:%M:%S") if item.updated_at else ""
+                    ])
                 
                 if data_type == "all":
-                    writer.writerow([])  # Empty row for spacing
+                    writer.writerow([])  # Empty row
+            
+            self.update_state(
+                state='PROGRESS',
+                meta={'progress': 60, 'status': 'Processing orders...'}
+            )
             
             if data_type == "orders" or data_type == "all":
-                logger.info(f"Generating orders CSV for user {user_id}")
-                
-                self.update_state(
-                    state='PROGRESS',
-                    meta={'progress': 50, 'status': 'Processing orders data...'}
-                )
-                
-                # Export orders with detailed information
-                writer.writerow(["ORDERS WITH INDIVIDUAL ITEMS"])
+                # Simple orders export
+                writer.writerow(["ORDERS"])
                 writer.writerow([
-                    "Order ID", "Order Date", "Order Total ($)", "Order Cost ($)", 
-                    "Order Margin ($)", "Order Margin %", "POS ID", 
-                    "Item Name", "Item Category", "Item Quantity", "Item Unit Price ($)", 
-                    "Item Subtotal ($)", "Item Unit Cost ($)", "Item Subtotal Cost ($)"
+                    "Order ID", "Order Date", "Total Amount", "Total Cost", 
+                    "Gross Margin", "POS ID", "Created At"
                 ])
                 
-                # Process orders in batches to prevent memory issues
-                batch_size = 500
-                offset = 0
-                total_orders_processed = 0
+                # Get all orders in one simple query
+                orders = db.query(models.Order).filter(
+                    models.Order.user_id == user_id
+                ).order_by(models.Order.order_date.desc()).all()
                 
-                while True:
-                    orders_batch = db.query(models.Order).filter(
-                        models.Order.user_id == user_id
-                    ).order_by(desc(models.Order.order_date)).offset(offset).limit(batch_size).all()
-                    
-                    if not orders_batch:
-                        break
-                    
-                    for order in orders_batch:
-                        # Calculate order-level metrics
-                        order_margin_pct = ((order.gross_margin or 0) / order.total_amount * 100) if order.total_amount > 0 else 0
-                        
-                        # Get order items for this order
-                        order_items = db.query(models.OrderItem).join(
-                            models.Item, models.OrderItem.item_id == models.Item.id
-                        ).filter(
-                            models.OrderItem.order_id == order.id
-                        ).all()
-                        
-                        if not order_items:
-                            # If no items found, still show the order
-                            writer.writerow([
-                                order.id,
-                                order.order_date.strftime("%Y-%m-%d %H:%M:%S"),
-                                f"{order.total_amount:.2f}",
-                                f"{order.total_cost:.2f}" if order.total_cost else "0.00",
-                                f"{order.gross_margin:.2f}" if order.gross_margin else "0.00",
-                                f"{order_margin_pct:.1f}%",
-                                order.pos_id or "N/A",
-                                "No items found", "", "", "", "", "", ""
-                            ])
-                        else:
-                            # Show each item in the order
-                            for item in order_items:
-                                item_subtotal = item.quantity * item.unit_price
-                                item_subtotal_cost = item.quantity * (item.unit_cost or 0)
-                                
-                                writer.writerow([
-                                    order.id,
-                                    order.order_date.strftime("%Y-%m-%d %H:%M:%S"),
-                                    f"{order.total_amount:.2f}",
-                                    f"{order.total_cost:.2f}" if order.total_cost else "0.00",
-                                    f"{order.gross_margin:.2f}" if order.gross_margin else "0.00",
-                                    f"{order_margin_pct:.1f}%",
-                                    order.pos_id or "N/A",
-                                    item.item.name,
-                                    item.item.category,
-                                    item.quantity,
-                                    f"{item.unit_price:.2f}",
-                                    f"{item_subtotal:.2f}",
-                                    f"{item.unit_cost:.2f}" if item.unit_cost else "0.00",
-                                    f"{item_subtotal_cost:.2f}"
-                                ])
-                        
-                        total_orders_processed += 1
-                    
-                    offset += batch_size
-                    
-                    # Update progress
-                    progress = min(90, 50 + (offset // batch_size) * 5)
-                    self.update_state(
-                        state='PROGRESS',
-                        meta={'progress': progress, 'status': f'Processed {total_orders_processed} orders...'}
-                    )
+                for order in orders:
+                    writer.writerow([
+                        order.id,
+                        order.order_date.strftime("%Y-%m-%d %H:%M:%S") if order.order_date else "",
+                        order.total_amount or 0,
+                        order.total_cost or 0,
+                        order.gross_margin or 0,
+                        order.pos_id or "",
+                        order.created_at.strftime("%Y-%m-%d %H:%M:%S") if order.created_at else ""
+                    ])
+                
+                # Add order items section
+                writer.writerow([])  # Empty row
+                writer.writerow(["ORDER ITEMS"])
+                writer.writerow([
+                    "Order Item ID", "Order ID", "Item ID", "Item Name", 
+                    "Quantity", "Unit Price", "Unit Cost"
+                ])
+                
+                # Get all order items with item names
+                order_items = db.query(
+                    models.OrderItem.id,
+                    models.OrderItem.order_id,
+                    models.OrderItem.item_id,
+                    models.Item.name,
+                    models.OrderItem.quantity,
+                    models.OrderItem.unit_price,
+                    models.OrderItem.unit_cost
+                ).join(
+                    models.Order, models.OrderItem.order_id == models.Order.id
+                ).outerjoin(
+                    models.Item, models.OrderItem.item_id == models.Item.id
+                ).filter(
+                    models.Order.user_id == user_id
+                ).all()
+                
+                for item in order_items:
+                    writer.writerow([
+                        item.id,
+                        item.order_id,
+                        item.item_id or "",
+                        item.name or "Unknown Item",
+                        item.quantity or 0,
+                        item.unit_price or 0,
+                        item.unit_cost or 0
+                    ])
             
-            # Close the file
             temp_file.close()
             
             self.update_state(
                 state='PROGRESS',
-                meta={'progress': 95, 'status': 'Finalizing CSV file...'}
+                meta={'progress': 90, 'status': 'Finalizing file...'}
             )
             
-            # Read the file content
+            # Read file content
             with open(temp_file.name, 'r', encoding='utf-8') as f:
                 csv_content = f.read()
             
-            # Clean up temporary file
+            # Clean up
             os.unlink(temp_file.name)
             
             # Generate filename
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"user_{user_id}_{data_type}_{timestamp}.csv"
+            filename = f"user_{user_id}_{data_type}_simple_{timestamp}.csv"
             
-            logger.info(f"CSV generation completed for user {user_id}")
+            logger.info(f"Simple CSV export completed for user {user_id}")
             
             return {
                 "success": True,
                 "filename": filename,
                 "csv_content": csv_content,
-                "total_orders_processed": total_orders_processed if data_type in ["orders", "all"] else 0,
-                "message": f"CSV export completed successfully"
+                "message": "CSV export completed successfully"
             }
             
         finally:
             db.close()
             
     except Exception as e:
-        logger.exception(f"Error generating CSV for user {user_id}: {str(e)}")
+        logger.exception(f"Error in simple CSV export for user {user_id}: {str(e)}")
         return {
             "success": False,
             "error": str(e),
