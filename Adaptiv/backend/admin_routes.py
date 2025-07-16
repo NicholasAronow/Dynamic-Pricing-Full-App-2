@@ -15,7 +15,7 @@ import io
 
 # Ensure we can import from parent directory
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from database import get_db
+from database import get_db, Base
 from auth import get_current_admin_user
 import models
 import schemas
@@ -571,7 +571,7 @@ async def get_system_health(
         database_status = f"error: {str(e)}"
     
     # Count tables (simplified)
-    total_tables = len(models.Base.metadata.tables)
+    total_tables = len(Base.metadata.tables)
     
     # Performance metrics (simplified)
     performance_metrics = {

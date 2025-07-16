@@ -219,7 +219,7 @@ class DataCollectionAgent(BaseAgent):
         items = db.query(models.Item).filter(models.Item.user_id == user_id).all()
         
         # Import Recipe models
-        from recipe_models import Recipe, RecipeIngredient
+        from models import Recipe, RecipeIngredient
         
         # Get recipes for cost calculation (keyed by recipe name which matches item name)
         recipes = db.query(Recipe).filter(Recipe.user_id == user_id).all()

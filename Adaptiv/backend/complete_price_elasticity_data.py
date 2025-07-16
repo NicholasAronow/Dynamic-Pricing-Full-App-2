@@ -12,7 +12,8 @@ import random
 import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, desc, asc
-from models import Base, Item, PriceHistory, User, Order, OrderItem
+from models import Item, PriceHistory, User, Order, OrderItem
+from database import Base
 from database import get_db
 import logging
 from dateutil.relativedelta import relativedelta

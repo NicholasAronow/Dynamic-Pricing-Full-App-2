@@ -9,7 +9,8 @@ from sqlalchemy.exc import OperationalError
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database import engine
-from models import Base, User
+from models import User
+from database import Base
 
 def add_columns():
     # Check if columns exist and add them if they don't

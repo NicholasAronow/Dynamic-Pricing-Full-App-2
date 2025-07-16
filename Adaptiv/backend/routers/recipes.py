@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from database import get_db
 from models import User
-from recipe_models import Recipe, Ingredient, RecipeIngredient
+from models import Recipe, Ingredient, RecipeIngredient
 from auth import get_current_user
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -233,7 +233,7 @@ def create_recipe(
     # If no item_id is provided, try to find a matching menu item by name
     if not recipe.item_id:
         # Import here to avoid circular imports
-        from models import MenuItem
+        from models import Item as MenuItem
         
         # Search for menu items with matching name
         matching_item = db.query(MenuItem).filter(

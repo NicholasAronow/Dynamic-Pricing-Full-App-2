@@ -207,7 +207,7 @@ def import_square_orders(user_id: int, db: Session, catalog_mapping: Dict[str, i
     Returns:
         Number of orders imported
     """
-    from recipe_models import Recipe
+    from models import Recipe
     from sqlalchemy.orm import joinedload
     orders_created = 0
     
@@ -381,7 +381,7 @@ def import_square_orders(user_id: int, db: Session, catalog_mapping: Dict[str, i
                     gross_margin = ((total_amount - total_cost) / total_amount) * 100
                     
                     # For net margin, calculate using fixed costs from the Recipe model
-                    from recipe_models import Recipe
+                    from models import Recipe
                     
                     # Calculate total fixed costs for this order (fixed cost per item * quantity)
                     total_fixed_cost = fixed_cost_per_item * total_items

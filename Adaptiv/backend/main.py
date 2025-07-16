@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List
 
-from database import get_db, engine
+from database import get_db, engine, Base
 import models, schemas
 from auth import auth_router
 from login_endpoint import login_router
@@ -38,7 +38,7 @@ from subscriptions import router as subscriptions_router
 from routers.premium_analytics import router as premium_analytics_router
 
 # Create database tables
-models.Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Adaptiv API")
 
