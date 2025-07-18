@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 from pydantic import BaseModel
 import models
 from database import get_db
-from auth import get_current_user
+from .auth import get_current_user
 
 class BusinessProfileResponse(BaseModel):
     business_name: Optional[str] = None

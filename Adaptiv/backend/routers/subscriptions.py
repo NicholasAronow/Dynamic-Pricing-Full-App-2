@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from database import get_db
 import models
-from auth import get_current_user
+from .auth import get_current_user
 
 # Initialize Stripe with API key from environment variable
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")

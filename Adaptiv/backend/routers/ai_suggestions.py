@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from database import get_db
-from auth import get_current_user
+from .auth import get_current_user
 from models import User
 import os
 from openai import OpenAI

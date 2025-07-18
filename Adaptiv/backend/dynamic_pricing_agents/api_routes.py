@@ -15,7 +15,7 @@ from knock_integration import knock_client
 from tasks import run_dynamic_pricing_analysis_task, get_dynamic_pricing_task_status
 
 from database import get_db
-from auth import get_current_user
+from routers.auth import get_current_user
 import models
 from .orchestrator import DynamicPricingOrchestrator
 from .task_manager import running_tasks  # Import from shared module

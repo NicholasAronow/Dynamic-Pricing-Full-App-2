@@ -9,7 +9,7 @@ import json
 
 from database import get_db
 import models, schemas
-from auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
+from routers.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 
 # Create router
 google_auth_router = APIRouter()

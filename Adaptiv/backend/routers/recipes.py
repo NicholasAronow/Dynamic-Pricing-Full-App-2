@@ -4,7 +4,7 @@ from typing import List, Optional
 from database import get_db
 from models import User
 from models import Recipe, Ingredient, RecipeIngredient
-from auth import get_current_user
+from .auth import get_current_user
 from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import List

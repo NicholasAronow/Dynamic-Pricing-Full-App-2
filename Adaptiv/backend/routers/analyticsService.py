@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 import models
 from database import get_db
-from auth import get_current_user
+from .auth import get_current_user
 
 analytics_router = APIRouter()
 

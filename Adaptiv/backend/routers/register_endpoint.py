@@ -8,7 +8,7 @@ from typing import Dict
 from datetime import timedelta
 from database import get_db
 import models
-from auth import get_user, get_password_hash, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
+from .auth import get_user, get_password_hash, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 
 register_router = APIRouter()
 

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import random
 
 from middleware import require_subscription, SUBSCRIPTION_PREMIUM
-from auth import get_current_user
+from .auth import get_current_user
 from models import User
 
 router = APIRouter(

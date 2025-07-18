@@ -16,7 +16,7 @@ import io
 # Ensure we can import from parent directory
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from database import get_db, Base
-from auth import get_current_admin_user
+from .auth import get_current_admin_user
 import models
 import schemas
 

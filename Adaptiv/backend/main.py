@@ -11,30 +11,30 @@ from typing import List
 
 from database import get_db, engine, Base
 import models, schemas
-from auth import auth_router
-from login_endpoint import login_router
-from register_endpoint import register_router
+from routers.auth import auth_router
+from routers.login_endpoint import login_router
+from routers.register_endpoint import register_router
 from authentication.google_auth import google_auth_router
 from middleware import setup_cors_middleware
-from profile import profile_router
-from items import items_router
-from price_history import price_history_router
-from competitor_items import competitor_items_router
-from orders import orders_router
-from dashboard import dashboard_router
-from item_analytics import item_analytics_router
-from cogs import cogs_router
-from action_items import action_items_router
-from square_integration import square_router
-from pricing_recommendations import pricing_recommendations_router
+from routers.profile import profile_router
+from routers.items import items_router
+from routers.price_history import price_history_router
+from routers.competitor_items import competitor_items_router
+from routers.orders import orders_router
+from routers.dashboard import dashboard_router
+from routers.item_analytics import item_analytics_router
+from routers.cogs import cogs_router
+from routers.action_items import action_items_router
+from routers.square_integration import square_router
+from routers.pricing_recommendations import pricing_recommendations_router
 from dynamic_pricing_agents.api_routes import router as dynamic_pricing_router
-from gemini_competitor_search import gemini_competitor_router
-from competitor_settings import competitor_settings_router
-from admin_routes import admin_router
+from routers.gemini_competitor_search import gemini_competitor_router
+from routers.competitor_settings import competitor_settings_router
+from routers.admin_routes import admin_router
 from routers.recipes import router as recipes_router
 from routers.ai_suggestions import router as ai_suggestions_router
 from routers.other_costs import other_costs_router
-from subscriptions import router as subscriptions_router
+from routers.subscriptions import router as subscriptions_router
 from routers.premium_analytics import router as premium_analytics_router
 
 # Create database tables

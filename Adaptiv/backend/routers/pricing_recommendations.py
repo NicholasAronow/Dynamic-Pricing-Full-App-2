@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from database import get_db
 from models import PricingRecommendation, Item, User
-from auth import get_current_user
+from .auth import get_current_user
 
 pricing_recommendations_router = APIRouter()
 

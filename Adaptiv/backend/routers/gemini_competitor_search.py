@@ -4,7 +4,7 @@ from sqlalchemy import desc
 from typing import List, Dict, Any
 from database import get_db
 import models, schemas
-from auth import get_current_user
+from .auth import get_current_user
 import os
 import json
 from datetime import datetime, timedelta

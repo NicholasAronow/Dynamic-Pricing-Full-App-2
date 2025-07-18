@@ -7,7 +7,7 @@ from sqlalchemy import func, text
 from datetime import datetime, timedelta
 import traceback
 import logging
-from auth import get_current_user
+from .auth import get_current_user
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

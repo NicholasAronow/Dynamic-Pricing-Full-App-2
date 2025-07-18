@@ -5,7 +5,7 @@ from datetime import datetime
 
 import models, schemas
 from database import get_db
-from auth import get_current_user
+from .auth import get_current_user
 
 action_items_router = APIRouter()
 

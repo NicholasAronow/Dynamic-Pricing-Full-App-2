@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import sqlalchemy as sa
 from database import get_db
 import models, schemas
-from auth import get_current_user
+from .auth import get_current_user
 
 cogs_router = APIRouter()
 

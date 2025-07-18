@@ -3,7 +3,7 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 from database import get_db
 from models import User
-from auth import get_current_user
+from routers.auth import get_current_user
 
 # Define typed dependencies for better Pydantic compatibility
 SessionDep = Annotated[Session, Depends(get_db)]

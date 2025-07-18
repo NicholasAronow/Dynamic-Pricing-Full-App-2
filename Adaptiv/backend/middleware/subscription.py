@@ -2,7 +2,7 @@ from fastapi import Depends, HTTPException, status
 from typing import List, Optional
 from functools import wraps
 
-from auth import get_current_user
+from routers.auth import get_current_user
 from models import User
 
 # Define subscription tiers as constants
