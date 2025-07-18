@@ -3,7 +3,7 @@ from typing import List, Dict, Any
 from datetime import datetime, timedelta
 import random
 
-from authentication.subscription_middleware import require_subscription, SUBSCRIPTION_PREMIUM
+from middleware import require_subscription, SUBSCRIPTION_PREMIUM
 from auth import get_current_user
 from models import User
 

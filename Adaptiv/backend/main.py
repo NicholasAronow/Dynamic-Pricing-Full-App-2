@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -16,6 +15,7 @@ from auth import auth_router
 from login_endpoint import login_router
 from register_endpoint import register_router
 from authentication.google_auth import google_auth_router
+from middleware import setup_cors_middleware
 from profile import profile_router
 from items import items_router
 from price_history import price_history_router
@@ -42,22 +42,8 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Adaptiv API")
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000", 
-        "http://127.0.0.1:3000",
-        "https://*.vercel.app",
-        "https://adaptiv-dynamic-pricing.vercel.app",
-        "https://adaptiv-eight.vercel.app",
-        "https://www.adaptiv.one",
-        "https://adaptiv-l9z8a1e32-nicholasaronows-projects.vercel.app"
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-)
+# Setup CORS middleware
+setup_cors_middleware(app)
 
 # Include routers
 app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])

@@ -51,7 +51,6 @@ def _has_tier_access(user_tier: str, required_tier: str) -> bool:
         return False
 
 
-# Route filter function to apply tiers to multiple endpoints
 def tier_limited_router(router, path: str, required_tier: str):
     """
     Apply subscription tier requirement to a router for a specific path
@@ -59,20 +58,12 @@ def tier_limited_router(router, path: str, required_tier: str):
     Usage example:
     tier_limited_router(router, "/analytics/advanced", SUBSCRIPTION_BASIC)
     """
-    original_route_decorator = router.get
-    
-    @wraps(original_route_decorator)
-    def wrapper(path_suffix: str, *args, **kwargs):
-        if path_suffix.startswith(path):
-            # Add the subscription dependency
-            if "dependencies" in kwargs:
-                kwargs["dependencies"].append(Depends(require_subscription(required_tier)))
+    # Get all routes from the router
+    for route in router.routes:
+        # Check if the route path matches the specified path
+        if hasattr(route, 'path') and route.path == path:
+            # Add the subscription dependency to the route
+            if hasattr(route, 'dependencies'):
+                route.dependencies.append(Depends(require_subscription(required_tier)))
             else:
-                kwargs["dependencies"] = [Depends(require_subscription(required_tier))]
-        
-        # Call the original method
-        return original_route_decorator(path_suffix, *args, **kwargs)
-    
-    # Replace the route decorator with our wrapped version
-    router.get = wrapper
-    return router
+                route.dependencies = [Depends(require_subscription(required_tier))]
