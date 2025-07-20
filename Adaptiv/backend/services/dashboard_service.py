@@ -17,7 +17,7 @@ class DashboardService:
     def __init__(self, db: Session):
         self.db = db
     
-    def get_sales_data(self, start_date: Optional[str] = None, end_date: Optional[str] = None, user_id: int = None):
+    def get_sales_data(self, start_date: Optional[str] = None, end_date: Optional[str] = None, user_id: int = None, time_frame: Optional[str] = None):
         """
         Get sales data for the dashboard
         """
@@ -69,35 +69,81 @@ class DashboardService:
             total_revenue = 0
             total_orders = len(orders)
 
-            # Group orders by date for daily aggregation
-            daily_orders = {}
-            for order in orders:
-                order_date = order.order_date.date()
-                if order_date not in daily_orders:
-                    daily_orders[order_date] = []
-                daily_orders[order_date].append(order)
+            # Determine if we should aggregate by month (for 6m and 1yr views)
+            aggregate_by_month = time_frame in ['6m', '1yr']
+            
+            if aggregate_by_month:
+                # Group orders by month for monthly aggregation
+                monthly_orders = {}
+                for order in orders:
+                    # Use year-month as key (e.g., "2024-01")
+                    month_key = order.order_date.strftime('%Y-%m')
+                    if month_key not in monthly_orders:
+                        monthly_orders[month_key] = []
+                    monthly_orders[month_key].append(order)
 
-            # Process each day's data
-            for date, day_orders in daily_orders.items():
-                daily_revenue = sum(order.total_amount or 0 for order in day_orders)
-                daily_order_count = len(day_orders)
-                
-                # Get COGS for this date
-                daily_cogs_amount = daily_cogs.get(date, 0)
-                
-                # Calculate profit margin
-                profit_margin = 0
-                if daily_revenue > 0 and daily_cogs_amount > 0:
-                    profit_margin = ((daily_revenue - daily_cogs_amount) / daily_revenue) * 100
+                # Process each month's data
+                for month_key, month_orders in monthly_orders.items():
+                    monthly_revenue = sum(order.total_amount or 0 for order in month_orders)
+                    monthly_order_count = len(month_orders)
+                    
+                    # Calculate monthly COGS by summing daily COGS for the month
+                    year, month = map(int, month_key.split('-'))
+                    monthly_cogs_amount = 0
+                    
+                    # Sum COGS for all days in this month
+                    for date, cogs_amount in daily_cogs.items():
+                        if date.year == year and date.month == month:
+                            monthly_cogs_amount += cogs_amount
+                    
+                    # Calculate profit margin
+                    profit_margin = None
+                    if monthly_revenue > 0 and monthly_cogs_amount > 0:
+                        profit_margin = ((monthly_revenue - monthly_cogs_amount) / monthly_revenue) * 100
 
-                sales_data.append({
-                    "date": date.isoformat(),
-                    "sales": daily_revenue,
-                    "orders": daily_order_count,
-                    "profit_margin": round(profit_margin, 2)
-                })
-                
-                total_revenue += daily_revenue
+                    # Use the first day of the month as the date for display
+                    month_date = datetime(year, month, 1).date()
+                    
+                    sales_data.append({
+                        "date": month_date.isoformat(),
+                        "revenue": monthly_revenue,
+                        "orders": monthly_order_count,
+                        "totalCost": monthly_cogs_amount,
+                        "profitMargin": round(profit_margin, 2) if profit_margin is not None else None
+                    })
+                    
+                    total_revenue += monthly_revenue
+            else:
+                # Group orders by date for daily aggregation
+                daily_orders = {}
+                for order in orders:
+                    order_date = order.order_date.date()
+                    if order_date not in daily_orders:
+                        daily_orders[order_date] = []
+                    daily_orders[order_date].append(order)
+
+                # Process each day's data
+                for date, day_orders in daily_orders.items():
+                    daily_revenue = sum(order.total_amount or 0 for order in day_orders)
+                    daily_order_count = len(day_orders)
+                    
+                    # Get COGS for this date
+                    daily_cogs_amount = daily_cogs.get(date, 0)
+                    
+                    # Calculate profit margin
+                    profit_margin = None
+                    if daily_revenue > 0 and daily_cogs_amount > 0:
+                        profit_margin = ((daily_revenue - daily_cogs_amount) / daily_revenue) * 100
+
+                    sales_data.append({
+                        "date": date.isoformat(),
+                        "revenue": daily_revenue,
+                        "orders": daily_order_count,
+                        "totalCost": daily_cogs_amount,
+                        "profitMargin": round(profit_margin, 2) if profit_margin is not None else None
+                    })
+                    
+                    total_revenue += daily_revenue
 
             # Sort by date
             sales_data.sort(key=lambda x: x["date"])
@@ -105,17 +151,17 @@ class DashboardService:
             # Calculate average order value
             avg_order_value = total_revenue / total_orders if total_orders > 0 else 0
 
-            logger.info(f"Processed sales data: {len(sales_data)} days, total revenue: ${total_revenue:.2f}")
+            aggregation_type = "months" if aggregate_by_month else "days"
+            logger.info(f"Processed sales data: {len(sales_data)} {aggregation_type}, total revenue: ${total_revenue:.2f}")
 
+            # Return in SalesAnalytics format expected by frontend
             return {
-                "sales_data": sales_data,
-                "total_revenue": round(total_revenue, 2),
-                "total_orders": total_orders,
-                "avg_order_value": round(avg_order_value, 2),
-                "date_range": {
-                    "start": start_date_obj.isoformat(),
-                    "end": end_date_obj.isoformat()
-                }
+                "totalSales": round(total_revenue, 2),
+                "totalOrders": total_orders,
+                "averageOrderValue": round(avg_order_value, 2),
+                "salesByDay": sales_data,  # Changed from "sales_data" to "salesByDay"
+                "topSellingItems": [],  # Will be populated by get_product_performance
+                "salesByCategory": []  # Will be populated if needed
             }
 
         except Exception as e:
@@ -171,29 +217,24 @@ class DashboardService:
                 
                 product_performance.append({
                     "id": item.id,
+                    "itemId": item.id,  # Alternative id format for compatibility
                     "name": item.name,
-                    "category": item.category,
-                    "current_price": float(item.current_price) if item.current_price else 0,
-                    "cost": float(item.cost) if item.cost else 0,
-                    "quantity_sold": total_quantity,
+                    "quantity": total_quantity,  # Changed from "quantity_sold" to "quantity"
                     "revenue": round(total_revenue, 2),
-                    "profit_margin": round(profit_margin, 2),
-                    "orders_count": len(set(oi.order_id for oi in order_items))
+                    "unitPrice": float(item.current_price) if item.current_price else 0,
+                    "unitCost": float(item.cost) if item.cost else 0,
+                    "totalCost": round(total_cost, 2),
+                    "hasCost": bool(item.cost and item.cost > 0),
+                    "marginPercentage": round(profit_margin, 2) if profit_margin > 0 else None
                 })
             
-            # Sort by revenue descending
-            product_performance.sort(key=lambda x: x["revenue"], reverse=True)
+            # Sort by quantity descending (top selling by volume)
+            product_performance.sort(key=lambda x: x["quantity"], reverse=True)
             
             logger.info(f"Processed {len(product_performance)} products")
             
-            return {
-                "products": product_performance,
-                "time_frame": time_frame,
-                "date_range": {
-                    "start": start_date.isoformat(),
-                    "end": end_date.isoformat()
-                }
-            }
+            # Return as a list of TopSellingItem objects
+            return product_performance
             
         except Exception as e:
             logger.error(f"Error in get_product_performance: {str(e)}")

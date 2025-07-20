@@ -19,16 +19,27 @@ dashboard_router = APIRouter()
 def get_sales_data(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    time_frame: Optional[str] = None,
+    include_item_details: Optional[bool] = False,
     account_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Get sales data for the dashboard without strict Pydantic validation
+    Get sales data for the dashboard in SalesAnalytics format
     """
     user_id = account_id if account_id else current_user.id
     dashboard_service = DashboardService(db)
-    return dashboard_service.get_sales_data(start_date, end_date, user_id)
+    
+    # Get sales data
+    sales_analytics = dashboard_service.get_sales_data(start_date, end_date, user_id, time_frame)
+    
+    # If item details are requested, add top selling items
+    if include_item_details:
+        top_selling_items = dashboard_service.get_product_performance(time_frame, user_id)
+        sales_analytics["topSellingItems"] = top_selling_items
+    
+    return sales_analytics
 
 
 @dashboard_router.get("/product-performance")

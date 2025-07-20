@@ -18,7 +18,7 @@ from .agents import (
     get_test_db_agent
 )
 from .agents.aggregate_pricing_agent import AggregatePricingAgent
-from .task_manager import running_tasks  # Import from shared module
+from utils import running_tasks  # Import from shared module
 
 class DynamicPricingOrchestrator:
     """Orchestrates the dynamic pricing agent system"""

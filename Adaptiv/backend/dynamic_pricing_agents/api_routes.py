@@ -9,7 +9,7 @@ import asyncio
 import logging
 
 # Import Knock integration
-from knock_integration import knock_client
+from utils import knock_client
 
 # Import Celery tasks
 from tasks import run_dynamic_pricing_analysis_task, get_dynamic_pricing_task_status
@@ -18,7 +18,7 @@ from database import get_db
 from routers.auth import get_current_user
 import models
 from .orchestrator import DynamicPricingOrchestrator
-from .task_manager import running_tasks  # Import from shared module
+from utils import running_tasks  # Import from shared module
 
 # Initialize router
 router = APIRouter(

@@ -15,7 +15,7 @@ from .data_collection import DataCollectionAgent
 from .test_db_agent import TestDBAgentWrapper
 from .test_web_agent import TestWebAgentWrapper
 # Use absolute import instead of relative
-from knock_integration import KnockClient
+from utils import KnockClient
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

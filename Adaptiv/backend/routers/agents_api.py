@@ -8,13 +8,14 @@ import asyncio
 import json
 import os
 from datetime import datetime
-from agent_progress import AgentProgress
+from utils import AgentProgress
 import copy
 
 # Import the agent manager, database interface, and session wrapper
 from agent_sdk.agent_manager import AgentManager
-from db_interface import DatabaseInterface
-from session_wrapper import SessionDep, SessionWrapper
+from utils import DatabaseInterface
+from utils import SessionWrapper
+from dependencies import SessionDep
 import models
 
 router = APIRouter(

@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 from datetime import datetime, timedelta
-from knock_integration import knock_client
+from utils import knock_client
 
 async def test_notification():
     # Sample report data mimicking what would come from the dynamic pricing analysis task
