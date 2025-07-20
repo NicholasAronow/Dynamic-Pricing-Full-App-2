@@ -1024,7 +1024,7 @@ def sync_square_data_task(self, user_id: int, force_sync: bool = False) -> Dict[
         Dictionary with sync results including items/orders created/updated
     """
     import requests
-    from square_integration import SQUARE_API_BASE
+    from routers.square_integration import SQUARE_API_BASE
     
     db = None
     try:

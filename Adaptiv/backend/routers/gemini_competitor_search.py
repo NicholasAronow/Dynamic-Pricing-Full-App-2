@@ -937,14 +937,19 @@ async def add_competitor_manually(
         
         # Validate required fields
         name = competitor_data.get("name")
-        address = competitor_data.get("address")
+        address = competitor_data.get("address", "")
         category = competitor_data.get("category")
         distance_km = competitor_data.get("distance_km")
         
         print(f"DEBUG - Extracted fields: name={name}, address={address}, category={category}")
         
-        if not name or not address or not category:
-            raise HTTPException(status_code=400, detail="Name, address, and category are required")
+        # Only name and category are truly required - address can be empty
+        if not name or not category:
+            raise HTTPException(status_code=400, detail="Name and category are required")
+        
+        # Use a default address if empty
+        if not address or address.strip() == "":
+            address = "Address not provided"
             
         # Extract menu_url from the data if it exists
         menu_url = competitor_data.get("menu_url")
@@ -991,7 +996,7 @@ async def add_competitor_manually(
                 "menu_url": menu_url if menu_url else None
             },
             metadata=metadata,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(),
             is_selected=True  # Manually added competitors are automatically selected
         )
         db.add(competitor_report)
@@ -1083,47 +1088,18 @@ async def add_competitor_manually(
                     has_user_id = hasattr(models.CompetitorItem, 'user_id')
                     print(f"DEBUG - add_competitor_manually: CompetitorItem has user_id field: {has_user_id}")
                     
-                    try:
-                        # Create based on whether user_id field exists
-                        if has_user_id:
-                            menu_item = models.CompetitorItem(
-                                competitor_name=name,
-                                item_name=item_name,
-                                description=item.get("description", ""),
-                                category=item_category,
-                                price=price_float,
-                                price_currency=item.get("price_currency", "USD"),
-                                url=address,  # Using address as reference
-                                batch_id=batch_id,
-                                sync_timestamp=sync_timestamp,
-                                user_id=current_user.id,  # Link to the current user
-                                source="manual"  # Mark this as manually added
-                            )
-                        else:
-                            menu_item = models.CompetitorItem(
-                                competitor_name=name,
-                                item_name=item_name,
-                                description=item.get("description", ""),
-                                category=item_category,
-                                price=price_float,
-                                price_currency=item.get("price_currency", "USD"), 
-                                url=address,  # Using address as reference
-                                batch_id=batch_id,
-                                sync_timestamp=sync_timestamp,
-                                source="manual"  # Mark this as manually added
-                            )
-                    except Exception as model_error:
-                        # Fallback for any model-related issues
-                        print(f"Error creating menu item: {str(model_error)}")
-                        # Create a minimal version as last resort
-                        menu_item = models.CompetitorItem(
-                            competitor_name=name,
-                            item_name=item_name,
-                            category=item_category,
-                            price=price_float,
-                            batch_id=batch_id,
-                            sync_timestamp=sync_timestamp
-                        )
+                    # CompetitorItem model doesn't have user_id, price_currency, or source fields
+                    # Create with only the fields that exist in the model
+                    menu_item = models.CompetitorItem(
+                        competitor_name=name,
+                        item_name=item_name,
+                        description=item.get("description", ""),
+                        category=item_category,
+                        price=price_float,
+                        url=address,  # Using address as reference
+                        batch_id=batch_id,
+                        sync_timestamp=sync_timestamp
+                    )
                     
                     db.add(menu_item)
                     items_saved += 1
@@ -1134,28 +1110,16 @@ async def add_competitor_manually(
             print(f"DEBUG - Successfully added {items_saved}/{len(extracted_menu_items)} menu items to database")
         else:
             # If no menu items, create a placeholder entry
-            try:
-                competitor_item = models.CompetitorItem(
-                    user_id=current_user.id,
-                    competitor_name=name,
-                    item_name="General",  # Placeholder
-                    category=category,
-                    price=0.0,  # Placeholder
-                    description=address,
-                    batch_id=batch_id,
-                    sync_timestamp=sync_timestamp
-                )
-            except Exception as e:
-                # If user_id field doesn't exist
-                competitor_item = models.CompetitorItem(
-                    competitor_name=name,
-                    item_name="General",  # Placeholder
-                    category=category,
-                    price=0.0,  # Placeholder
-                    description=address,
-                    batch_id=batch_id,
-                    sync_timestamp=sync_timestamp
-                )
+            # CompetitorItem doesn't have user_id field, so create without it
+            competitor_item = models.CompetitorItem(
+                competitor_name=name,
+                item_name="General",  # Placeholder
+                category=category,
+                price=0.0,  # Placeholder
+                description=address,
+                batch_id=batch_id,
+                sync_timestamp=sync_timestamp
+            )
             
             db.add(competitor_item)
         
@@ -1177,6 +1141,9 @@ async def add_competitor_manually(
         }
     except Exception as e:
         db.rollback()
+        print(f"ERROR in add_competitor_manually: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error adding competitor: {str(e)}")
 
 @gemini_competitor_router.delete("/competitors/{report_id}")

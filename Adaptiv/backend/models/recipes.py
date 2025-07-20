@@ -64,31 +64,31 @@ class Recipe(Base):
         end_date = datetime.now()
         start_date = end_date - timedelta(days=30)
         
-        # Get the current month and year for fixed costs
-        current_month = datetime.now().month
-        current_year = datetime.now().year
-        fixed_costs = db.query(FixedCost).filter(
+        # Get the most recent fixed costs for each cost type
+        # We need to get the latest entry for each cost type (rent, utilities)
+        from sqlalchemy import and_
+        
+        # Get the most recent rent cost
+        latest_rent = db.query(FixedCost).filter(
             FixedCost.user_id == user_id,
-            FixedCost.month <= current_month,
-            FixedCost.year <= current_year
+            FixedCost.cost_type.ilike('rent')
         ).order_by(
             FixedCost.year.desc(),
             FixedCost.month.desc()
-        ).all()
+        ).first()
+        
+        # Get the most recent utilities cost
+        latest_utilities = db.query(FixedCost).filter(
+            FixedCost.user_id == user_id,
+            FixedCost.cost_type.ilike('utilities')
+        ).order_by(
+            FixedCost.year.desc(),
+            FixedCost.month.desc()
+        ).first()
         
         # Calculate total monthly fixed costs
-        total_rent = 0
-        total_utilities = 0
-        
-        for cost in fixed_costs:
-            if cost.cost_type.lower() == 'rent':
-                total_rent = cost.amount
-                break
-                
-        for cost in fixed_costs:
-            if cost.cost_type.lower() == 'utilities':
-                total_utilities = cost.amount
-                break
+        total_rent = latest_rent.amount if latest_rent else 0
+        total_utilities = latest_utilities.amount if latest_utilities else 0
         
         # Get active employees
         employees = db.query(Employee).filter(
@@ -110,13 +110,17 @@ class Recipe(Base):
             Order.user_id == user_id,
             Order.order_date >= start_date,
             Order.order_date <= end_date
-        ).scalar() or 1  # Default to 1 to avoid division by zero
+        ).scalar() or 0  # Default to 0 if no sales data
         
         # Calculate total monthly fixed costs (rent + utilities + labor)
         total_monthly_fixed_costs = total_rent + total_utilities + total_monthly_labor
         
         # Calculate fixed cost per item based on actual sales volume
-        fixed_cost_per_item = total_monthly_fixed_costs / total_items_sold if total_items_sold > 0 else 0
+        # Only calculate if we have both fixed costs and sales data
+        if total_monthly_fixed_costs > 0 and total_items_sold > 0:
+            fixed_cost_per_item = total_monthly_fixed_costs / total_items_sold
+        else:
+            fixed_cost_per_item = 0
         
         return {
             'fixed_cost_per_item': fixed_cost_per_item,
