@@ -116,10 +116,12 @@ export const pricingService = {
       ]);
 
       const items = itemsResponse.data;
-      const performanceData = analyticsResponse.data;
+      const performanceResponse = analyticsResponse.data;
+      const performanceData = performanceResponse.products || [];
       
       console.log('Fetched items:', items.length);
       console.log('Fetched performance data:', performanceData.length);
+      console.log('Performance response structure:', performanceResponse);
       
       // Extract all item IDs for batch fetching
       const itemIds = items.map((item: Item) => item.id);
@@ -179,12 +181,16 @@ const generateRecommendationsFromData = (
   priceHistoryByItemId: {[itemId: number]: PriceHistory[]},
   timeFrame: string,
 ): PriceRecommendation[] => {
+  // Ensure performanceData is an array
+  const safePerformanceData = Array.isArray(performanceData) ? performanceData : [];
+  
   return items.map((item: Item) => {
     // Find performance data for this item
-    const performance = performanceData.find(p => p.id === item.id) || {
-      quantity: 0,
+    const performance = safePerformanceData.find(p => p.id === item.id) || {
+      quantity_sold: 0,
       revenue: 0,
-      growth: 0
+      growth: 0,
+      profit_margin: 0
     };
     
     // Get the price history for this item from our organized data structure 
@@ -193,9 +199,9 @@ const generateRecommendationsFromData = (
     console.log(`Processing item: ${item.name} (ID: ${item.id}), Current price: ${item.current_price}`);
     console.log(`Price history records found: ${priceHistory.length}`);
     
-    // Calculate profit margin (assuming cost is 60% of price if not available)
-    const cost = item.cost || item.current_price * 0.6;
-    const profitMargin = (item.current_price - cost) / item.current_price;
+    // Use profit margin from performance data or calculate if not available
+    const profitMargin = performance.profit_margin ? performance.profit_margin / 100 : 
+      (item.cost ? (item.current_price - item.cost) / item.current_price : 0.4); // Default 40% if no cost data
     
     return {
       id: item.id,
@@ -204,7 +210,7 @@ const generateRecommendationsFromData = (
       currentPrice: item.current_price,
       previousPrice: null,
       lastPriceChangeDate: null,
-      quantity: performance.quantity || 0,
+      quantity: performance.quantity_sold || 0,
       revenue: performance.revenue || 0,
       growth: performance.growth || 0,
       profitMargin,

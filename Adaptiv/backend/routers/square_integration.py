@@ -20,6 +20,7 @@ import uuid
 import models, schemas
 from database import get_db
 from .auth import get_current_user
+from services.square_service import SquareService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -27,6 +28,52 @@ logger = logging.getLogger(__name__)
 
 # Router
 square_router = APIRouter()
+
+@square_router.get("/status")
+def get_square_status(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get Square integration status using service layer"""
+    try:
+        square_service = SquareService(db)
+        return square_service.get_sync_status(current_user.id)
+    except Exception as e:
+        logger.error(f"Error getting Square status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@square_router.post("/sync-catalog")
+def sync_catalog(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Sync Square catalog using service layer"""
+    try:
+        square_service = SquareService(db)
+        result = square_service.sync_square_catalog(current_user.id)
+        return {"success": True, "data": result}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error syncing catalog: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@square_router.post("/sync-orders")
+def sync_orders(
+    days: int = 30,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Sync Square orders using service layer"""
+    try:
+        square_service = SquareService(db)
+        result = square_service.sync_square_orders(current_user.id, days)
+        return {"success": True, "data": result}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error syncing orders: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Constants
 SQUARE_ENV = os.getenv("SQUARE_ENV", "production")  # 'sandbox' or 'production'

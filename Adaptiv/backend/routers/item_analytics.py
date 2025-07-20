@@ -7,12 +7,50 @@ from sqlalchemy import func, text
 from datetime import datetime, timedelta
 import traceback
 import logging
+from .auth import get_current_user
+from services.item_analytics_service import ItemAnalyticsService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 item_analytics_router = APIRouter()
+
+@item_analytics_router.get("/analytics/{item_id}")
+def get_comprehensive_item_analytics(
+    item_id: int, 
+    days: int = 30,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Get comprehensive analytics for a specific item using the service layer.
+    """
+    try:
+        analytics_service = ItemAnalyticsService(db)
+        return analytics_service.get_item_analytics(item_id, current_user.id, days)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error getting item analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@item_analytics_router.get("/top-performing")
+def get_top_performing_items(
+    days: int = 30,
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Get top performing items by revenue.
+    """
+    try:
+        analytics_service = ItemAnalyticsService(db)
+        return analytics_service.get_top_performing_items(current_user.id, days, limit)
+    except Exception as e:
+        logger.error(f"Error getting top performing items: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @item_analytics_router.get("/elasticity/{item_id}")
 def get_elasticity_data(item_id: int, db: Session = Depends(get_db)):

@@ -10,6 +10,7 @@ from uuid import uuid4
 from database import get_db
 from models import PricingRecommendation, Item, User
 from .auth import get_current_user
+from services.pricing_service import PricingService
 
 pricing_recommendations_router = APIRouter()
 
@@ -125,6 +126,10 @@ def get_pricing_recommendations(
     Optionally filter by implementation_status and date range.
     Only returns the most recent recommendation per item.
     """
+    pricing_service = PricingService(db)
+    
+    # For now, return existing database recommendations but could be enhanced to use service logic
+    # This maintains backward compatibility while introducing the service layer
     user_id = current_user.id
     
     # Filter by date - get recommendations from the last 'days' days

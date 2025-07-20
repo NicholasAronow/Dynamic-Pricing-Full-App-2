@@ -224,7 +224,15 @@ class RecipeIngredient(Base):
                 'quart': 946.353,
                 'quarts': 946.353,
                 'pint': 473.176,
-                'pints': 473.176
+                'pints': 473.176,
+                'oz': 28.3495,
+                'ounce': 28.3495,
+                'ounces': 28.3495,
+                'ea': 1,
+                'each': 1,
+                'pieces': 1,
+                'bunch': 1,
+                'pinch': 1,
             }
                         
             # Check if both units are in the same system

@@ -5,6 +5,7 @@ from typing import List, Dict, Any
 from database import get_db
 import models, schemas
 from .auth import get_current_user
+from services.competitor_service import CompetitorService
 import os
 import json
 from datetime import datetime, timedelta
@@ -22,6 +23,76 @@ if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
 gemini_competitor_router = APIRouter()
+
+@gemini_competitor_router.post("/search-competitors")
+def search_item_competitors(
+    item_name: str = Body(..., embed=True),
+    location: str = Body(None, embed=True),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Search for competitors using the service layer"""
+    try:
+        competitor_service = CompetitorService(db)
+        return competitor_service.search_competitors(item_name, current_user.id, location)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@gemini_competitor_router.get("/competitor-data/{item_name}")
+def get_competitor_data(
+    item_name: str,
+    days: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Get stored competitor data for an item"""
+    try:
+        competitor_service = CompetitorService(db)
+        return competitor_service.get_competitor_data(item_name, days)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@gemini_competitor_router.get("/market-analysis/{item_name}")
+def get_market_analysis(
+    item_name: str,
+    current_price: float = Query(..., gt=0),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Get market analysis comparing current price to competitors"""
+    try:
+        competitor_service = CompetitorService(db)
+        return competitor_service.get_market_analysis(item_name, current_price)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@gemini_competitor_router.post("/update-all-competitors")
+def update_all_competitor_prices(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Update competitor prices for all user items"""
+    try:
+        competitor_service = CompetitorService(db)
+        return competitor_service.update_competitor_prices(current_user.id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@gemini_competitor_router.get("/trends/{item_name}")
+def get_competitor_trends(
+    item_name: str,
+    days: int = Query(90, ge=7, le=365),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Get competitor price trends over time"""
+    try:
+        competitor_service = CompetitorService(db)
+        return competitor_service.get_competitor_trends(item_name, days)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @gemini_competitor_router.post("/find-menu-urls/{report_id}")
 async def find_competitor_menu_urls(

@@ -3,6 +3,7 @@ from typing import Dict, Any, List
 from sqlalchemy.orm import Session
 import models
 from database import SessionLocal
+from services.task_service import TaskService
 import json
 import asyncio
 import os
@@ -1023,15 +1024,34 @@ def sync_square_data_task(self, user_id: int, force_sync: bool = False) -> Dict[
     Returns:
         Dictionary with sync results including items/orders created/updated
     """
-    import requests
-    from routers.square_integration import SQUARE_API_BASE
-    
     db = None
     try:
         logger.info(f"Starting Square sync task {self.request.id} for user {user_id}")
         
         # Create database session
         db = SessionLocal()
+        
+        # Use TaskService to handle the business logic
+        task_service = TaskService(db)
+        
+        # Update progress
+        self.update_state(state='PROGRESS', meta={'progress': 10, 'status': 'Validating prerequisites...'})
+        
+        # Validate prerequisites
+        validation = task_service.validate_sync_prerequisites(user_id)
+        if not validation['valid']:
+            raise ValueError(f"Sync prerequisites not met: {validation['errors']}")
+        
+        # Update progress
+        self.update_state(state='PROGRESS', meta={'progress': 20, 'status': 'Starting sync...'})
+        
+        # Perform the sync using the service
+        result = task_service.sync_square_data(user_id, force_sync)
+        
+        # Update progress
+        self.update_state(state='PROGRESS', meta={'progress': 100, 'status': 'Sync completed successfully'})
+        
+        return result
         
         # Get Square integration for user
         integration = db.query(models.POSIntegration).filter(
