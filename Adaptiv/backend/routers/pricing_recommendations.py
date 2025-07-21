@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
 from uuid import uuid4
 
-from database import get_db
+from config.database import get_db
 from models import PricingRecommendation, Item, User
 from .auth import get_current_user
 from services.pricing_service import PricingService

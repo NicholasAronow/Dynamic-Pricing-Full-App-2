@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from sqlalchemy.orm import Session
 from typing import List
 
-from database import get_db, engine, Base
+from config.database import get_db, engine, Base
 import models, schemas
 from routers.auth import auth_router
 from routers.login_endpoint import login_router

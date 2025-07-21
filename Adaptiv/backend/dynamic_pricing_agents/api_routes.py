@@ -14,7 +14,7 @@ from utils import knock_client
 # Import Celery tasks
 from tasks import run_dynamic_pricing_analysis_task, get_dynamic_pricing_task_status
 
-from database import get_db
+from config.database import get_db
 from routers.auth import get_current_user
 import models
 from .orchestrator import DynamicPricingOrchestrator

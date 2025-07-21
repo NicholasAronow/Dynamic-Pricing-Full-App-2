@@ -2,7 +2,7 @@
 Migration script to add cost and margin columns to orders and order_items tables.
 """
 from sqlalchemy import create_engine, text
-from database import DATABASE_URL
+from config.settings import get_settings; DATABASE_URL = get_settings().database_url
 
 def run_migration():
     """

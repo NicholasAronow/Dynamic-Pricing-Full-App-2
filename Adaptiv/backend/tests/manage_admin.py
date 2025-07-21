@@ -14,7 +14,7 @@ Usage:
 import argparse
 import sys
 from sqlalchemy import text
-from database import engine
+from config.database import engine
 from sqlalchemy.orm import sessionmaker
 
 def create_session():

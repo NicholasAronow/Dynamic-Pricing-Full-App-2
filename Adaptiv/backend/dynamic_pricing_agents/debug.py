@@ -35,7 +35,7 @@ from .agents.performance_monitor import PerformanceMonitorAgent
 from .orchestrator import DynamicPricingOrchestrator
 
 # Import database
-from database import SessionLocal, engine
+from config.database import SessionLocal, engine
 
 def get_db():
     db = SessionLocal()

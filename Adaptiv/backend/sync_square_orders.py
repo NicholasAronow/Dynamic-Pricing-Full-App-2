@@ -27,7 +27,7 @@ from typing import Optional
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from sqlalchemy.orm import Session
-from database import get_db
+from config.database import get_db
 import models
 from tasks import sync_square_data_task
 

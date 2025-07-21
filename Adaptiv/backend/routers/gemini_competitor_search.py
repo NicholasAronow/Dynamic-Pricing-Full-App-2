@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Body, Query, BackgroundTa
 from sqlalchemy.orm import Session, attributes
 from sqlalchemy import desc
 from typing import List, Dict, Any
-from database import get_db
+from config.database import get_db
 import models, schemas
 from .auth import get_current_user
 from services.competitor_service import CompetitorService

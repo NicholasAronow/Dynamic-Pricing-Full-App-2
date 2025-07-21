@@ -7,15 +7,19 @@ from passlib.context import CryptContext
 from typing import Optional, Annotated
 
 import models, schemas
-from database import get_db
+from config.database import get_db
+from config.auth_config import (
+    SECRET_KEY, 
+    ALGORITHM, 
+    pwd_context,
+    create_access_token as config_create_access_token,
+    verify_token,
+    verify_password as config_verify_password,
+    get_password_hash
+)
 
-# JWT Settings
-SECRET_KEY = "YOUR_SECRET_KEY"  # In production, use os.getenv and .env file
-ALGORITHM = "HS256"
+# Override access token expire time for persistent login
 ACCESS_TOKEN_EXPIRE_MINUTES = 10080  # 7 days (60 * 24 * 7) for persistent login
-
-# Password handling
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # Use absolute URL to avoid confusion with frontend routes
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
@@ -25,11 +29,8 @@ TokenDep = Annotated[str, Depends(oauth2_scheme)]
 
 auth_router = APIRouter()
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
-
-def get_password_hash(password):
-    return pwd_context.hash(password)
+# Use functions from config
+verify_password = config_verify_password
 
 def get_user(db: Session, email: str):
     return db.query(models.User).filter(models.User.email == email).first()
@@ -43,16 +44,10 @@ def authenticate_user(db: Session, email: str, password: str):
     return user
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    to_encode = data.copy()
-    
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
-        
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+    # Use custom expiration time for this router if provided, otherwise use default from config
+    if expires_delta is None:
+        expires_delta = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    return config_create_access_token(data, expires_delta)
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     """Get the current user from the database.

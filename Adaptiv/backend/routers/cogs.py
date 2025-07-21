@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
 import sqlalchemy as sa
-from database import get_db
+from config.database import get_db
 import models, schemas
 from .auth import get_current_user
 

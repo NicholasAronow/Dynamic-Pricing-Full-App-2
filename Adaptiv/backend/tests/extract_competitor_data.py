@@ -2,7 +2,7 @@
 """
 Extract competitor data from the database
 """
-from database import SessionLocal
+from config.database import SessionLocal
 import models
 import json
 import sys

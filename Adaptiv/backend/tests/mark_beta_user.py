@@ -7,7 +7,7 @@ which will be recognized by the get_subscription_status function.
 
 import argparse
 from sqlalchemy.orm import Session
-from database import SessionLocal, engine
+from config.database import SessionLocal, engine
 import models
 
 # The special marker we'll use for beta testers

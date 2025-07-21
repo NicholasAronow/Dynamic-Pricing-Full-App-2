@@ -19,7 +19,7 @@ from sqlalchemy.sql import func
 # Import local modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import models
-from database import SessionLocal, engine, Base
+from config.database import SessionLocal, engine, Base
 
 # Configure logging
 logging.basicConfig(

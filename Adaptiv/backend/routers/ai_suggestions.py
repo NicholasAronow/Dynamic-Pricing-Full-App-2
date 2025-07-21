@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
-from database import get_db
+from config.database import get_db
 from .auth import get_current_user
 from models import User
 import os
@@ -18,14 +18,14 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-# Configure OpenAI
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Configure OpenAI using config
+from config.external_apis import get_openai_client, OPENAI_API_KEY
 clients = {}
 if OPENAI_API_KEY:
     try:
-        clients['openai'] = OpenAI(api_key=OPENAI_API_KEY)
+        clients['openai'] = get_openai_client()
     except Exception as e:
-        logger.error(f"Failed to initialize OpenAI client: {e}")
+        logger.error(f"Failed to initialize OpenAI client in ai_suggestions.py: {e}")
 
 router = APIRouter(
     prefix="/ai-suggestions",

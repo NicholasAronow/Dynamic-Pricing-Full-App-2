@@ -5,7 +5,7 @@ from typing import Annotated, Any
 from fastapi import Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from database import get_db
+from config.database import get_db
 import json
 
 class SessionWrapper(BaseModel):

@@ -27,7 +27,7 @@ from typing import List, Dict, Any, Optional
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from database import SessionLocal
+from config.database import SessionLocal
 import models
 import logging
 from decimal import Decimal

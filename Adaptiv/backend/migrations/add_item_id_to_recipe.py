@@ -2,7 +2,7 @@
 Migration script to add item_id column to the recipes table.
 """
 from sqlalchemy import create_engine, text
-from database import DATABASE_URL
+from config.settings import get_settings; DATABASE_URL = get_settings().database_url
 
 def run_migration():
     """

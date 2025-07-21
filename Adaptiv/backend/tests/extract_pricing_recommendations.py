@@ -2,7 +2,7 @@
 """
 Extract pricing recommendations for a specific user or all users
 """
-from database import SessionLocal
+from config.database import SessionLocal
 import models
 import json
 import sys

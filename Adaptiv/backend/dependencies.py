@@ -1,7 +1,7 @@
 from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.orm import Session
-from database import get_db
+from config.database import get_db
 from models import User
 from routers.auth import get_current_user
 

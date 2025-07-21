@@ -37,7 +37,7 @@ if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
 # Import database models and Celery task
-from database import SessionLocal
+from config.database import SessionLocal
 import models
 from tasks import run_dynamic_pricing_analysis_task
 

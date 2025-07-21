@@ -16,7 +16,7 @@ import sys
 import os
 from sqlalchemy import create_engine, text, inspect, MetaData, Table, Column, Boolean
 from sqlalchemy.exc import SQLAlchemyError
-from database import DATABASE_URL
+from config.settings import get_settings; DATABASE_URL = get_settings().database_url
 import logging
 
 # Set up logging

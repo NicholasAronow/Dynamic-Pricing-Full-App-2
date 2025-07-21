@@ -1,8 +1,8 @@
-from celery_app import celery_app
+from config.celery_config import celery_app
 from typing import Dict, Any, List
 from sqlalchemy.orm import Session
 import models
-from database import SessionLocal
+from config.database import SessionLocal
 from services.task_service import TaskService
 import json
 import asyncio
@@ -20,12 +20,12 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-# Configure OpenAI
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Configure OpenAI using config
+from config.external_apis import get_openai_client, OPENAI_API_KEY
 clients = {}
 if OPENAI_API_KEY:
     try:
-        clients['openai'] = OpenAI(api_key=OPENAI_API_KEY)
+        clients['openai'] = get_openai_client()
     except Exception as e:
         logger.error(f"Failed to initialize OpenAI client in tasks.py: {e}")
 

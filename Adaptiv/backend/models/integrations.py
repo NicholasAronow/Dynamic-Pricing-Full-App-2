@@ -1,7 +1,7 @@
 from sqlalchemy import Column, ForeignKey, Integer, String, DateTime
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from database import Base
+from config.database import Base
 
 class POSIntegration(Base):
     __tablename__ = "pos_integrations"

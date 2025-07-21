@@ -7,15 +7,13 @@ from google.oauth2 import id_token
 from google.auth.transport import requests
 import json
 
-from database import get_db
+from config.database import get_db
 import models, schemas
 from routers.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
+from config.external_apis import GOOGLE_CLIENT_ID
 
 # Create router
 google_auth_router = APIRouter()
-
-# Get the Google Client ID from environment variables
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 if not GOOGLE_CLIENT_ID:
     print("Warning: GOOGLE_CLIENT_ID not set in environment variables")
 

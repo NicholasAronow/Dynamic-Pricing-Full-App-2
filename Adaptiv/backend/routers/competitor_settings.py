@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Dict, Any, Optional
 from pydantic import BaseModel
 import models
-from database import get_db
+from config.database import get_db
 from .auth import get_current_user
 
 class BusinessProfileResponse(BaseModel):

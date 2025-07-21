@@ -2,7 +2,7 @@
 Migration script to add stripe_customer_id and subscription_tier columns to the users table.
 """
 from sqlalchemy import create_engine, text
-from database import DATABASE_URL
+from config.settings import get_settings; DATABASE_URL = get_settings().database_url
 
 def run_migration():
     """

@@ -18,7 +18,7 @@ import logging
 import uuid
 
 import models, schemas
-from database import get_db
+from config.database import get_db
 from .auth import get_current_user
 from services.square_service import SquareService
 

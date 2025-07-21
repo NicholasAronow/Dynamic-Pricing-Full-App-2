@@ -4,12 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional, List
-from database import get_db
+from config.database import get_db
+from config.external_apis import STRIPE_SECRET_KEY
 import models
 from .auth import get_current_user
 
-# Initialize Stripe with API key from environment variable
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+# Initialize Stripe with API key from config
+stripe.api_key = STRIPE_SECRET_KEY
 stripe_webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
 router = APIRouter()
