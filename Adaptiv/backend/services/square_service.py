@@ -402,7 +402,7 @@ class SquareService:
                             }
                         },
                         'state_filter': {
-                            'states': ['COMPLETED']
+                            'states': ['COMPLETED', 'CANCELLED']
                         }
                     },
                     'sort': {
