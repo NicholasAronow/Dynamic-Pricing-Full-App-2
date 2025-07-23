@@ -2,7 +2,7 @@
 Dashboard service for handling dashboard data operations
 """
 from sqlalchemy.orm import Session
-from sqlalchemy import func, text
+from sqlalchemy import func, text, or_, and_
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 import models
@@ -16,152 +16,215 @@ class DashboardService:
     
     def __init__(self, db: Session):
         self.db = db
+
+    def get_dashboard_data(self, start_date: Optional[str] = None, end_date: Optional[str] = None, 
+                      user_id: int = None, time_frame: Optional[str] = None,
+                      items_time_frame: Optional[str] = None):
+        """
+        Get all dashboard data in a single call - both sales and product performance
+        """
+        try:
+            # Get sales data
+            sales_data = self.get_sales_data(start_date, end_date, user_id, time_frame)
+        
+            # Get product performance data with its own timeframe
+            product_performance = self.get_product_performance(items_time_frame or time_frame, user_id)
+        
+            # Add product performance to the sales data
+            sales_data["topSellingItems"] = product_performance
+        
+            return sales_data
+        except Exception as e:
+            logger.error(f"Error in get_dashboard_data: {str(e)}")
+            raise
     
     def get_sales_data(self, start_date: Optional[str] = None, end_date: Optional[str] = None, user_id: int = None, time_frame: Optional[str] = None):
         """
-        Get sales data for the dashboard
+        Get sales data for the dashboard - optimized version with SQLite compatibility
         """
         try:
-            # Parse date range or use default (last 30 days)
-            end_date_obj = datetime.now()
-            start_date_obj = end_date_obj - timedelta(days=30)  # Default to last 30 days
+            # Parse date range based on timeframe
+            end_date_obj = datetime.now().replace(hour=23, minute=59, second=59)
             
-            logger.info(f"Dashboard request with date range params: start_date={start_date}, end_date={end_date}")
-            
-            if start_date and end_date:
+            if time_frame:
+                # Calculate start date based on timeframe
+                if time_frame == "1d":
+                    # For 1 day view, show yesterday's data
+                    start_date_obj = (end_date_obj - timedelta(days=1)).replace(hour=0, minute=0, second=0)
+                    end_date_obj = (end_date_obj - timedelta(days=1)).replace(hour=23, minute=59, second=59)
+                elif time_frame == "7d":
+                    start_date_obj = (end_date_obj - timedelta(days=6)).replace(hour=0, minute=0, second=0)
+                elif time_frame == "1m":
+                    start_date_obj = (end_date_obj - timedelta(days=29)).replace(hour=0, minute=0, second=0)
+                elif time_frame == "6m":
+                    start_date_obj = (end_date_obj - timedelta(days=179)).replace(hour=0, minute=0, second=0)
+                elif time_frame == "1yr":
+                    start_date_obj = (end_date_obj - timedelta(days=364)).replace(hour=0, minute=0, second=0)
+                else:
+                    start_date_obj = (end_date_obj - timedelta(days=29)).replace(hour=0, minute=0, second=0)
+            elif start_date and end_date:
+                # Parse provided dates
                 try:
-                    # Try ISO format first
                     start_date_obj = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
                     end_date_obj = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
-                    logger.info(f"Successfully parsed ISO date range: {start_date_obj} to {end_date_obj}")
                 except ValueError:
-                    # Fall back to simple format
                     try:
                         start_date_obj = datetime.strptime(start_date, '%Y-%m-%d')
-                        end_date_obj = datetime.strptime(end_date, '%Y-%m-%d')
-                        logger.info(f"Successfully parsed simple date range: {start_date_obj} to {end_date_obj}")
+                        end_date_obj = datetime.strptime(end_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
                     except ValueError:
-                        # If all parsing fails, use default
-                        logger.warning(f"Failed to parse dates {start_date} and {end_date}, using default range")
-                        pass
+                        start_date_obj = (end_date_obj - timedelta(days=29)).replace(hour=0, minute=0, second=0)
+            else:
+                # Default to last 30 days
+                start_date_obj = (end_date_obj - timedelta(days=29)).replace(hour=0, minute=0, second=0)
 
-            logger.info(f"Using date range: {start_date_obj} to {end_date_obj}")
+            logger.info(f"Using date range: {start_date_obj} to {end_date_obj} for timeframe: {time_frame}")
 
-            # Get orders within the date range
-            orders = self.db.query(models.Order).filter(
-                models.Order.user_id == user_id,
-                models.Order.order_date >= start_date_obj,
-                models.Order.order_date <= end_date_obj
-            ).all()
-
-            logger.info(f"Found {len(orders)} orders for user {user_id}")
-
-            # Get COGS data for profit margin calculations
-            cogs_data = self.db.query(models.COGS).filter(
-                models.COGS.user_id == user_id
-            ).order_by(models.COGS.week_start_date.desc()).all()
-
-            # Convert weekly COGS to daily values for profit margin calculation
-            daily_cogs = self._convert_weekly_cogs_to_daily(cogs_data)
-
-            # Process orders and calculate metrics
-            sales_data = []
-            total_revenue = 0
-            total_orders = len(orders)
-
-            # Determine if we should aggregate by month (for 6m and 1yr views)
+            # Determine if we should aggregate by month
             aggregate_by_month = time_frame in ['6m', '1yr']
             
             if aggregate_by_month:
-                # Group orders by month for monthly aggregation
-                monthly_orders = {}
-                for order in orders:
-                    # Use year-month as key (e.g., "2024-01")
-                    month_key = order.order_date.strftime('%Y-%m')
-                    if month_key not in monthly_orders:
-                        monthly_orders[month_key] = []
-                    monthly_orders[month_key].append(order)
-
-                # Process each month's data
-                for month_key, month_orders in monthly_orders.items():
-                    monthly_revenue = sum(order.total_amount or 0 for order in month_orders)
-                    monthly_order_count = len(month_orders)
+                # For SQLite, use strftime to group by month
+                query = self.db.query(
+                    func.strftime('%Y-%m-01', models.Order.order_date).label('month'),
+                    func.sum(models.Order.total_amount).label('revenue'),
+                    func.count(models.Order.id).label('order_count')
+                ).filter(
+                    models.Order.user_id == user_id,
+                    models.Order.order_date >= start_date_obj,
+                    models.Order.order_date <= end_date_obj
+                ).group_by(
+                    func.strftime('%Y-%m', models.Order.order_date)
+                ).order_by('month')
+                
+                monthly_results = query.all()
+                
+                # Get COGS data for the period
+                cogs_data = self.db.query(models.COGS).filter(
+                    models.COGS.user_id == user_id,
+                    models.COGS.week_start_date >= start_date_obj.date() - timedelta(days=7),
+                    models.COGS.week_start_date <= end_date_obj.date()
+                ).all()
+                
+                daily_cogs = self._convert_weekly_cogs_to_daily(cogs_data)
+                
+                # Process monthly data
+                sales_data = []
+                total_revenue = 0
+                total_orders = 0
+                
+                for row in monthly_results:
+                    month_date_str = row.month
+                    month_date = datetime.strptime(month_date_str, '%Y-%m-%d')
+                    monthly_revenue = float(row.revenue or 0)
+                    monthly_order_count = row.order_count or 0
                     
-                    # Calculate monthly COGS by summing daily COGS for the month
-                    year, month = map(int, month_key.split('-'))
+                    # Calculate monthly COGS
                     monthly_cogs_amount = 0
-                    
-                    # Sum COGS for all days in this month
                     for date, cogs_amount in daily_cogs.items():
-                        if date.year == year and date.month == month:
+                        if date.year == month_date.year and date.month == month_date.month:
                             monthly_cogs_amount += cogs_amount
                     
                     # Calculate profit margin
                     profit_margin = None
                     if monthly_revenue > 0 and monthly_cogs_amount > 0:
                         profit_margin = ((monthly_revenue - monthly_cogs_amount) / monthly_revenue) * 100
-
-                    # Use the first day of the month as the date for display
-                    month_date = datetime(year, month, 1).date()
                     
                     sales_data.append({
-                        "date": month_date.isoformat(),
-                        "revenue": monthly_revenue,
+                        "date": month_date_str,
+                        "revenue": round(monthly_revenue, 2),
                         "orders": monthly_order_count,
-                        "totalCost": monthly_cogs_amount,
+                        "totalCost": round(monthly_cogs_amount, 2),
                         "profitMargin": round(profit_margin, 2) if profit_margin is not None else None
                     })
                     
                     total_revenue += monthly_revenue
+                    total_orders += monthly_order_count
+                    
             else:
-                # Group orders by date for daily aggregation
-                daily_orders = {}
-                for order in orders:
-                    order_date = order.order_date.date()
-                    if order_date not in daily_orders:
-                        daily_orders[order_date] = []
-                    daily_orders[order_date].append(order)
-
-                # Process each day's data
-                for date, day_orders in daily_orders.items():
-                    daily_revenue = sum(order.total_amount or 0 for order in day_orders)
-                    daily_order_count = len(day_orders)
+                # For daily aggregation, use date function for SQLite
+                query = self.db.query(
+                    func.date(models.Order.order_date).label('order_date'),
+                    func.sum(models.Order.total_amount).label('revenue'),
+                    func.count(models.Order.id).label('order_count')
+                ).filter(
+                    models.Order.user_id == user_id,
+                    models.Order.order_date >= start_date_obj,
+                    models.Order.order_date <= end_date_obj
+                ).group_by(
+                    func.date(models.Order.order_date)
+                ).order_by('order_date')
+                
+                daily_results = query.all()
+                
+                # Get COGS data
+                cogs_data = self.db.query(models.COGS).filter(
+                    models.COGS.user_id == user_id,
+                    models.COGS.week_start_date >= start_date_obj.date() - timedelta(days=7),
+                    models.COGS.week_start_date <= end_date_obj.date()
+                ).all()
+                
+                daily_cogs = self._convert_weekly_cogs_to_daily(cogs_data)
+                
+                # Create a map of actual sales data
+                sales_map = {}
+                for row in daily_results:
+                    # Convert string date to date object if necessary
+                    if isinstance(row.order_date, str):
+                        order_date = datetime.strptime(row.order_date, '%Y-%m-%d').date()
+                    else:
+                        order_date = row.order_date
+                    sales_map[order_date] = row
+                
+                # Generate complete date range to ensure all days are represented
+                sales_data = []
+                total_revenue = 0
+                total_orders = 0
+                
+                current_date = start_date_obj.date()
+                while current_date <= end_date_obj.date():
+                    row = sales_map.get(current_date)
+                    
+                    if row:
+                        daily_revenue = float(row.revenue or 0)
+                        daily_order_count = row.order_count or 0
+                    else:
+                        daily_revenue = 0
+                        daily_order_count = 0
                     
                     # Get COGS for this date
-                    daily_cogs_amount = daily_cogs.get(date, 0)
+                    daily_cogs_amount = daily_cogs.get(current_date, 0)
                     
                     # Calculate profit margin
                     profit_margin = None
                     if daily_revenue > 0 and daily_cogs_amount > 0:
                         profit_margin = ((daily_revenue - daily_cogs_amount) / daily_revenue) * 100
-
+                    
                     sales_data.append({
-                        "date": date.isoformat(),
-                        "revenue": daily_revenue,
+                        "date": current_date.isoformat(),
+                        "revenue": round(daily_revenue, 2),
                         "orders": daily_order_count,
-                        "totalCost": daily_cogs_amount,
+                        "totalCost": round(daily_cogs_amount, 2),
                         "profitMargin": round(profit_margin, 2) if profit_margin is not None else None
                     })
                     
                     total_revenue += daily_revenue
-
-            # Sort by date
-            sales_data.sort(key=lambda x: x["date"])
+                    total_orders += daily_order_count
+                    
+                    current_date += timedelta(days=1)
 
             # Calculate average order value
             avg_order_value = total_revenue / total_orders if total_orders > 0 else 0
 
-            aggregation_type = "months" if aggregate_by_month else "days"
-            logger.info(f"Processed sales data: {len(sales_data)} {aggregation_type}, total revenue: ${total_revenue:.2f}")
+            logger.info(f"Processed sales data: {len(sales_data)} data points, total revenue: ${total_revenue:.2f}")
 
             # Return in SalesAnalytics format expected by frontend
             return {
                 "totalSales": round(total_revenue, 2),
                 "totalOrders": total_orders,
                 "averageOrderValue": round(avg_order_value, 2),
-                "salesByDay": sales_data,  # Changed from "sales_data" to "salesByDay"
-                "topSellingItems": [],  # Will be populated by get_product_performance
-                "salesByCategory": []  # Will be populated if needed
+                "salesByDay": sales_data,
+                "topSellingItems": [],
+                "salesByCategory": []
             }
 
         except Exception as e:
@@ -171,7 +234,7 @@ class DashboardService:
 
     def get_product_performance(self, time_frame: Optional[str] = None, user_id: int = None):
         """
-        Get performance data for all products
+        Get performance data for all products - optimized version
         """
         try:
             # Calculate date range based on time frame
@@ -187,53 +250,72 @@ class DashboardService:
             elif time_frame == "1yr":
                 start_date = end_date - timedelta(days=365)
             else:
-                start_date = end_date - timedelta(days=30)  # Default to 30 days
+                start_date = end_date - timedelta(days=30)
 
             logger.info(f"Getting product performance for time frame: {time_frame}, date range: {start_date} to {end_date}")
 
-            # Get all items for the user
-            items = self.db.query(models.Item).filter(models.Item.user_id == user_id).all()
+            # Single optimized query to get all product performance data
+            # Use a subquery to properly filter orders by date
+            query = self.db.query(
+                models.Item.id,
+                models.Item.name,
+                models.Item.current_price,
+                models.Item.cost,
+                func.coalesce(func.sum(models.OrderItem.quantity), 0).label('total_quantity'),
+                func.coalesce(func.sum(models.OrderItem.quantity * models.OrderItem.unit_price), 0).label('total_revenue'),
+                func.coalesce(func.sum(models.OrderItem.quantity * models.OrderItem.unit_cost), 0).label('total_cost')
+            ).outerjoin(
+                models.OrderItem, models.Item.id == models.OrderItem.item_id
+            ).outerjoin(
+                models.Order, models.OrderItem.order_id == models.Order.id
+            ).filter(
+                models.Item.user_id == user_id,
+                or_(
+                    models.Order.id == None,  # Include items with no orders
+                    and_(
+                        models.Order.order_date >= start_date,
+                        models.Order.order_date <= end_date,
+                        models.Order.user_id == user_id  # Ensure orders belong to the same user
+                    )
+                )
+            ).group_by(
+                models.Item.id, models.Item.name, models.Item.current_price, models.Item.cost
+            ).all()
             
             product_performance = []
-            
-            for item in items:
-                # Get order items for this product within the date range
-                order_items = self.db.query(models.OrderItem).join(models.Order).filter(
-                    models.OrderItem.item_id == item.id,
-                    models.Order.user_id == user_id,
-                    models.Order.order_date >= start_date,
-                    models.Order.order_date <= end_date
-                ).all()
-                
-                # Calculate metrics
-                total_quantity = sum(oi.quantity for oi in order_items)
-                total_revenue = sum(oi.quantity * oi.unit_price for oi in order_items)
-                total_cost = sum(oi.quantity * (oi.unit_cost or 0) for oi in order_items)
+            for row in query:
+                total_quantity = row.total_quantity or 0
+                total_revenue = float(row.total_revenue or 0)
+                total_cost = float(row.total_cost or 0)
+                unit_cost = float(row.cost or 0)
                 
                 # Calculate profit margin
                 profit_margin = 0
-                if total_revenue > 0:
+                if total_revenue > 0 and total_cost > 0:
                     profit_margin = ((total_revenue - total_cost) / total_revenue) * 100
+                elif total_revenue > 0 and unit_cost > 0:
+                    # If no order-level cost, calculate based on item cost
+                    estimated_total_cost = total_quantity * unit_cost
+                    profit_margin = ((total_revenue - estimated_total_cost) / total_revenue) * 100
                 
                 product_performance.append({
-                    "id": item.id,
-                    "itemId": item.id,  # Alternative id format for compatibility
-                    "name": item.name,
-                    "quantity": total_quantity,  # Changed from "quantity_sold" to "quantity"
+                    "id": row.id,
+                    "itemId": row.id,
+                    "name": row.name,
+                    "quantity": total_quantity,
                     "revenue": round(total_revenue, 2),
-                    "unitPrice": float(item.current_price) if item.current_price else 0,
-                    "unitCost": float(item.cost) if item.cost else 0,
+                    "unitPrice": float(row.current_price) if row.current_price else 0,
+                    "unitCost": unit_cost,
                     "totalCost": round(total_cost, 2),
-                    "hasCost": bool(item.cost and item.cost > 0),
+                    "hasCost": bool(unit_cost > 0),
                     "marginPercentage": round(profit_margin, 2) if profit_margin > 0 else None
                 })
             
-            # Sort by quantity descending (top selling by volume)
+            # Sort by quantity descending
             product_performance.sort(key=lambda x: x["quantity"], reverse=True)
             
-            logger.info(f"Processed {len(product_performance)} products")
+            logger.info(f"Found {len(product_performance)} products with performance data")
             
-            # Return as a list of TopSellingItem objects
             return product_performance
             
         except Exception as e:
