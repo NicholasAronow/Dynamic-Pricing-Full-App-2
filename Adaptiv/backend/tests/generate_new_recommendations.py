@@ -9,7 +9,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger("RecommendationGenerator")
 
 # Add the current directory to the path so we can import our models
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(backend_dir)
+# Change to backend directory so database path is correct
+os.chdir(backend_dir)
 from config.database import SessionLocal, engine
 from models import User, Item, PricingRecommendation
 from dynamic_pricing_agents.agents.pricing_strategy import PricingStrategyAgent

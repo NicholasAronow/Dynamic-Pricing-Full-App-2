@@ -2,10 +2,16 @@
 """
 Extract competitor data from the database
 """
-from config.database import SessionLocal
-import models
-import json
 import sys
+import os
+# Add the backend directory to the Python path and change working directory
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(backend_dir)
+# Change to backend directory so database path is correct
+os.chdir(backend_dir)
+from config.database import SessionLocal
+from models import CompetitorItem, PricingRecommendation
+import json
 from datetime import datetime, timedelta
 from sqlalchemy import func, desc
 
@@ -27,10 +33,10 @@ def extract_competitor_data(user_id=None, competitor_name=None, days=None, outpu
         using_fallback_format = False
         
         # First get a list of unique competitors
-        competitor_query = db.query(models.CompetitorItem.competitor_name, 
-                                    func.count(models.CompetitorItem.id).label('item_count'),
-                                    func.max(models.CompetitorItem.sync_timestamp).label('last_sync')) \
-                            .group_by(models.CompetitorItem.competitor_name)
+        competitor_query = db.query(CompetitorItem.competitor_name, 
+                                    func.count(CompetitorItem.id).label('item_count'),
+                                    func.max(CompetitorItem.sync_timestamp).label('last_sync')) \
+                            .group_by(CompetitorItem.competitor_name)
                            
         # Filter by user_id if specified
         if user_id:
@@ -38,8 +44,8 @@ def extract_competitor_data(user_id=None, competitor_name=None, days=None, outpu
             print(f"Looking up batch IDs for user {user_id}...")
             
             # Try first with PricingRecommendation
-            user_batch_ids = db.query(models.PricingRecommendation.batch_id)\
-                            .filter(models.PricingRecommendation.user_id == user_id)\
+            user_batch_ids = db.query(PricingRecommendation.batch_id)\
+                            .filter(PricingRecommendation.user_id == user_id)\
                             .distinct().all()
                             
             if not user_batch_ids:
@@ -48,16 +54,16 @@ def extract_competitor_data(user_id=None, competitor_name=None, days=None, outpu
                 # Convert list of tuples to list of batch_ids
                 batch_ids = [bid[0] for bid in user_batch_ids]
                 print(f"Found {len(batch_ids)} batch IDs for user {user_id}")
-                competitor_query = competitor_query.filter(models.CompetitorItem.batch_id.in_(batch_ids))
+                competitor_query = competitor_query.filter(CompetitorItem.batch_id.in_(batch_ids))
                            
         # Filter competitors if requested
         if competitor_name:
-            competitor_query = competitor_query.filter(models.CompetitorItem.competitor_name == competitor_name)
+            competitor_query = competitor_query.filter(CompetitorItem.competitor_name == competitor_name)
             
         # Filter by date if requested
         if days:
             cutoff_date = datetime.now() - timedelta(days=days)
-            competitor_query = competitor_query.filter(models.CompetitorItem.sync_timestamp >= cutoff_date)
+            competitor_query = competitor_query.filter(CompetitorItem.sync_timestamp >= cutoff_date)
         
         # Execute query to get competitors list
         competitors = competitor_query.all()
@@ -66,15 +72,15 @@ def extract_competitor_data(user_id=None, competitor_name=None, days=None, outpu
             if user_id and fallback_to_all:
                 print(f"No competitors found for user {user_id}. Falling back to showing all competitor data.")
                 # Start a new query without user_id filter
-                competitor_query = db.query(models.CompetitorItem).distinct(models.CompetitorItem.competitor_name)
+                competitor_query = db.query(CompetitorItem).distinct(CompetitorItem.competitor_name)
                 
                 # Re-apply other filters
                 if competitor_name:
-                    competitor_query = competitor_query.filter(models.CompetitorItem.competitor_name == competitor_name)
+                    competitor_query = competitor_query.filter(CompetitorItem.competitor_name == competitor_name)
                     
                 if days:
                     cutoff_date = datetime.now() - timedelta(days=days)
-                    competitor_query = competitor_query.filter(models.CompetitorItem.sync_timestamp >= cutoff_date)
+                    competitor_query = competitor_query.filter(CompetitorItem.sync_timestamp >= cutoff_date)
                     
                 competitors = competitor_query.all()
                 using_fallback_format = True  # Flag that we're using the fallback format
@@ -104,12 +110,12 @@ def extract_competitor_data(user_id=None, competitor_name=None, days=None, outpu
                     # In fallback format, we get CompetitorItem objects directly
                     competitor = competitor_info.competitor_name
                     # Get item count and last sync separately
-                    item_count_query = db.query(func.count(models.CompetitorItem.id))\
-                                       .filter(models.CompetitorItem.competitor_name == competitor)
+                    item_count_query = db.query(func.count(CompetitorItem.id))\
+                                       .filter(CompetitorItem.competitor_name == competitor)
                     item_count = item_count_query.scalar() or 0
                     
-                    last_sync_query = db.query(func.max(models.CompetitorItem.sync_timestamp))\
-                                      .filter(models.CompetitorItem.competitor_name == competitor)
+                    last_sync_query = db.query(func.max(CompetitorItem.sync_timestamp))\
+                                      .filter(CompetitorItem.competitor_name == competitor)
                     last_sync_date = last_sync_query.scalar()
                     last_sync = last_sync_date.strftime('%Y-%m-%d %H:%M') if last_sync_date else 'Unknown'
                 else:
@@ -123,27 +129,27 @@ def extract_competitor_data(user_id=None, competitor_name=None, days=None, outpu
                 print("-" * 100)
                 
                 # Get competitor items
-                items_query = db.query(models.CompetitorItem) \
-                               .filter(models.CompetitorItem.competitor_name == competitor)
+                items_query = db.query(CompetitorItem) \
+                               .filter(CompetitorItem.competitor_name == competitor)
                 
                 # Apply user filter if specified
                 if user_id:
                     # Get batch IDs associated with the user
-                    user_batch_ids = db.query(models.PricingRecommendation.batch_id)\
-                                    .filter(models.PricingRecommendation.user_id == user_id)\
+                    user_batch_ids = db.query(PricingRecommendation.batch_id)\
+                                    .filter(PricingRecommendation.user_id == user_id)\
                                     .distinct().all()
                     
                     if user_batch_ids:
                         batch_ids = [bid[0] for bid in user_batch_ids]
-                        items_query = items_query.filter(models.CompetitorItem.batch_id.in_(batch_ids))
+                        items_query = items_query.filter(CompetitorItem.batch_id.in_(batch_ids))
                 
                 # Apply additional filters
                 if days:
                     cutoff_date = datetime.now() - timedelta(days=days)
-                    items_query = items_query.filter(models.CompetitorItem.sync_timestamp >= cutoff_date)
+                    items_query = items_query.filter(CompetitorItem.sync_timestamp >= cutoff_date)
                     
                 # Get latest items first
-                items = items_query.order_by(desc(models.CompetitorItem.sync_timestamp)).all()
+                items = items_query.order_by(desc(CompetitorItem.sync_timestamp)).all()
                 
                 # Group by category
                 categories = {}
@@ -165,13 +171,13 @@ def extract_competitor_data(user_id=None, competitor_name=None, days=None, outpu
                     competitor = competitor_info[0]
                 
                 # Get competitor items
-                items_query = db.query(models.CompetitorItem) \
-                               .filter(models.CompetitorItem.competitor_name == competitor)
+                items_query = db.query(CompetitorItem) \
+                               .filter(CompetitorItem.competitor_name == competitor)
                 
                 # Apply additional filters
                 if days:
                     cutoff_date = datetime.now() - timedelta(days=days)
-                    items_query = items_query.filter(models.CompetitorItem.sync_timestamp >= cutoff_date)
+                    items_query = items_query.filter(CompetitorItem.sync_timestamp >= cutoff_date)
                 
                 items = items_query.all()
                 
@@ -223,13 +229,13 @@ def extract_competitor_data(user_id=None, competitor_name=None, days=None, outpu
                     competitor = competitor_info[0]
                 
                 # Get competitor items
-                items_query = db.query(models.CompetitorItem) \
-                               .filter(models.CompetitorItem.competitor_name == competitor)
+                items_query = db.query(CompetitorItem) \
+                               .filter(CompetitorItem.competitor_name == competitor)
                 
                 # Apply additional filters
                 if days:
                     cutoff_date = datetime.now() - timedelta(days=days)
-                    items_query = items_query.filter(models.CompetitorItem.sync_timestamp >= cutoff_date)
+                    items_query = items_query.filter(CompetitorItem.sync_timestamp >= cutoff_date)
                 
                 items = items_query.all()
                 

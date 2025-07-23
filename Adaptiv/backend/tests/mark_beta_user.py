@@ -6,9 +6,16 @@ which will be recognized by the get_subscription_status function.
 """
 
 import argparse
+import sys
+import os
 from sqlalchemy.orm import Session
-from config.database import SessionLocal, engine
-import models
+# Add the backend directory to the Python path and change working directory
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(backend_dir)
+# Change to backend directory so database path is correct
+os.chdir(backend_dir)
+from config.database import SessionLocal
+from models import User
 
 # The special marker we'll use for beta testers
 BETA_TESTER_MARKER = "BETA_TESTER_SUBSCRIPTION_ACTIVE"
@@ -25,7 +32,7 @@ def mark_user_as_beta_tester(email: str):
     db = next(get_db())
     
     # Find the user by email
-    user = db.query(models.User).filter(models.User.email == email).first()
+    user = db.query(User).filter(User.email == email).first()
     
     if not user:
         print(f"User with email {email} not found.")
@@ -43,7 +50,7 @@ def remove_beta_tester_status(email: str):
     db = next(get_db())
     
     # Find the user by email
-    user = db.query(models.User).filter(models.User.email == email).first()
+    user = db.query(User).filter(User.email == email).first()
     
     if not user:
         print(f"User with email {email} not found.")
@@ -64,7 +71,7 @@ def list_beta_testers():
     db = next(get_db())
     
     # Find all users with our special marker
-    beta_testers = db.query(models.User).filter(models.User.stripe_customer_id == BETA_TESTER_MARKER).all()
+    beta_testers = db.query(User).filter(User.stripe_customer_id == BETA_TESTER_MARKER).all()
     
     if not beta_testers:
         print("No beta testers found.")

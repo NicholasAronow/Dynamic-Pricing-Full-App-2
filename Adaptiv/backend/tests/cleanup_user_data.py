@@ -35,15 +35,23 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
-# Import database models
+# Add the backend directory to the Python path and change working directory
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(backend_dir)
+# Change to backend directory so database path is correct
+os.chdir(backend_dir)
 from config.database import SessionLocal
-import models
+from models import (
+    User, PricingRecommendation, AgentMemory, CompetitorPriceHistory,
+    OrderItem, Order, PriceHistory, Item, CompetitorItem, ActionItem,
+    COGS, FixedCost, Employee, BusinessProfile, POSIntegration, Recipe, Ingredient, CompetitorReport, DataCollectionSnapshot
+)
 from sqlalchemy import inspect, text, MetaData
 from sqlalchemy.orm import Session
 
 def get_user_by_id(db: Session, user_id: int) -> Dict[str, Any]:
     """Get user details by ID"""
-    user = db.query(models.User).filter(models.User.id == user_id).first()
+    user = db.query(User).filter(User.id == user_id).first()
     if not user:
         return None
     return {"id": user.id, "email": user.email}
@@ -54,7 +62,7 @@ def get_all_test_users(db: Session) -> List[Dict[str, Any]]:
     users = []
     
     for domain in test_domains:
-        domain_users = db.query(models.User).filter(models.User.email.like(f'%{domain}')).all()
+        domain_users = db.query(User).filter(User.email.like(f'%{domain}')).all()
         users.extend([{"id": user.id, "email": user.email} for user in domain_users])
     
     return users
@@ -76,28 +84,28 @@ def delete_user_data(db: Session, user_id: int, dry_run: bool = False) -> Dict[s
     # This assumes knowledge of your schema - adjust as needed
     tables_to_clean = [
         # Start with the most dependent tables first
-        {"table": models.PricingRecommendation, "user_field": "user_id"},
-        {"table": models.AgentMemory, "user_field": "user_id"},
-        {"table": models.CompetitorPriceHistory, "user_field": "user_id"},
+        {"table": PricingRecommendation, "user_field": "user_id"},
+        {"table": AgentMemory, "user_field": "user_id"},
+        {"table": CompetitorPriceHistory, "user_field": "user_id"},
         # Handle OrderItem before Order
-        {"table": models.OrderItem, "user_field": None, "custom_filter": lambda q, user_id: q.filter(models.OrderItem.order_id.in_(db.query(models.Order.id).filter(models.Order.user_id == user_id)))},
-        {"table": models.Order, "user_field": "user_id"},
+        {"table": OrderItem, "user_field": None, "custom_filter": lambda q, user_id: q.filter(OrderItem.order_id.in_(db.query(Order.id).filter(Order.user_id == user_id)))},
+        {"table": Order, "user_field": "user_id"},
         # Handle PriceHistory before Item (it has foreign keys to Item)
-        {"table": models.PriceHistory, "user_field": "user_id"},
-        {"table": models.Item, "user_field": "user_id"},
-        {"table": models.BusinessProfile, "user_field": "user_id"},
-        {"table": models.Recipe, "user_field": "user_id"},
-        {"table": models.Ingredient, "user_field": "user_id"},
-        {"table": models.COGS, "user_field": "user_id"},
-        {"table": models.Employee, "user_field": "user_id"},
-        {"table": models.FixedCost, "user_field": "user_id"},
+        {"table": PriceHistory, "user_field": "user_id"},
+        {"table": Item, "user_field": "user_id"},
+        {"table": BusinessProfile, "user_field": "user_id"},
+        {"table": Recipe, "user_field": "user_id"},
+        {"table": Ingredient, "user_field": "user_id"},
+        {"table": COGS, "user_field": "user_id"},
+        {"table": Employee, "user_field": "user_id"},
+        {"table": FixedCost, "user_field": "user_id"},
         # We are using Competitor Report in Competitors
-        {"table": models.CompetitorReport, "user_field": "user_id"},
+        {"table": CompetitorReport, "user_field": "user_id"},
         # Handle data collection snapshots before deleting the user
-        {"table": models.DataCollectionSnapshot, "user_field": "user_id"},
+        {"table": DataCollectionSnapshot, "user_field": "user_id"},
         # Add POS integration
-        {"table": models.POSIntegration, "user_field": "user_id"},
-        {"table": models.User, "user_field": "id"},
+        {"table": POSIntegration, "user_field": "user_id"},
+        {"table": User, "user_field": "id"},
         # Add other tables that have user references
     ]
     

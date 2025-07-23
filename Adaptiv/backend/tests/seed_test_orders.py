@@ -17,8 +17,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
 # Import local modules
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-import models
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(backend_dir)
+# Change to backend directory so database path is correct
+os.chdir(backend_dir)
+from models import Item, Order, OrderItem
 from config.database import SessionLocal, engine, Base
 
 # Configure logging
@@ -31,9 +34,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def get_user_items(db: Session, user_id: int) -> List[models.Item]:
+def get_user_items(db: Session, user_id: int) -> List[Item]:
     """Get all menu items for a user"""
-    items = db.query(models.Item).filter(models.Item.user_id == user_id).all()
+    items = db.query(Item).filter(Item.user_id == user_id).all()
     logger.info(f"Found {len(items)} menu items for user {user_id}")
     return items
 
@@ -59,7 +62,7 @@ def generate_order_date(start_date, end_date):
     
     return random_date.replace(hour=hour, minute=minutes, second=seconds)
 
-def generate_order_items(items: List[models.Item], min_items=1, max_items=5):
+def generate_order_items(items: List[Item], min_items=1, max_items=5):
     """Generate a random selection of order items with quantities"""
     
     # If there are fewer than min_items, use all available items
@@ -94,7 +97,7 @@ def create_test_order(db: Session, user_id: int, order_date: datetime, order_ite
     total_amount = sum(item["quantity"] * item["unit_price"] for item in order_items)
     
     # Create order
-    new_order = models.Order(
+    new_order = Order(
         order_date=order_date,
         total_amount=total_amount,
         user_id=user_id,
@@ -108,7 +111,7 @@ def create_test_order(db: Session, user_id: int, order_date: datetime, order_ite
     
     # Create order items
     for item_data in order_items:
-        order_item = models.OrderItem(
+        order_item = OrderItem(
             order_id=new_order.id,
             item_id=item_data["item"].id,
             quantity=item_data["quantity"],

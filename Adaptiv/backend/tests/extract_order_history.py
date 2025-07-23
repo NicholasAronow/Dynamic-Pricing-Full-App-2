@@ -2,10 +2,16 @@
 """
 Extract order history for a specific user or all users
 """
-from config.database import SessionLocal
-import models
-import json
 import sys
+import os
+# Add the backend directory to the Python path and change working directory
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(backend_dir)
+# Change to backend directory so database path is correct
+os.chdir(backend_dir)
+from config.database import SessionLocal
+from models import Order, OrderItem
+import json
 from datetime import datetime, timedelta
 
 def extract_order_history(user_id=None, days=None, output_format='display', output_file=None):
@@ -21,18 +27,18 @@ def extract_order_history(user_id=None, days=None, output_format='display', outp
     db = SessionLocal()
     try:
         # Build the order query
-        query = db.query(models.Order)
+        query = db.query(Order)
         
         # Apply filters
         if user_id:
-            query = query.filter(models.Order.user_id == user_id)
+            query = query.filter(Order.user_id == user_id)
             
         if days:
             cutoff_date = datetime.now() - timedelta(days=days)
-            query = query.filter(models.Order.order_date >= cutoff_date)
+            query = query.filter(Order.order_date >= cutoff_date)
             
         # Sort by date
-        query = query.order_by(models.Order.order_date.desc())
+        query = query.order_by(Order.order_date.desc())
             
         # Execute query
         orders = query.all()
@@ -52,7 +58,7 @@ def extract_order_history(user_id=None, days=None, output_format='display', outp
                 order_date = order.order_date.strftime('%Y-%m-%d %H:%M') if order.order_date else "Unknown date"
                 
                 # Get order items
-                db_order_items = db.query(models.OrderItem).filter(models.OrderItem.order_id == order.id).all()
+                db_order_items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
                 
                 print(f"\nOrder #{order.id} | Date: {order_date} | Total: ${order.total_amount:.2f}")
                 print(f"POS ID: {order.pos_id or 'N/A'}")
@@ -80,7 +86,7 @@ def extract_order_history(user_id=None, days=None, output_format='display', outp
             
             for order in orders:
                 # Get order items
-                db_order_items = db.query(models.OrderItem).filter(models.OrderItem.order_id == order.id).all()
+                db_order_items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
                 
                 # Build order items list
                 order_items = []
@@ -140,7 +146,7 @@ def extract_order_history(user_id=None, days=None, output_format='display', outp
                 )
                 
                 # Get order items
-                db_order_items = db.query(models.OrderItem).filter(models.OrderItem.order_id == order.id).all()
+                db_order_items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
                 
                 for oi in db_order_items:
                     item_name = "Unknown"

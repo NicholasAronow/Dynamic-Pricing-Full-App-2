@@ -8,11 +8,14 @@ import os
 import time
 
 # Add the backend directory to the Python path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(backend_dir)
+# Change to backend directory so database path is correct
+os.chdir(backend_dir)
 
 from tasks import sync_square_data_task
-from database import get_db
-import models
+from config.database import get_db
+from models import User, POSIntegration
 
 def test_background_sync():
     """Test the background sync task"""

@@ -12,14 +12,16 @@ import sys
 import os
 from typing import Dict, Any, Optional
 
-# Add the current directory to path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
+# Add the backend directory to the Python path and change working directory
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+# Change to backend directory so database path is correct
+os.chdir(backend_dir)
 
 # Import database models
 from config.database import SessionLocal
-import models
+from models import User, BusinessProfile, Item, PricingRecommendation
 from sqlalchemy.orm import Session
 
 def get_user_info(user_id: int) -> Optional[Dict[str, Any]]:
@@ -34,18 +36,18 @@ def get_user_info(user_id: int) -> Optional[Dict[str, Any]]:
     """
     db = SessionLocal()
     try:
-        user = db.query(models.User).filter(models.User.id == user_id).first()
+        user = db.query(User).filter(User.id == user_id).first()
         if not user:
             print(f"User with ID {user_id} not found")
             return None
         
         # Get business profile if it exists
-        business = db.query(models.BusinessProfile).filter(models.BusinessProfile.user_id == user_id).first()
+        business = db.query(BusinessProfile).filter(BusinessProfile.user_id == user_id).first()
         business_name = business.business_name if business else "No business profile"
         
         # Get counts of related data
-        item_count = db.query(models.Item).filter(models.Item.user_id == user_id).count()
-        pricing_rec_count = db.query(models.PricingRecommendation).filter(models.PricingRecommendation.user_id == user_id).count()
+        item_count = db.query(Item).filter(Item.user_id == user_id).count()
+        pricing_rec_count = db.query(PricingRecommendation).filter(PricingRecommendation.user_id == user_id).count()
         
         user_info = {
             "id": user.id,

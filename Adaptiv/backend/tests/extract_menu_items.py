@@ -2,10 +2,16 @@
 """
 Extract all menu items for a specific user or all users
 """
-from config.database import SessionLocal
-import models
-import json
 import sys
+import os
+# Add the backend directory to the Python path and change working directory
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(backend_dir)
+# Change to backend directory so database path is correct
+os.chdir(backend_dir)
+from config.database import SessionLocal
+from models import Item
+import json
 
 def extract_menu_items(user_id=None, output_format='display', output_file=None):
     """
@@ -19,9 +25,9 @@ def extract_menu_items(user_id=None, output_format='display', output_file=None):
     db = SessionLocal()
     try:
         # Build the query
-        query = db.query(models.Item)
+        query = db.query(Item)
         if user_id:
-            query = query.filter(models.Item.user_id == user_id)
+            query = query.filter(Item.user_id == user_id)
             
         # Execute query
         items = query.all()

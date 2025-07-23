@@ -2,10 +2,16 @@
 """
 Extract pricing recommendations for a specific user or all users
 """
-from config.database import SessionLocal
-import models
-import json
 import sys
+import os
+# Add the backend directory to the Python path and change working directory
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(backend_dir)
+# Change to backend directory so database path is correct
+os.chdir(backend_dir)
+from config.database import SessionLocal
+from models import PricingRecommendation, User
+import json
 from datetime import datetime, timedelta
 from sqlalchemy import desc, func
 
@@ -23,30 +29,30 @@ def extract_pricing_recommendations(user_id=None, days=None, output_format='disp
     try:
         # Get unique batches of recommendations
         batch_query = db.query(
-            models.PricingRecommendation.batch_id,
-            models.PricingRecommendation.user_id,
-            models.PricingRecommendation.recommendation_date,
-            models.User.email,
-            func.count(models.PricingRecommendation.id).label('rec_count')
+            PricingRecommendation.batch_id,
+            PricingRecommendation.user_id,
+            PricingRecommendation.recommendation_date,
+            User.email,
+            func.count(PricingRecommendation.id).label('rec_count')
         ).join(
-            models.User, models.PricingRecommendation.user_id == models.User.id
+            User, PricingRecommendation.user_id == User.id
         ).group_by(
-            models.PricingRecommendation.batch_id,
-            models.PricingRecommendation.user_id,
-            models.PricingRecommendation.recommendation_date,
-            models.User.email
+            PricingRecommendation.batch_id,
+            PricingRecommendation.user_id,
+            PricingRecommendation.recommendation_date,
+            User.email
         )
         
         # Apply filters
         if user_id:
-            batch_query = batch_query.filter(models.PricingRecommendation.user_id == user_id)
+            batch_query = batch_query.filter(PricingRecommendation.user_id == user_id)
             
         if days:
             cutoff_date = datetime.now() - timedelta(days=days)
-            batch_query = batch_query.filter(models.PricingRecommendation.recommendation_date >= cutoff_date)
+            batch_query = batch_query.filter(PricingRecommendation.recommendation_date >= cutoff_date)
             
         # Sort by date (newest first)
-        batch_query = batch_query.order_by(desc(models.PricingRecommendation.recommendation_date))
+        batch_query = batch_query.order_by(desc(PricingRecommendation.recommendation_date))
         
         # Execute batch query
         batches = batch_query.all()
@@ -76,9 +82,9 @@ def extract_pricing_recommendations(user_id=None, days=None, output_format='disp
                 print("-" * 100)
                 
                 # Get recommendations for this batch
-                recs = db.query(models.PricingRecommendation) \
-                        .filter(models.PricingRecommendation.batch_id == batch_id) \
-                        .order_by(desc(models.PricingRecommendation.price_change_percent)) \
+                recs = db.query(PricingRecommendation) \
+                        .filter(PricingRecommendation.batch_id == batch_id) \
+                        .order_by(desc(PricingRecommendation.price_change_percent)) \
                         .all()
                 
                 print(f"{'Item Name':<40} {'Current':<10} {'Rec.':<10} {'Change':<10} {'Status':<12}")
@@ -107,8 +113,8 @@ def extract_pricing_recommendations(user_id=None, days=None, output_format='disp
                 batch_id = batch.batch_id
                 
                 # Get recommendations for this batch
-                recs = db.query(models.PricingRecommendation) \
-                        .filter(models.PricingRecommendation.batch_id == batch_id) \
+                recs = db.query(PricingRecommendation) \
+                        .filter(PricingRecommendation.batch_id == batch_id) \
                         .all()
                 
                 # Format recommendations
@@ -169,8 +175,8 @@ def extract_pricing_recommendations(user_id=None, days=None, output_format='disp
                 rec_date = batch.recommendation_date.isoformat() if batch.recommendation_date else ''
                 
                 # Get recommendations for this batch
-                recs = db.query(models.PricingRecommendation) \
-                        .filter(models.PricingRecommendation.batch_id == batch_id) \
+                recs = db.query(PricingRecommendation) \
+                        .filter(PricingRecommendation.batch_id == batch_id) \
                         .all()
                 
                 for rec in recs:
