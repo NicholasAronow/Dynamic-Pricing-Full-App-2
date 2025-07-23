@@ -36,6 +36,7 @@ from routers.ai_suggestions import router as ai_suggestions_router
 from routers.other_costs import other_costs_router
 from routers.subscriptions import router as subscriptions_router
 from routers.premium_analytics import router as premium_analytics_router
+from routers.langgraph_routes import router as langgraph_router
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -70,6 +71,7 @@ app.include_router(ai_suggestions_router, prefix="/api", tags=["AI Suggestions"]
 app.include_router(other_costs_router, prefix="/api/costs/other", tags=["Fixed Costs and Employees"])
 app.include_router(subscriptions_router, prefix="/api/subscriptions", tags=["Subscriptions"])
 app.include_router(premium_analytics_router)
+app.include_router(langgraph_router, tags=["LangGraph Multi-Agent"])
 
 @app.get("/")
 async def root():

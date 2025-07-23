@@ -28,6 +28,9 @@ import SubscriptionManagement from './components/subscriptions/SubscriptionManag
 // Support component
 import Support from './components/support/Support';
 
+// Feature component
+import Feature from './components/feature/Feature';
+
 
 // Integration components
 import SquareCallback from './components/integrations/Square/SquareCallback';
@@ -101,6 +104,9 @@ function App() {
               
               {/* Support Route */}
               <Route path="support" element={<Support />} />
+              
+              {/* Feature Route */}
+              <Route path="feature" element={<Feature />} />
               
               <Route path="square-test" element={<SquareOrderTester />} />
               <Route path="integrations/square" element={<SquareIntegrationPage />} />
