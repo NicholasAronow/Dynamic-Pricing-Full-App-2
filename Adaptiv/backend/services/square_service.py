@@ -374,10 +374,22 @@ class SquareService:
             if not integration:
                 raise ValueError("Square integration not found for user")
             
-            # Get orders from the last N days
-            start_date = datetime.now() - timedelta(days=days)
+            # Get the most recent order date to avoid re-processing
+            latest_order = self.db.query(models.Order).filter(
+                models.Order.user_id == user_id
+            ).order_by(models.Order.order_date.desc()).first()
             
-            # Search for orders
+            # Determine start date for sync
+            if latest_order and latest_order.order_date:
+                # Add a small buffer (1 hour) to account for any timezone issues
+                start_date = latest_order.order_date - timedelta(hours=1)
+                logger.info(f"Starting incremental sync from {start_date.isoformat()}")
+            else:
+                # No existing orders, get from the last N days
+                start_date = datetime.now() - timedelta(days=days)
+                logger.info(f"Starting full sync from {start_date.isoformat()}")
+            
+            # Build search query with date filter
             request_body = {
                 'query': {
                     'filter': {
@@ -390,18 +402,15 @@ class SquareService:
                 }
             }
             
-            # location_ids is required and goes at the top level
             # Get all location IDs for multi-location support
             location_ids = self.get_all_location_ids(user_id)
             
             if not location_ids:
-                # Try to fetch and update location ID if none found
                 logger.info(f"No location_ids found for user {user_id}, attempting to fetch from Square API")
                 if not self.fetch_and_update_location_id(user_id):
                     logger.error(f"Failed to fetch location_id for user {user_id}")
                     return {'orders_created': 0, 'orders_updated': 0, 'error': 'Failed to fetch location_id'}
                 
-                # Try again to get location IDs
                 location_ids = self.get_all_location_ids(user_id)
                 if not location_ids:
                     logger.error(f"Still no location_ids after fetch attempt for user {user_id}")
@@ -410,23 +419,43 @@ class SquareService:
             request_body['location_ids'] = location_ids
             logger.info(f"Searching orders for user {user_id} across {len(location_ids)} location(s): {location_ids}")
             
+            # Pre-fetch all existing orders to avoid N+1 queries
+            existing_order_ids = set()
+            existing_orders_query = self.db.query(models.Order.pos_id).filter(
+                models.Order.user_id == user_id,
+                models.Order.pos_id.isnot(None)
+            )
+            for order in existing_orders_query:
+                existing_order_ids.add(order.pos_id)
+            
+            # Pre-fetch all items for this user to create a mapping
+            items_map = {}
+            user_items = self.db.query(models.Item).filter(
+                models.Item.user_id == user_id
+            ).all()
+            for item in user_items:
+                if item.pos_id:
+                    items_map[item.pos_id] = item
+            
             orders_created = 0
             orders_updated = 0
             cursor = None
             page_count = 0
             
-            # Handle pagination - keep fetching until no more pages
+            # Batch operations
+            new_orders = []
+            new_order_items = []
+            
+            # Handle pagination
             while True:
                 page_count += 1
                 
-                # Add cursor to request if we have one (for pagination)
                 current_request = request_body.copy()
                 if cursor:
                     current_request['cursor'] = cursor
                 
-                logger.info(f"Fetching orders page {page_count} for user {user_id}" + (f" (cursor: {cursor[:20]}...)" if cursor else ""))
+                logger.info(f"Fetching orders page {page_count} for user {user_id}")
                 
-                # Make API request to search orders
                 response = self._make_square_request_with_refresh(
                     '/v2/orders/search',
                     user_id,
@@ -441,92 +470,81 @@ class SquareService:
                     logger.info(f"No orders found on page {page_count}, stopping pagination")
                     break
                 
-                # Process orders in this page
+                # Process orders in batch
                 for order_data in orders_in_page:
                     order_id = order_data.get('id')
-                    order_location_id = order_data.get('location_id')  # Get location ID from order data
                     
-                    # Check if order already exists
-                    existing_order = self.db.query(models.Order).filter(
-                        and_(
-                            models.Order.user_id == user_id,
-                            models.Order.pos_id == order_id
-                        )
-                    ).first()
+                    # Skip if order already exists
+                    if order_id in existing_order_ids:
+                        orders_updated += 1
+                        continue
                     
-                    # Parse order date
+                    order_location_id = order_data.get('location_id')
                     order_date = datetime.fromisoformat(
                         order_data.get('created_at', '').replace('Z', '+00:00')
                     )
                     
-                    # Calculate total amount
                     total_money = order_data.get('total_money', {})
                     total_amount = float(total_money.get('amount', 0)) / 100 if total_money.get('amount') else 0
                     
-                    if existing_order:
-                        # Update existing order
-                        existing_order.total_amount = total_amount
-                        existing_order.order_date = order_date
-                        existing_order.location_id = order_location_id  # Update location ID
-                        existing_order.updated_at = datetime.now()
-                        orders_updated += 1
-                        order_obj = existing_order
-                    else:
-                        # Create new order
-                        order_obj = models.Order(
-                            user_id=user_id,
-                            pos_id=order_id,
-                            location_id=order_location_id,  # Store location ID
-                            order_date=order_date,
-                            total_amount=total_amount,
-                            created_at=datetime.now(),
-                            updated_at=datetime.now()
-                        )
-                        self.db.add(order_obj)
-                        self.db.flush()  # Get the order ID
-                        orders_created += 1
+                    # Create new order object (don't add to DB yet)
+                    new_order = models.Order(
+                        user_id=user_id,
+                        pos_id=order_id,
+                        location_id=order_location_id,
+                        order_date=order_date,
+                        total_amount=total_amount,
+                        created_at=datetime.now(),
+                        updated_at=datetime.now()
+                    )
+                    new_orders.append(new_order)
                     
                     # Process line items
                     line_items = order_data.get('line_items', [])
                     for line_item in line_items:
                         catalog_object_id = line_item.get('catalog_object_id')
-                        if not catalog_object_id:
+                        if not catalog_object_id or catalog_object_id not in items_map:
                             continue
                         
-                        # Find the corresponding item
-                        item = self.db.query(models.Item).filter(
-                            and_(
-                                models.Item.user_id == user_id,
-                                models.Item.pos_id == catalog_object_id
-                            )
-                        ).first()
+                        item = items_map[catalog_object_id]
+                        quantity = int(line_item.get('quantity', 1))
+                        unit_price = float(line_item.get('base_price_money', {}).get('amount', 0)) / 100
                         
-                        if item:
-                            quantity = int(line_item.get('quantity', 1))
-                            unit_price = float(line_item.get('base_price_money', {}).get('amount', 0)) / 100
-                            
-                            # Check if order item already exists
-                            existing_order_item = self.db.query(models.OrderItem).filter(
-                                and_(
-                                    models.OrderItem.order_id == order_obj.id,
-                                    models.OrderItem.item_id == item.id
-                                )
-                            ).first()
-                            
-                            if not existing_order_item:
-                                order_item = models.OrderItem(
-                                    order_id=order_obj.id,
-                                    item_id=item.id,
-                                    quantity=quantity,
-                                    unit_price=unit_price
-                                )
-                                self.db.add(order_item)
+                        # Store order item data for batch insert
+                        new_order_items.append({
+                            'order': new_order,
+                            'item_id': item.id,
+                            'quantity': quantity,
+                            'unit_price': unit_price
+                        })
+                    
+                    orders_created += 1
                 
-                # Check if there's a cursor for next page
+                # Check for next page
                 cursor = response.get('cursor')
                 if not cursor:
                     logger.info(f"No more pages available, pagination complete for user {user_id}")
                     break
+            
+            # Bulk insert all new orders
+            if new_orders:
+                self.db.bulk_save_objects(new_orders)
+                self.db.flush()  # Get IDs for the orders
+                
+                # Now create OrderItem objects with proper order IDs
+                order_item_objects = []
+                for item_data in new_order_items:
+                    order_item = models.OrderItem(
+                        order_id=item_data['order'].id,
+                        item_id=item_data['item_id'],
+                        quantity=item_data['quantity'],
+                        unit_price=item_data['unit_price']
+                    )
+                    order_item_objects.append(order_item)
+                
+                # Bulk insert order items
+                if order_item_objects:
+                    self.db.bulk_save_objects(order_item_objects)
             
             self.db.commit()
             logger.info(f"Orders sync completed for user {user_id}: {orders_created} created, {orders_updated} updated across {page_count} pages")

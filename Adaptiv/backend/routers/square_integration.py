@@ -982,7 +982,7 @@ async def sync_initial_data(user_id: int, db: Session, force_sync: bool = False)
                 "Authorization": f"Bearer {integration.access_token}",
                 "Content-Type": "application/json"
             },
-            timeout=10  # Add timeout to prevent hanging requests
+            timeout=10
         )
         
         locations_data = locations_response.json()
@@ -1021,6 +1021,19 @@ async def sync_initial_data(user_id: int, db: Session, force_sync: bool = False)
         
         logger.info(f"Found {len(items)} items in Square catalog")
         
+        # Pre-load all existing items for this user to avoid N+1 queries
+        existing_items_by_pos_id = {}
+        existing_items_by_name = {}
+        for item in db.query(models.Item).filter(models.Item.user_id == user_id).all():
+            if item.pos_id:
+                existing_items_by_pos_id[item.pos_id] = item
+            existing_items_by_name[item.name.lower()] = item
+        
+        # Batch operations for catalog items
+        new_items = []
+        items_to_update = []
+        price_history_records = []
+        
         # Process each catalog item
         for item_obj in items:
             if item_obj.get("type") != "ITEM":
@@ -1053,39 +1066,29 @@ async def sync_initial_data(user_id: int, db: Session, force_sync: bool = False)
             if price is None:
                 continue
                 
-            # Check if item already exists by Square ID first
-            existing_item = db.query(models.Item).filter(
-                models.Item.pos_id == square_item_id,
-                models.Item.user_id == user_id
-            ).first()
-            
-            # If not found by ID, try by name
-            if not existing_item:
-                existing_item = db.query(models.Item).filter(
-                    models.Item.name == name,
-                    models.Item.user_id == user_id
-                ).first()
+            # Check if item already exists using pre-loaded data
+            existing_item = existing_items_by_pos_id.get(square_item_id) or \
+                           existing_items_by_pos_id.get(square_variation_id) or \
+                           existing_items_by_name.get(name.lower())
             
             if existing_item:
                 # Update existing item
                 if existing_item.current_price != price:
-                    # Create price history
-                    price_history = models.PriceHistory(
+                    # Create price history record (will batch insert later)
+                    price_history_records.append(models.PriceHistory(
                         item_id=existing_item.id,
                         user_id=user_id,
                         previous_price=existing_item.current_price,
                         new_price=price,
                         change_reason="Updated from Square"
-                    )
-                    db.add(price_history)
+                    ))
                 
                 # Update item
                 existing_item.current_price = price
                 existing_item.description = description or existing_item.description
                 existing_item.updated_at = datetime.now()
-                # IMPORTANT: Store the variation ID in pos_id, not the main item ID
-                # This is because price updates are done at the variation level
                 existing_item.pos_id = square_variation_id if square_variation_id else square_item_id
+                items_to_update.append(existing_item)
                 items_updated += 1
                 
                 # Add to mapping
@@ -1097,31 +1100,63 @@ async def sync_initial_data(user_id: int, db: Session, force_sync: bool = False)
                 new_item = models.Item(
                     name=name,
                     description=description,
-                    category="From Square",  # Default category
+                    category="From Square",
                     current_price=price,
                     user_id=user_id,
-                    pos_id=square_variation_id if square_variation_id else square_item_id  # Store variation ID for price updates
+                    pos_id=square_variation_id if square_variation_id else square_item_id
                 )
-                db.add(new_item)
-                db.flush()  # Get ID of new item
+                new_items.append(new_item)
                 items_created += 1
-                
-                # Add to mapping
-                catalog_mapping[square_item_id] = new_item.id
-                if square_variation_id:
-                    catalog_mapping[square_variation_id] = new_item.id
+        
+        # Bulk insert new items
+        if new_items:
+            db.bulk_save_objects(new_items, return_defaults=True)
+            db.flush()
+            
+            # Add new items to mapping
+            for item in new_items:
+                if item.pos_id:
+                    catalog_mapping[item.pos_id] = item.id
+                catalog_mapping[item.name] = item.id
+        
+        # Bulk insert price history records
+        if price_history_records:
+            db.bulk_save_objects(price_history_records)
         
         # Commit catalog changes
         db.commit()
         logger.info(f"Catalog sync complete. Created: {items_created}, Updated: {items_updated}")
         
-        # Sync orders from all locations
-        orders_created = 0
-        orders_failed = 0
-        last_sync_time = None
+        # Get the most recent order to determine sync start date
+        latest_order = db.query(models.Order).filter(
+            models.Order.user_id == user_id
+        ).order_by(models.Order.order_date.desc()).first()
         
-        # We're no longer applying a date filter to ensure we get all historical orders
-        logger.info("Retrieving all historical orders without date filtering")
+        if latest_order and latest_order.order_date and not force_sync:
+            # Incremental sync - only get orders after the latest one
+            start_date = latest_order.order_date - timedelta(hours=1)  # 1 hour buffer
+            logger.info(f"Incremental sync: Getting orders after {start_date.isoformat()}")
+        else:
+            # Full sync - no date filter
+            start_date = None
+            logger.info("Full sync: Getting all historical orders")
+        
+        # Pre-load existing orders to check for duplicates
+        existing_order_ids = set()
+        if not force_sync:
+            existing_orders = db.query(models.Order.pos_id).filter(
+                models.Order.user_id == user_id,
+                models.Order.pos_id.isnot(None)
+            ).all()
+            existing_order_ids = {order.pos_id for order in existing_orders}
+            logger.info(f"Found {len(existing_order_ids)} existing orders to skip")
+        
+        # Batch collections for bulk operations
+        all_new_orders = []
+        all_new_order_items = []
+        orders_created = 0
+        orders_skipped = 0
+        orders_failed = 0
         
         # Process each location
         for location in locations:
@@ -1130,10 +1165,7 @@ async def sync_initial_data(user_id: int, db: Session, force_sync: bool = False)
             
             logger.info(f"Syncing orders from location: {location_name} ({location_id})")
             
-            # Log that we're fetching all orders
-            logger.info(f"Fetching all completed orders for location {location_name}")
-            
-            # Build request JSON with only state filter (no date filter)
+            # Build request with optional date filter
             request_json = {
                 "location_ids": [location_id],
                 "query": {
@@ -1145,307 +1177,168 @@ async def sync_initial_data(user_id: int, db: Session, force_sync: bool = False)
                         "sort_order": "ASC"
                     }
                 },
-                "limit": 1000  # Square limits to 100 orders per request
+                "limit": 1000
             }
             
-            # Get orders from Square with date filter
-            orders_response = requests.post(
-                f"{SQUARE_API_BASE}/v2/orders/search",
-                headers={
-                    "Authorization": f"Bearer {integration.access_token}",
-                    "Content-Type": "application/json"
-                },
-                json=request_json,
-                timeout=15  # Longer timeout for orders
-            )
+            # Add date filter if doing incremental sync
+            if start_date:
+                request_json["query"]["filter"]["date_time_filter"] = {
+                    "created_at": {
+                        "start_at": start_date.isoformat() + 'Z'
+                    }
+                }
             
-            if orders_response.status_code != 200:
-                logger.error(f"Failed to get orders from location {location_name}: {orders_response.json().get('errors', [])}")
-                orders_failed += 1
-                continue
+            # Process with pagination
+            cursor = None
+            location_page = 0
             
-            orders_data = orders_response.json()
-            orders = orders_data.get("orders", [])
-            entries = orders_data.get("entries", [])
-            
-            # Log detailed order info for debugging
-            logger.info(f"Found {len(orders)} orders in location {location_name}")
-            logger.info(f"Response contains {len(entries)} order entries")
-            
-            # Log the raw response structure to debug
-            logger.info(f"Orders response keys: {list(orders_data.keys())}")
-            
-            # Check if there are any errors
-            if "errors" in orders_data:
-                logger.error(f"Square API errors: {orders_data['errors']}")
-            
-            # Process each order
-            for order in orders:
-                # Get order date and ID
-                created_at = order.get("created_at")
-                if not created_at:
-                    continue
+            while True:
+                location_page += 1
                 
-                order_date = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                square_order_id = order.get("id")
+                if cursor:
+                    request_json["cursor"] = cursor
                 
-                # Check if order already exists
-                existing_order = db.query(models.Order).filter(
-                    models.Order.user_id == user_id,
-                    models.Order.pos_id == square_order_id
-                ).first()
-                
-                if existing_order:
-                    logger.debug(f"Order {square_order_id} already exists, skipping")
-                    continue
-                
-                # Calculate total from line items
-                total_amount = 0
-                order_items = []
-                
-                line_items = order.get("line_items", [])
-                for line_item in line_items:
-                    # Get item details
-                    name = line_item.get("name", "")
-                    quantity = int(line_item.get("quantity", 1))
-                    
-                    # Get catalog ID from variation ID if available
-                    catalog_object_id = line_item.get("catalog_object_id")
-                    
-                    # Extract price
-                    base_price_money = line_item.get("base_price_money", {})
-                    unit_price = base_price_money.get("amount", 0) / 100.0  # Convert cents to dollars
-                    
-                    # Calculate line item total
-                    item_total = unit_price * quantity
-                    total_amount += item_total
-                    
-                    # Find matching item in database through the catalog mapping
-                    item_id = None
-                    if catalog_object_id and catalog_object_id in catalog_mapping:
-                        item_id = catalog_mapping[catalog_object_id]
-                    
-                    if not item_id:
-                        # Try to find by name if not in mapping
-                        item = db.query(models.Item).filter(
-                            models.Item.name == name,
-                            models.Item.user_id == user_id
-                        ).first()
-                        
-                        if item:
-                            item_id = item.id
-                        else:
-                            # Create new item if not exists
-                            new_item = models.Item(
-                                name=name,
-                                description=f"Imported from Square - {location_name}",
-                                category="From Square",  # Default category
-                                current_price=unit_price,
-                                user_id=user_id,
-                                pos_id=catalog_object_id  # Store Square ID if available
-                            )
-                            db.add(new_item)
-                            db.flush()  # Get ID
-                            
-                            item_id = new_item.id
-                            if catalog_object_id:
-                                catalog_mapping[catalog_object_id] = item_id
-                    
-                    # Add to order items list
-                    order_items.append({
-                        "item_id": item_id,
-                        "quantity": quantity,
-                        "unit_price": unit_price
-                    })
-                
-                # Create order
-                new_order = models.Order(
-                    order_date=order_date,
-                    total_amount=total_amount,
-                    user_id=user_id,
-                    pos_id=square_order_id,  # Store Square order ID
-                    created_at=order_date,    # Use Square creation date
-                    updated_at=order_date
-                )
-                db.add(new_order)
-                db.flush()  # Get ID of new order
-                
-                # Add order items
-                for item_data in order_items:
-                    order_item = models.OrderItem(
-                        order_id=new_order.id,
-                        item_id=item_data["item_id"],
-                        quantity=item_data["quantity"],
-                        unit_price=item_data["unit_price"]
-                    )
-                    db.add(order_item)
-                
-                orders_created += 1
-            
-            # Handle pagination to fetch all orders
-            cursor = orders_data.get("cursor")
-            page_count = 1
-            max_pages = 1000  # Increased max pages to ensure we get all orders
-            
-            logger.info(f"Initial page has {len(orders)} orders, cursor present: {cursor is not None}")
-            
-            while cursor and page_count < max_pages:
-                logger.info(f"Fetching additional orders with cursor for location {location_name}")
-                
-                # Update request JSON with cursor for next page
-                request_json["cursor"] = cursor
-                
-                # Fetch next page of orders
-                next_page_response = requests.post(
+                orders_response = requests.post(
                     f"{SQUARE_API_BASE}/v2/orders/search",
                     headers={
                         "Authorization": f"Bearer {integration.access_token}",
                         "Content-Type": "application/json"
                     },
                     json=request_json,
-                    timeout=30  # Increased timeout for orders
+                    timeout=30
                 )
                 
-                logger.info(f"Pagination request for page {page_count+1} status: {next_page_response.status_code}")
-                
-                if next_page_response.status_code != 200:
-                    logger.error(f"Failed to get paginated orders from location {location_name}: {next_page_response.json().get('errors', [])}")
+                if orders_response.status_code != 200:
+                    logger.error(f"Failed to get orders from location {location_name}: {orders_response.json().get('errors', [])}")
+                    orders_failed += 1
                     break
                 
-                try:
-                    next_page_data = next_page_response.json()
-                    next_page_orders = next_page_data.get("orders", [])
-                    
-                    logger.info(f"Found {len(next_page_orders)} additional orders in location {location_name} (page {page_count+1})")
-                    
-                    # Debug cursor information
-                    new_cursor = next_page_data.get("cursor")
-                    logger.info(f"New cursor received: {new_cursor is not None}")
-                    
-                    if cursor == new_cursor:
-                        logger.error(f"Cursor did not change! Breaking pagination loop to avoid infinite loop")
-                        break
-                        
-                    cursor = new_cursor
-                except Exception as e:
-                    logger.exception(f"Error parsing pagination response: {str(e)}")
+                orders_data = orders_response.json()
+                orders = orders_data.get("orders", [])
+                
+                if not orders:
                     break
                 
-                # Process each order in the next page
-                for order in next_page_orders:
-                    # Get order date and ID
+                logger.info(f"Processing {len(orders)} orders from location {location_name} (page {location_page})")
+                
+                # Process orders in this batch
+                for order in orders:
+                    square_order_id = order.get("id")
+                    
+                    # Skip if already exists
+                    if square_order_id in existing_order_ids:
+                        orders_skipped += 1
+                        continue
+                    
                     created_at = order.get("created_at")
                     if not created_at:
                         continue
                     
                     order_date = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                    square_order_id = order.get("id")
                     
-                    # Check if order already exists
-                    existing_order = db.query(models.Order).filter(
-                        models.Order.user_id == user_id,
-                        models.Order.pos_id == square_order_id
-                    ).first()
-                    
-                    if existing_order:
-                        logger.debug(f"Order {square_order_id} already exists, skipping")
-                        continue
-                    
-                    # Calculate total from line items
+                    # Calculate total
                     total_amount = 0
-                    order_items = []
+                    order_items_data = []
                     
                     line_items = order.get("line_items", [])
                     for line_item in line_items:
-                        # Get item details
                         name = line_item.get("name", "")
                         quantity = int(line_item.get("quantity", 1))
-                        
-                        # Get catalog ID from variation ID if available
                         catalog_object_id = line_item.get("catalog_object_id")
                         
-                        # Extract price
                         base_price_money = line_item.get("base_price_money", {})
-                        unit_price = base_price_money.get("amount", 0) / 100.0  # Convert cents to dollars
+                        unit_price = base_price_money.get("amount", 0) / 100.0
                         
-                        # Calculate line item total
                         item_total = unit_price * quantity
                         total_amount += item_total
                         
-                        # Find matching item in database through the catalog mapping
+                        # Find item ID from catalog mapping
                         item_id = None
                         if catalog_object_id and catalog_object_id in catalog_mapping:
                             item_id = catalog_mapping[catalog_object_id]
-                        
-                        if not item_id:
-                            # Try to find by name if not in mapping
-                            item = db.query(models.Item).filter(
-                                models.Item.name == name,
-                                models.Item.user_id == user_id
-                            ).first()
-                            
-                            if item:
-                                item_id = item.id
-                            else:
-                                # Create new item if not exists
-                                new_item = models.Item(
-                                    name=name,
-                                    description=f"Imported from Square - {location_name}",
-                                    category="From Square",  # Default category
-                                    current_price=unit_price,
-                                    user_id=user_id,
-                                    pos_id=catalog_object_id  # Store Square ID if available
-                                )
-                                db.add(new_item)
-                                db.flush()  # Get ID
+                        elif name:
+                            # Try to find by name if not in mapping - but cache the result
+                            if name not in catalog_mapping:
+                                item = existing_items_by_name.get(name.lower())
                                 
-                                item_id = new_item.id
-                                if catalog_object_id:
-                                    catalog_mapping[catalog_object_id] = item_id
+                                if item:
+                                    catalog_mapping[name] = item.id
+                                    item_id = item.id
+                                else:
+                                    # Create new item
+                                    new_item = models.Item(
+                                        name=name,
+                                        description=f"Imported from Square - {location_name}",
+                                        category="From Square",
+                                        current_price=unit_price,
+                                        user_id=user_id,
+                                        pos_id=catalog_object_id
+                                    )
+                                    db.add(new_item)
+                                    db.flush()
+                                    catalog_mapping[name] = new_item.id
+                                    if catalog_object_id:
+                                        catalog_mapping[catalog_object_id] = new_item.id
+                                    item_id = new_item.id
+                            else:
+                                item_id = catalog_mapping[name]
                         
-                        # Add to order items list
-                        order_items.append({
-                            "item_id": item_id,
-                            "quantity": quantity,
-                            "unit_price": unit_price
-                        })
+                        if item_id:
+                            order_items_data.append({
+                                "item_id": item_id,
+                                "quantity": quantity,
+                                "unit_price": unit_price
+                            })
                     
-                    # Create order
+                    # Create order object
                     new_order = models.Order(
                         order_date=order_date,
                         total_amount=total_amount,
                         user_id=user_id,
-                        pos_id=square_order_id,  # Store Square order ID
-                        created_at=order_date,    # Use Square creation date
-                        updated_at=order_date
+                        pos_id=square_order_id,
+                        location_id=location_id,
+                        created_at=datetime.now(),
+                        updated_at=datetime.now()
                     )
-                    db.add(new_order)
-                    db.flush()  # Get ID of new order
+                    all_new_orders.append(new_order)
                     
-                    # Add order items
-                    for item_data in order_items:
-                        order_item = models.OrderItem(
-                            order_id=new_order.id,
-                            item_id=item_data["item_id"],
-                            quantity=item_data["quantity"],
-                            unit_price=item_data["unit_price"]
-                        )
-                        db.add(order_item)
-                    
+                    # Store order items data for later
+                    all_new_order_items.append((new_order, order_items_data))
                     orders_created += 1
+                    
+                    # Add to existing set to avoid duplicates in same sync
+                    existing_order_ids.add(square_order_id)
                 
-                # Increment page counter
-                page_count += 1
-                
+                # Get next cursor
+                cursor = orders_data.get("cursor")
                 if not cursor:
-                    logger.info("No more cursor returned. Pagination complete.")
                     break
         
-        # Commit all changes
-        db.commit()
+        # Bulk insert all orders at once
+        if all_new_orders:
+            logger.info(f"Bulk inserting {len(all_new_orders)} new orders...")
+            db.bulk_save_objects(all_new_orders, return_defaults=True)
+            db.flush()  # Get IDs
+            
+            # Now create all order items
+            order_item_objects = []
+            for order, items_data in all_new_order_items:
+                for item_data in items_data:
+                    order_item = models.OrderItem(
+                        order_id=order.id,
+                        item_id=item_data["item_id"],
+                        quantity=item_data["quantity"],
+                        unit_price=item_data["unit_price"]
+                    )
+                    order_item_objects.append(order_item)
+            
+            if order_item_objects:
+                logger.info(f"Bulk inserting {len(order_item_objects)} order items...")
+                db.bulk_save_objects(order_item_objects)
         
-        # Debug info about orders synced
-        logger.info(f"Total sync complete: {orders_created} orders created across {len(locations)} locations")
+        # Commit all changes at once
+        db.commit()
+        logger.info(f"Orders sync complete: {orders_created} created, {orders_skipped} skipped")
         
         # Update integration with last sync time
         integration.last_sync_at = datetime.now()
@@ -1457,6 +1350,7 @@ async def sync_initial_data(user_id: int, db: Session, force_sync: bool = False)
             "items_created": items_created,
             "items_updated": items_updated,
             "orders_created": orders_created,
+            "orders_skipped": orders_skipped,
             "locations_processed": len(locations),
             "locations_failed": orders_failed
         }
@@ -1464,6 +1358,7 @@ async def sync_initial_data(user_id: int, db: Session, force_sync: bool = False)
         logger.exception(f"Error syncing Square data: {str(e)}")
         db.rollback()
         return {"success": False, "error": str(e)}
+    
 async def _get_integration(user_id: int, db: Session) -> models.POSIntegration:
     """Get Square integration for user or raise exception"""
     integration = db.query(models.POSIntegration).filter(
