@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 import models
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional, Tuple
 import logging
 import requests
@@ -45,6 +45,36 @@ class SquareService:
         except requests.exceptions.RequestException as e:
             logger.error(f"Square API request failed: {e}")
             raise
+    
+    def _make_square_request_with_refresh(self, endpoint: str, user_id: int, method: str = 'GET', data: Dict = None) -> Dict[str, Any]:
+        """
+        Make a request to the Square API with automatic token refresh on 401 errors.
+        """
+        integration = self.get_user_square_integration(user_id)
+        if not integration:
+            raise ValueError(f"No Square integration found for user {user_id}")
+        
+        try:
+            # First attempt with current token
+            return self._make_square_request(endpoint, integration.access_token, method, data)
+            
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 401:
+                logger.info(f"Access token expired for user {user_id}, attempting refresh")
+                
+                # Try to refresh the token
+                if self.refresh_access_token(user_id):
+                    # Get the updated integration with new token
+                    integration = self.get_user_square_integration(user_id)
+                    if integration:
+                        logger.info(f"Retrying request with refreshed token for user {user_id}")
+                        return self._make_square_request(endpoint, integration.access_token, method, data)
+                
+                logger.error(f"Token refresh failed for user {user_id}, cannot complete request")
+                raise ValueError(f"Authentication failed for user {user_id} - token refresh unsuccessful")
+            else:
+                # Re-raise non-401 errors
+                raise
     
     def get_user_square_integration(self, user_id: int) -> Optional[models.POSIntegration]:
         """
@@ -119,9 +149,9 @@ class SquareService:
                 return True
             
             # Fetch locations from Square API
-            response = self._make_square_request(
+            response = self._make_square_request_with_refresh(
                 '/v2/locations',
-                integration.access_token
+                user_id
             )
             
             locations = response.get('locations', [])
@@ -131,21 +161,26 @@ class SquareService:
             
             logger.info(f"Found {len(locations)} location(s) for user {user_id}")
             
-            # Use the first location as primary (most merchants have one location)
-            # For multi-location merchants, we'll search all locations in orders sync
-            location_id = locations[0].get('id')
-            if not location_id:
-                logger.error(f"Invalid location data for user {user_id}")
+            # Extract all location IDs
+            location_ids = [loc.get('id') for loc in locations if loc.get('id')]
+            if not location_ids:
+                logger.error(f"No valid location IDs found for user {user_id}")
                 return False
             
-            # Update the integration with the primary location ID
-            integration.pos_id = location_id
+            # Use the first location as primary
+            primary_location_id = location_ids[0]
+            
+            # Update the integration with location data
+            integration.pos_id = primary_location_id  # Primary location
+            integration.location_ids = json.dumps(location_ids)  # All locations as JSON
             integration.updated_at = datetime.now()
             self.db.commit()
             
-            logger.info(f"Updated primary location ID for user {user_id}: {location_id}")
-            if len(locations) > 1:
-                logger.info(f"User {user_id} has {len(locations)} locations - orders will be synced from all locations")
+            logger.info(f"Updated location data for user {user_id}:")
+            logger.info(f"  Primary location: {primary_location_id}")
+            logger.info(f"  All locations: {location_ids}")
+            if len(location_ids) > 1:
+                logger.info(f"Multi-location merchant: orders will be synced from all {len(location_ids)} locations")
             
             return True
             
@@ -156,7 +191,8 @@ class SquareService:
     
     def get_all_location_ids(self, user_id: int) -> List[str]:
         """
-        Get all location IDs for a user from Square API.
+        Get all location IDs for a user. First tries stored location_ids,
+        then falls back to fetching from Square API.
         Returns list of location IDs, or empty list if none found.
         """
         try:
@@ -164,14 +200,33 @@ class SquareService:
             if not integration:
                 return []
             
-            # Fetch locations from Square API
-            response = self._make_square_request(
+            # First try to use stored location IDs
+            if integration.location_ids:
+                try:
+                    stored_location_ids = json.loads(integration.location_ids)
+                    if stored_location_ids:
+                        logger.info(f"Using stored location IDs for user {user_id}: {stored_location_ids}")
+                        return stored_location_ids
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Failed to parse stored location_ids for user {user_id}: {e}")
+            
+            # Fallback: fetch from Square API
+            logger.info(f"Fetching location IDs from Square API for user {user_id}")
+            response = self._make_square_request_with_refresh(
                 '/v2/locations',
-                integration.access_token
+                user_id
             )
             
             locations = response.get('locations', [])
             location_ids = [loc.get('id') for loc in locations if loc.get('id')]
+            
+            # Store the fetched location IDs for future use
+            if location_ids:
+                integration.location_ids = json.dumps(location_ids)
+                if not integration.pos_id:
+                    integration.pos_id = location_ids[0]  # Set primary if not set
+                integration.updated_at = datetime.now()
+                self.db.commit()
             
             logger.info(f"Found {len(location_ids)} location IDs for user {user_id}: {location_ids}")
             return location_ids
@@ -179,6 +234,61 @@ class SquareService:
         except Exception as e:
             logger.error(f"Error fetching all location IDs for user {user_id}: {str(e)}")
             return []
+    
+    def refresh_access_token(self, user_id: int) -> bool:
+        """
+        Refresh the Square access token using the refresh token.
+        Returns True if successful, False otherwise.
+        """
+        try:
+            integration = self.get_user_square_integration(user_id)
+            if not integration or not integration.refresh_token:
+                logger.error(f"No refresh token available for user {user_id}")
+                return False
+            
+            # Square token refresh endpoint
+            refresh_url = 'https://connect.squareup.com/oauth2/token'
+            
+            payload = {
+                'client_id': os.getenv('SQUARE_APPLICATION_ID'),
+                'client_secret': os.getenv('SQUARE_APPLICATION_SECRET'),
+                'grant_type': 'refresh_token',
+                'refresh_token': integration.refresh_token
+            }
+            
+            headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+            
+            response = requests.post(refresh_url, json=payload, headers=headers)
+            
+            if response.status_code == 200:
+                token_data = response.json()
+                
+                # Update the integration with new tokens
+                integration.access_token = token_data.get('access_token')
+                if token_data.get('refresh_token'):
+                    integration.refresh_token = token_data.get('refresh_token')
+                
+                # Calculate expiration time
+                expires_in = token_data.get('expires_in')  # seconds
+                if expires_in:
+                    integration.expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+                
+                integration.updated_at = datetime.now()
+                self.db.commit()
+                
+                logger.info(f"Successfully refreshed access token for user {user_id}")
+                return True
+            else:
+                logger.error(f"Token refresh failed for user {user_id}: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error refreshing token for user {user_id}: {str(e)}")
+            self.db.rollback()
+            return False
     
     def sync_square_catalog(self, user_id: int) -> Dict[str, Any]:
         """
@@ -190,9 +300,9 @@ class SquareService:
                 raise ValueError("Square integration not found for user")
             
             # Get catalog items from Square using HTTP request
-            response = self._make_square_request(
+            response = self._make_square_request_with_refresh(
                 '/v2/catalog/list?types=ITEM',
-                integration.access_token
+                user_id
             )
             
             items_created = 0
@@ -301,9 +411,9 @@ class SquareService:
             logger.info(f"Searching orders for user {user_id} across {len(location_ids)} location(s): {location_ids}")
             
             # Make API request to search orders
-            response = self._make_square_request(
+            response = self._make_square_request_with_refresh(
                 '/v2/orders/search',
-                integration.access_token,
+                user_id,
                 method='POST',
                 data=request_body
             )

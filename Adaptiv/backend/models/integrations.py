@@ -18,7 +18,8 @@ class POSIntegration(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     last_sync_at = Column(DateTime(timezone=True), nullable=True)
-    pos_id = Column(String, nullable=True, index=True)  # Store external order IDs
+    pos_id = Column(String, nullable=True, index=True)  # Store primary location ID
+    location_ids = Column(String, nullable=True)  # Store all location IDs as JSON string
     
     # Relationship to User
     user = relationship("User", backref="pos_integrations")
