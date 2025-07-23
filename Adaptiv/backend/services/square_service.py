@@ -190,25 +190,32 @@ class SquareService:
             start_date = datetime.now() - timedelta(days=days)
             
             # Search for orders
-            search_query = {
-                'filter': {
-                    'date_time_filter': {
-                        'created_at': {
-                            'start_at': start_date.isoformat() + 'Z'
+            request_body = {
+                'query': {
+                    'filter': {
+                        'date_time_filter': {
+                            'created_at': {
+                                'start_at': start_date.isoformat() + 'Z'
+                            }
                         }
                     }
                 }
             }
             
+            # location_ids is required and goes at the top level
             if integration.pos_id:
-                search_query['location_ids'] = [integration.pos_id]
+                request_body['location_ids'] = [integration.pos_id]
+            else:
+                # If no location_id, we can't search orders
+                logger.error(f"No location_id found for user {user_id}")
+                return {'orders_created': 0, 'orders_updated': 0, 'error': 'No location_id configured'}
             
             # Make API request to search orders
             response = self._make_square_request(
                 '/v2/orders/search',
                 integration.access_token,
                 method='POST',
-                data={'query': search_query}
+                data=request_body
             )
             
             orders_created = 0
