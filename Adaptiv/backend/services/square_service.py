@@ -497,8 +497,7 @@ class SquareService:
                                 order_id=order_obj.id,
                                 item_id=item.id,
                                 quantity=quantity,
-                                unit_price=unit_price,
-                                created_at=datetime.now()
+                                unit_price=unit_price
                             )
                             self.db.add(order_item)
             
