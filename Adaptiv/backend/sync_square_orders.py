@@ -105,18 +105,17 @@ async def sync_user_orders(user_id: int, force_sync: bool = False):
         last_progress = -1
         
         while time.time() - start_time < max_wait_time:
-            task_result = task.AsyncResult(task.id)
-            
-            if task_result.state == 'PENDING':
+            # task is already an AsyncResult object, no need to call task.AsyncResult()
+            if task.state == 'PENDING':
                 print("⏳ Task is waiting to be processed...")
-            elif task_result.state == 'PROGRESS':
-                progress = task_result.info.get('progress', 0)
-                status = task_result.info.get('status', 'Processing...')
+            elif task.state == 'PROGRESS':
+                progress = task.info.get('progress', 0)
+                status = task.info.get('status', 'Processing...')
                 if progress != last_progress:
                     print(f"📊 Progress: {progress}% - {status}")
                     last_progress = progress
-            elif task_result.state == 'SUCCESS':
-                result = task_result.result
+            elif task.state == 'SUCCESS':
+                result = task.result
                 print(f"✅ Sync completed successfully!")
                 print(f"   Items created: {result.get('items_created', 0)}")
                 print(f"   Items updated: {result.get('items_updated', 0)}")
@@ -126,8 +125,8 @@ async def sync_user_orders(user_id: int, force_sync: bool = False):
                     print(f"   Orders failed: {result.get('orders_failed', 0)}")
                 print(f"   Locations processed: {result.get('locations_processed', 0)}")
                 return True
-            elif task_result.state == 'FAILURE':
-                print(f"❌ Sync failed: {str(task_result.info)}")
+            elif task.state == 'FAILURE':
+                print(f"❌ Sync failed: {str(task.info)}")
                 return False
             
             time.sleep(5)  # Wait 5 seconds before checking again
