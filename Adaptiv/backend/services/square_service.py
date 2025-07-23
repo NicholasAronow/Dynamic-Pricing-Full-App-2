@@ -139,7 +139,7 @@ class SquareService:
                     existing_item = self.db.query(models.Item).filter(
                         and_(
                             models.Item.user_id == user_id,
-                            models.Item.square_item_id == catalog_object.get('id')
+                            models.Item.pos_id == catalog_object.get('id')
                         )
                     ).first()
                     
@@ -157,7 +157,7 @@ class SquareService:
                             name=item_data.get('name', 'Unknown Item'),
                             current_price=price,
                             category=item_data.get('category_id'),
-                            square_item_id=catalog_object.get('id'),
+                            pos_id=catalog_object.get('id'),
                             created_at=datetime.now(),
                             updated_at=datetime.now()
                         )
@@ -221,7 +221,7 @@ class SquareService:
                 existing_order = self.db.query(models.Order).filter(
                     and_(
                         models.Order.user_id == user_id,
-                        models.Order.square_order_id == order_id
+                        models.Order.pos_id == order_id
                     )
                 ).first()
                 
@@ -245,7 +245,7 @@ class SquareService:
                     # Create new order
                     order_obj = models.Order(
                         user_id=user_id,
-                        square_order_id=order_id,
+                        pos_id=order_id,
                         order_date=order_date,
                         total_amount=total_amount,
                         created_at=datetime.now(),
@@ -266,7 +266,7 @@ class SquareService:
                     item = self.db.query(models.Item).filter(
                         and_(
                             models.Item.user_id == user_id,
-                            models.Item.square_item_id == catalog_object_id
+                            models.Item.pos_id == catalog_object_id
                         )
                     ).first()
                     
@@ -318,7 +318,7 @@ class SquareService:
             item_count = self.db.query(models.Item).filter(
                 and_(
                     models.Item.user_id == user_id,
-                    models.Item.square_item_id.isnot(None)
+                    models.Item.pos_id.isnot(None)
                 )
             ).count()
             
@@ -327,7 +327,7 @@ class SquareService:
             order_count = self.db.query(models.Order).filter(
                 and_(
                     models.Order.user_id == user_id,
-                    models.Order.square_order_id.isnot(None),
+                    models.Order.pos_id.isnot(None),
                     models.Order.order_date >= thirty_days_ago
                 )
             ).count()

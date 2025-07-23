@@ -183,7 +183,7 @@ class TaskService:
             square_items = self.db.query(models.Item).filter(
                 and_(
                     models.Item.user_id == user_id,
-                    models.Item.square_item_id.isnot(None)
+                    models.Item.pos_id.isnot(None)
                 )
             ).count()
             
@@ -191,7 +191,7 @@ class TaskService:
             square_orders = self.db.query(models.Order).filter(
                 and_(
                     models.Order.user_id == user_id,
-                    models.Order.square_order_id.isnot(None),
+                    models.Order.pos_id.isnot(None),
                     models.Order.order_date >= thirty_days_ago
                 )
             ).count()

@@ -60,9 +60,8 @@ def list_users_with_square_integration(db: Session):
     print("-" * 80)
     
     for user in users_with_square:
-        business_name = user.business_name or "N/A"
         pos_connected = "Yes" if user.pos_connected else "No"
-        print(f"{user.id:<5} {user.email:<30} {business_name:<25} {pos_connected:<12}")
+        print(f"{user.id:<5} {user.email:<30} {pos_connected:<12}")
 
 
 async def sync_user_orders(user_id: int, force_sync: bool = False):

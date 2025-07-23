@@ -40,7 +40,7 @@ class DashboardService:
     
     def get_sales_data(self, start_date: Optional[str] = None, end_date: Optional[str] = None, user_id: int = None, time_frame: Optional[str] = None):
         """
-        Get sales data for the dashboard - optimized version with SQLite compatibility
+        Get sales data for the dashboard - database agnostic version
         """
         try:
             # Parse date range based on timeframe
@@ -79,22 +79,40 @@ class DashboardService:
 
             logger.info(f"Using date range: {start_date_obj} to {end_date_obj} for timeframe: {time_frame}")
 
+            # Detect database type
+            db_dialect = self.db.bind.dialect.name
+            logger.info(f"Database dialect detected: {db_dialect}")
+
             # Determine if we should aggregate by month
             aggregate_by_month = time_frame in ['6m', '1yr']
             
             if aggregate_by_month:
-                # For SQLite, use strftime to group by month
-                query = self.db.query(
-                    func.strftime('%Y-%m-01', models.Order.order_date).label('month'),
-                    func.sum(models.Order.total_amount).label('revenue'),
-                    func.count(models.Order.id).label('order_count')
-                ).filter(
-                    models.Order.user_id == user_id,
-                    models.Order.order_date >= start_date_obj,
-                    models.Order.order_date <= end_date_obj
-                ).group_by(
-                    func.strftime('%Y-%m', models.Order.order_date)
-                ).order_by('month')
+                if db_dialect == 'postgresql':
+                    # PostgreSQL version using date_trunc
+                    query = self.db.query(
+                        func.date_trunc('month', models.Order.order_date).label('month'),
+                        func.sum(models.Order.total_amount).label('revenue'),
+                        func.count(models.Order.id).label('order_count')
+                    ).filter(
+                        models.Order.user_id == user_id,
+                        models.Order.order_date >= start_date_obj,
+                        models.Order.order_date <= end_date_obj
+                    ).group_by(
+                        func.date_trunc('month', models.Order.order_date)
+                    ).order_by('month')
+                else:
+                    # SQLite version using strftime
+                    query = self.db.query(
+                        func.strftime('%Y-%m-01', models.Order.order_date).label('month'),
+                        func.sum(models.Order.total_amount).label('revenue'),
+                        func.count(models.Order.id).label('order_count')
+                    ).filter(
+                        models.Order.user_id == user_id,
+                        models.Order.order_date >= start_date_obj,
+                        models.Order.order_date <= end_date_obj
+                    ).group_by(
+                        func.strftime('%Y-%m', models.Order.order_date)
+                    ).order_by('month')
                 
                 monthly_results = query.all()
                 
@@ -113,8 +131,14 @@ class DashboardService:
                 total_orders = 0
                 
                 for row in monthly_results:
-                    month_date_str = row.month
-                    month_date = datetime.strptime(month_date_str, '%Y-%m-%d')
+                    # Handle different date formats from different databases
+                    if db_dialect == 'postgresql':
+                        month_date = row.month
+                    else:
+                        # SQLite returns string
+                        month_date_str = row.month
+                        month_date = datetime.strptime(month_date_str, '%Y-%m-%d')
+                        
                     monthly_revenue = float(row.revenue or 0)
                     monthly_order_count = row.order_count or 0
                     
@@ -130,7 +154,7 @@ class DashboardService:
                         profit_margin = ((monthly_revenue - monthly_cogs_amount) / monthly_revenue) * 100
                     
                     sales_data.append({
-                        "date": month_date_str,
+                        "date": month_date.strftime('%Y-%m-%d'),
                         "revenue": round(monthly_revenue, 2),
                         "orders": monthly_order_count,
                         "totalCost": round(monthly_cogs_amount, 2),
@@ -141,7 +165,7 @@ class DashboardService:
                     total_orders += monthly_order_count
                     
             else:
-                # For daily aggregation, use date function for SQLite
+                # For daily aggregation, both databases support date() function
                 query = self.db.query(
                     func.date(models.Order.order_date).label('order_date'),
                     func.sum(models.Order.total_amount).label('revenue'),
