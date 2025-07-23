@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Card, Row, Col, Button, Tag, Space, Spin, Radio, Tooltip, message, Progress } from 'antd';
+import { Typography, Card, Row, Col, Button, Tag, Space, Spin, Radio, Tooltip, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { ShoppingOutlined, ArrowUpOutlined, ArrowDownOutlined, TagsOutlined, ShopOutlined, QuestionCircleOutlined, LineChartOutlined, CrownOutlined} from '@ant-design/icons';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, Area } from 'recharts';
@@ -68,81 +68,6 @@ const Dashboard: React.FC = () => {
   // Use pos_connected field from the user object
   const isPosConnected = user?.pos_connected ?? false;
   const [hasAnySalesData, setHasAnySalesData] = useState(false);
-  
-  // Square sync progress state
-  const [syncInProgress, setSyncInProgress] = useState(false);
-  const [syncProgress, setSyncProgress] = useState(0);
-  const [syncStatus, setSyncStatus] = useState('');
-  const [syncTaskId, setSyncTaskId] = useState<string | null>(null);
-
-  // Check for ongoing sync tasks on component mount
-  useEffect(() => {
-    const checkOngoingSync = async () => {
-      try {
-        // Check localStorage for any ongoing sync task
-        const storedTaskId = localStorage.getItem('square_sync_task_id');
-        if (storedTaskId) {
-          console.log('Found ongoing sync task:', storedTaskId);
-          
-          // Check if the task is still running
-          const statusResponse = await orderService.getSquareSyncStatus(storedTaskId);
-          
-          if (statusResponse.success && 
-              (statusResponse.status === 'PENDING' || statusResponse.status === 'PROGRESS')) {
-            // Resume the sync progress tracking
-            setSyncInProgress(true);
-            setSyncTaskId(storedTaskId);
-            setSyncProgress(statusResponse.progress || 0);
-            setSyncStatus(statusResponse.status);
-            
-            console.log('Resuming sync progress tracking for task:', storedTaskId);
-            
-            // Continue polling for progress
-            const result = await orderService.pollSquareSyncStatus(
-              storedTaskId,
-              (progress: number, status: string) => {
-                setSyncProgress(progress);
-                setSyncStatus(status);
-              }
-            );
-            
-            // Handle completion
-            if (result.success && result.result) {
-              message.success(
-                `Sync completed! Created ${result.result.orders_created || 0} orders, ` +
-                `updated ${result.result.orders_updated || 0} orders, ` +
-                `${result.result.items_created || 0} items created, ` +
-                `${result.result.items_updated || 0} items updated`
-              );
-              
-              // Refresh dashboard data after successful sync
-              window.location.reload();
-            } else if (!result.success) {
-              message.error(result.error || 'Sync failed');
-            }
-            
-            // Clean up
-            localStorage.removeItem('square_sync_task_id');
-            setSyncInProgress(false);
-            setSyncProgress(0);
-            setSyncStatus('');
-            setSyncTaskId(null);
-          } else {
-            // Task is no longer running, clean up localStorage
-            localStorage.removeItem('square_sync_task_id');
-          }
-        }
-      } catch (error) {
-        console.error('Error checking ongoing sync:', error);
-        // Clean up on error
-        localStorage.removeItem('square_sync_task_id');
-      }
-    };
-    
-    if (isPosConnected) {
-      checkOngoingSync();
-    }
-  }, [isPosConnected]);
 
   /// Helper function to convert timeframe to dates
   const getDateRangeFromTimeFrame = (timeFrame: string) => {
@@ -1036,62 +961,6 @@ const Dashboard: React.FC = () => {
   const topProducts = getTopProducts();
   const bottomProducts = getBottomProducts();
   
-  // Handle Square sync with progress tracking
-  const handleSquareSync = async (forceSync: boolean = false) => {
-    try {
-      setSyncInProgress(true);
-      setSyncProgress(0);
-      setSyncStatus('Starting sync...');
-      
-      // Start the sync task
-      const syncStart = await orderService.syncSquareOrders(forceSync);
-      
-      if (!syncStart.success || !syncStart.task_id) {
-        message.error(syncStart.message || 'Failed to start sync');
-        setSyncInProgress(false);
-        return;
-      }
-      
-      setSyncTaskId(syncStart.task_id);
-      // Store task ID in localStorage for persistence across page refreshes
-      localStorage.setItem('square_sync_task_id', syncStart.task_id);
-      message.success('Square sync started in background');
-      
-      // Poll for progress updates
-      const result = await orderService.pollSquareSyncStatus(
-        syncStart.task_id,
-        (progress: number, status: string) => {
-          setSyncProgress(progress);
-          setSyncStatus(status);
-        }
-      );
-      
-      if (result.success && result.result) {
-        message.success(
-          `Sync completed! Created ${result.result.orders_created || 0} orders, ` +
-          `updated ${result.result.orders_updated || 0} orders, ` +
-          `${result.result.items_created || 0} items created, ` +
-          `${result.result.items_updated || 0} items updated`
-        );
-        
-        // Refresh dashboard data after successful sync
-        window.location.reload();
-      } else {
-        message.error(result.error || 'Sync failed');
-      }
-    } catch (error: any) {
-      console.error('Error during Square sync:', error);
-      message.error('Failed to sync Square data. Please try again.');
-    } finally {
-      // Clean up localStorage and state
-      localStorage.removeItem('square_sync_task_id');
-      setSyncInProgress(false);
-      setSyncProgress(0);
-      setSyncStatus('');
-      setSyncTaskId(null);
-    }
-  };
-  
   return (
     <div style={{ position: 'relative' }}>
       <Title level={2}>Dashboard</Title>
@@ -1178,83 +1047,6 @@ const Dashboard: React.FC = () => {
             </Text>
           </div>
         </div>
-      )}
-      
-      {/* Square Sync Progress Bar */}
-      {syncInProgress && (
-        <Card style={{ marginBottom: 24 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-            <div>
-              <Title level={5} style={{ margin: 0 }}>
-                <ShoppingOutlined /> Syncing Square Data
-              </Title>
-              <Text type="secondary">{syncStatus}</Text>
-            </div>
-            <Button 
-              type="text" 
-              size="small" 
-              onClick={() => {
-                // Clean up localStorage and state when canceling
-                localStorage.removeItem('square_sync_task_id');
-                setSyncInProgress(false);
-                setSyncProgress(0);
-                setSyncStatus('');
-                setSyncTaskId(null);
-              }}
-            >
-              Cancel
-            </Button>
-          </div>
-          <Progress 
-            percent={Math.round(syncProgress)} 
-            status={syncProgress === 100 ? 'success' : 'active'}
-            strokeColor={{
-              '0%': '#667eea',
-              '100%': '#764ba2',
-            }}
-          />
-          {syncTaskId && (
-            <Text type="secondary" style={{ fontSize: '12px', marginTop: 8, display: 'block' }}>
-              Task ID: {syncTaskId}
-            </Text>
-          )}
-        </Card>
-      )}
-      
-      {/* Sync Button for connected users */}
-      {isPosConnected && (
-        <Card style={{ marginBottom: 24 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <Title level={5} style={{ margin: 0 }}>
-                <ShoppingOutlined /> Square Data Sync
-              </Title>
-              <Text type="secondary">Sync your latest Square orders and catalog items</Text>
-            </div>
-            <Space>
-              <Button 
-                type="default" 
-                onClick={() => handleSquareSync(false)}
-                disabled={syncInProgress}
-                loading={syncInProgress}
-              >
-                Quick Sync
-              </Button>
-              <Button 
-                type="primary" 
-                onClick={() => handleSquareSync(true)}
-                disabled={syncInProgress}
-                loading={syncInProgress}
-                style={{
-                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                  border: 'none'
-                }}
-              >
-                Full Sync
-              </Button>
-            </Space>
-          </div>
-        </Card>
       )}
       
       {/* Chart Row with Sales Chart and Action Items */}

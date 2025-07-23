@@ -1031,12 +1031,27 @@ def sync_square_data_task(self, user_id: int, force_sync: bool = False) -> Dict[
         # Create database session
         db = SessionLocal()
         
+        # Use TaskService to handle the business logic
+        task_service = TaskService(db)
+        
         # Update progress
-        self.update_state(state='PROGRESS', meta={
-            'progress': 5, 
-            'status': 'Initializing sync...', 
-            'stage': 'initialization'
-        })
+        self.update_state(state='PROGRESS', meta={'progress': 10, 'status': 'Validating prerequisites...'})
+        
+        # Validate prerequisites
+        validation = task_service.validate_sync_prerequisites(user_id)
+        if not validation['valid']:
+            raise ValueError(f"Sync prerequisites not met: {validation['errors']}")
+        
+        # Update progress
+        self.update_state(state='PROGRESS', meta={'progress': 20, 'status': 'Starting sync...'})
+        
+        # Perform the sync using the service
+        result = task_service.sync_square_data(user_id, force_sync)
+        
+        # Update progress
+        self.update_state(state='PROGRESS', meta={'progress': 100, 'status': 'Sync completed successfully'})
+        
+        return result
         
         # Get Square integration for user
         integration = db.query(models.POSIntegration).filter(
@@ -1051,32 +1066,347 @@ def sync_square_data_task(self, user_id: int, force_sync: bool = False) -> Dict[
                 "task_status": "COMPLETED"
             }
         
-        # Update progress
-        self.update_state(state='PROGRESS', meta={
-            'progress': 10, 
-            'status': 'Getting account information...', 
-            'stage': 'setup'
-        })
+        # Update task progress
+        self.update_state(state='PROGRESS', meta={'progress': 10, 'status': 'Getting locations...'})
         
-        # Get the earliest order date to calculate sync progress
-        earliest_order_date = None
-        try:
-            # First check if we have any existing orders to determine date range
-            existing_order = db.query(models.Order).filter(
-                models.Order.user_id == user_id
-            ).order_by(models.Order.order_date.asc()).first()
-            
-            if existing_order:
-                earliest_order_date = existing_order.order_date
-                logger.info(f"Found existing orders starting from {earliest_order_date}")
-        except Exception as e:
-            logger.warning(f"Could not determine earliest order date: {e}")
-        
-        # Perform the sync with enhanced progress tracking
-        result = self._perform_enhanced_square_sync(
-            user_id, integration, force_sync, earliest_order_date, db
+        # Get merchant's locations
+        logger.info("Square API: Fetching locations for sync")
+        locations_response = requests.get(
+            f"{SQUARE_API_BASE}/v2/locations",
+            headers={
+                "Authorization": f"Bearer {integration.access_token}",
+                "Content-Type": "application/json"
+            },
+            timeout=30
         )
         
+        locations_data = locations_response.json()
+        
+        if locations_response.status_code != 200 or "locations" not in locations_data:
+            return {
+                "success": False,
+                "error": "Failed to get locations",
+                "task_status": "COMPLETED"
+            }
+        
+        if not locations_data.get("locations"):
+            return {
+                "success": False,
+                "error": "No locations found",
+                "task_status": "COMPLETED"
+            }
+        
+        locations = locations_data.get("locations", [])
+        catalog_mapping = {}  # Maps Square catalog IDs to local item IDs
+        
+        # Update progress
+        self.update_state(state='PROGRESS', meta={'progress': 20, 'status': 'Syncing catalog items...'})
+        
+        # Sync catalog items
+        items_created = 0
+        items_updated = 0
+        
+        # Get catalog from Square
+        logger.info("Square API: Fetching catalog items")
+        catalog_response = requests.get(
+            f"{SQUARE_API_BASE}/v2/catalog/list?types=ITEM",
+            headers={
+                "Authorization": f"Bearer {integration.access_token}",
+                "Content-Type": "application/json"
+            },
+            timeout=30
+        )
+        
+        if catalog_response.status_code != 200:
+            return {
+                "success": False,
+                "error": "Failed to get catalog",
+                "task_status": "COMPLETED"
+            }
+            
+        catalog_data = catalog_response.json()
+        items = catalog_data.get("objects", [])
+        
+        logger.info(f"Found {len(items)} items in Square catalog")
+        
+        # Process each catalog item
+        for i, item_obj in enumerate(items):
+            if i % 10 == 0:  # Update progress every 10 items
+                progress = 20 + (i / len(items)) * 30  # 20-50% for catalog sync
+                self.update_state(state='PROGRESS', meta={
+                    'progress': int(progress), 
+                    'status': f'Processing catalog item {i+1}/{len(items)}...'
+                })
+            
+            if item_obj.get("type") != "ITEM":
+                continue
+                
+            square_item_id = item_obj.get("id")
+            item_data = item_obj.get("item_data", {})
+            name = item_data.get("name", "")
+            description = item_data.get("description", "")
+            
+            # Skip items without name
+            if not name:
+                continue
+                
+            # Get price from first variation
+            variations = item_data.get("variations", [])
+            price = None
+            square_variation_id = None
+            
+            if variations:
+                variation = variations[0]
+                square_variation_id = variation.get("id")
+                variation_data = variation.get("item_variation_data", {})
+                price_money = variation_data.get("price_money", {})
+                if price_money:
+                    # Convert cents to dollars
+                    price = price_money.get("amount", 0) / 100.0
+            
+            # Skip items without price
+            if price is None:
+                continue
+                
+            # Check if item already exists by Square ID first
+            existing_item = db.query(models.Item).filter(
+                models.Item.pos_id == square_item_id,
+                models.Item.user_id == user_id
+            ).first()
+            
+            if existing_item:
+                # Update existing item
+                existing_item.name = name
+                existing_item.description = description
+                existing_item.current_price = price
+                existing_item.updated_at = datetime.utcnow()
+                items_updated += 1
+                catalog_mapping[square_item_id] = existing_item.id
+            else:
+                # Create new item
+                new_item = models.Item(
+                    user_id=user_id,
+                    name=name,
+                    description=description,
+                    current_price=price,
+                    pos_id=square_item_id,
+                    category="Square Import",
+                    created_at=datetime.utcnow()
+                )
+                db.add(new_item)
+                db.flush()  # Get the ID
+                items_created += 1
+                catalog_mapping[square_item_id] = new_item.id
+        
+        # Commit catalog changes
+        db.commit()
+        
+        # Update progress
+        self.update_state(state='PROGRESS', meta={'progress': 50, 'status': 'Syncing orders...'})
+        
+        # Sync orders for each location
+        orders_created = 0
+        orders_updated = 0
+        orders_failed = 0
+        
+        for loc_idx, location in enumerate(locations):
+            location_id = location.get("id")
+            if not location_id:
+                continue
+                
+            logger.info(f"Processing orders for location {location_id}")
+            
+            # Update progress
+            loc_progress = 50 + (loc_idx / len(locations)) * 40  # 50-90% for orders
+            self.update_state(state='PROGRESS', meta={
+                'progress': int(loc_progress),
+                'status': f'Processing orders for location {loc_idx+1}/{len(locations)}...'
+            })
+            
+            try:
+                # Get orders for this location with pagination
+                cursor = None
+                page_count = 0
+                max_pages = 50 if force_sync else 10  # Limit pages to prevent memory issues
+                
+                while page_count < max_pages:
+                    page_count += 1
+                    
+                    # Build request payload
+                    request_payload = {
+                        "location_ids": [location_id],
+                        "query": {
+                            "filter": {
+                                "state_filter": {"states": ["COMPLETED", "OPEN"]}
+                            },
+                            "sort": {
+                                "sort_field": "CREATED_AT",
+                                "sort_order": "DESC"
+                            }
+                        },
+                        "limit": 100  # Process in smaller batches
+                    }
+                    
+                    if cursor:
+                        request_payload["cursor"] = cursor
+                    
+                    # Make API request
+                    orders_response = requests.post(
+                        f"{SQUARE_API_BASE}/v2/orders/search",
+                        headers={
+                            "Authorization": f"Bearer {integration.access_token}",
+                            "Content-Type": "application/json"
+                        },
+                        json=request_payload,
+                        timeout=30
+                    )
+                    
+                    if orders_response.status_code != 200:
+                        logger.error(f"Failed to get orders for location {location_id}: {orders_response.text}")
+                        orders_failed += 1
+                        break
+                    
+                    orders_data = orders_response.json()
+                    orders = orders_data.get("orders", [])
+                    
+                    if not orders:
+                        break  # No more orders
+                    
+                    # Process orders in this batch
+                    for order in orders:
+                        try:
+                            square_order_id = order.get("id")
+                            if not square_order_id:
+                                continue
+                            
+                            # Check if order already exists
+                            existing_order = db.query(models.Order).filter(
+                                models.Order.pos_id == square_order_id,
+                                models.Order.user_id == user_id
+                            ).first()
+                            
+                            if existing_order and not force_sync:
+                                continue  # Skip existing orders unless force sync
+                            
+                            # Extract order data
+                            order_date_str = order.get("created_at", "")
+                            order_date = datetime.fromisoformat(order_date_str.replace('Z', '+00:00')) if order_date_str else datetime.utcnow()
+                            
+                            # Calculate total from line items
+                            line_items = order.get("line_items", [])
+                            total_amount = 0
+                            total_cost = 0
+                            
+                            for line_item in line_items:
+                                quantity = int(line_item.get("quantity", "1"))
+                                
+                                # Get price from line item
+                                total_money = line_item.get("total_money", {})
+                                item_total = total_money.get("amount", 0) / 100.0  # Convert cents to dollars
+                                total_amount += item_total
+                                
+                                # Try to get cost from catalog mapping
+                                catalog_object_id = line_item.get("catalog_object_id")
+                                if catalog_object_id and catalog_object_id in catalog_mapping:
+                                    local_item_id = catalog_mapping[catalog_object_id]
+                                    local_item = db.query(models.Item).filter(models.Item.id == local_item_id).first()
+                                    if local_item and local_item.cost:
+                                        total_cost += quantity * local_item.cost
+                            
+                            if existing_order:
+                                # Update existing order
+                                existing_order.order_date = order_date
+                                existing_order.total_amount = total_amount
+                                existing_order.total_cost = total_cost
+                                existing_order.gross_margin = total_amount - total_cost
+                                existing_order.updated_at = datetime.utcnow()
+                                orders_updated += 1
+                                order_id = existing_order.id
+                            else:
+                                # Create new order
+                                new_order = models.Order(
+                                    user_id=user_id,
+                                    pos_id=square_order_id,
+                                    order_date=order_date,
+                                    total_amount=total_amount,
+                                    total_cost=total_cost,
+                                    gross_margin=total_amount - total_cost,
+                                    created_at=datetime.utcnow()
+                                )
+                                db.add(new_order)
+                                db.flush()  # Get the ID
+                                orders_created += 1
+                                order_id = new_order.id
+                            
+                            # Process line items
+                            if not existing_order or force_sync:
+                                # Delete existing order items if updating
+                                if existing_order:
+                                    db.query(models.OrderItem).filter(
+                                        models.OrderItem.order_id == order_id
+                                    ).delete()
+                                
+                                # Add line items
+                                for line_item in line_items:
+                                    catalog_object_id = line_item.get("catalog_object_id")
+                                    if catalog_object_id and catalog_object_id in catalog_mapping:
+                                        local_item_id = catalog_mapping[catalog_object_id]
+                                        quantity = int(line_item.get("quantity", "1"))
+                                        
+                                        # Get unit price
+                                        total_money = line_item.get("total_money", {})
+                                        item_total = total_money.get("amount", 0) / 100.0
+                                        unit_price = item_total / quantity if quantity > 0 else 0
+                                        
+                                        # Get unit cost
+                                        local_item = db.query(models.Item).filter(models.Item.id == local_item_id).first()
+                                        unit_cost = local_item.cost if local_item else None
+                                        
+                                        order_item = models.OrderItem(
+                                            order_id=order_id,
+                                            item_id=local_item_id,
+                                            quantity=quantity,
+                                            unit_price=unit_price,
+                                            unit_cost=unit_cost
+                                        )
+                                        db.add(order_item)
+                        
+                        except Exception as e:
+                            logger.error(f"Error processing order {square_order_id}: {str(e)}")
+                            orders_failed += 1
+                            continue
+                    
+                    # Check for next page
+                    cursor = orders_data.get("cursor")
+                    if not cursor:
+                        break  # No more pages
+                    
+                    # Commit batch to prevent memory buildup
+                    db.commit()
+                    
+            except Exception as e:
+                logger.error(f"Error processing location {location_id}: {str(e)}")
+                orders_failed += 1
+                continue
+        
+        # Final commit
+        db.commit()
+        
+        # Update final progress
+        self.update_state(state='PROGRESS', meta={'progress': 100, 'status': 'Sync completed!'})
+        
+        result = {
+            "success": True,
+            "task_status": "COMPLETED",
+            "items_created": items_created,
+            "items_updated": items_updated,
+            "orders_created": orders_created,
+            "orders_updated": orders_updated,
+            "orders_failed": orders_failed,
+            "locations_processed": len(locations)
+        }
+        
+        logger.info(f"Square sync task completed: {result}")
         return result
         
     except Exception as e:
@@ -1090,412 +1420,6 @@ def sync_square_data_task(self, user_id: int, force_sync: bool = False) -> Dict[
         }
     finally:
         if db:
-            db.close()
-    
-    def _perform_enhanced_square_sync(self, user_id: int, integration, force_sync: bool, earliest_order_date, db: Session) -> Dict[str, Any]:
-        """
-        Enhanced Square sync with detailed progress tracking based on date ranges
-        """
-        try:
-            from datetime import timezone
-            import requests
-            
-            # Square API configuration
-            SQUARE_ENV = os.getenv("SQUARE_ENV", "production")
-            if SQUARE_ENV == "sandbox":
-                SQUARE_API_BASE = "https://connect.squareupsandbox.com"
-            else:
-                SQUARE_API_BASE = "https://connect.squareup.com"
-            
-            # Update progress
-            self.update_state(state='PROGRESS', meta={
-                'progress': 15, 
-                'status': 'Getting locations...', 
-                'stage': 'setup'
-            })
-            
-            # Get merchant's locations
-            logger.info("Square API: Fetching locations for sync")
-            locations_response = requests.get(
-                f"{SQUARE_API_BASE}/v2/locations",
-                headers={
-                    "Authorization": f"Bearer {integration.access_token}",
-                    "Content-Type": "application/json"
-                },
-                timeout=30
-            )
-            
-            locations_data = locations_response.json()
-            
-            if locations_response.status_code != 200 or "locations" not in locations_data:
-                return {
-                    "success": False,
-                    "error": "Failed to get locations",
-                    "task_status": "COMPLETED"
-                }
-            
-            locations = locations_data.get("locations", [])
-            if not locations:
-                return {
-                    "success": False,
-                    "error": "No locations found",
-                    "task_status": "COMPLETED"
-                }
-            
-            # Initialize counters
-            catalog_mapping = {}  # Maps Square catalog IDs to local item IDs
-            items_created = 0
-            items_updated = 0
-            orders_created = 0
-            orders_updated = 0
-            orders_failed = 0
-            
-            # Step 1: Sync catalog items (15-25% progress)
-            self.update_state(state='PROGRESS', meta={
-                'progress': 20, 
-                'status': 'Syncing catalog items...', 
-                'stage': 'catalog'
-            })
-            
-            # Get catalog from Square
-            logger.info("Square API: Fetching catalog items")
-            catalog_response = requests.get(
-                f"{SQUARE_API_BASE}/v2/catalog/list?types=ITEM",
-                headers={
-                    "Authorization": f"Bearer {integration.access_token}",
-                    "Content-Type": "application/json"
-                },
-                timeout=30
-            )
-            
-            if catalog_response.status_code != 200:
-                return {
-                    "success": False,
-                    "error": "Failed to get catalog",
-                    "task_status": "COMPLETED"
-                }
-                
-            catalog_data = catalog_response.json()
-            items = catalog_data.get("objects", [])
-            
-            logger.info(f"Found {len(items)} items in Square catalog")
-            
-            # Process each catalog item
-            for i, item_obj in enumerate(items):
-                if i % 10 == 0:  # Update progress every 10 items
-                    progress = 20 + (i / len(items)) * 5  # 20-25% for catalog sync
-                    self.update_state(state='PROGRESS', meta={
-                        'progress': int(progress), 
-                        'status': f'Processing catalog item {i+1}/{len(items)}...', 
-                        'stage': 'catalog'
-                    })
-                
-                if item_obj.get("type") != "ITEM":
-                    continue
-                    
-                square_item_id = item_obj.get("id")
-                item_data = item_obj.get("item_data", {})
-                name = item_data.get("name", "")
-                description = item_data.get("description", "")
-                
-                # Skip items without name
-                if not name:
-                    continue
-                    
-                # Get price from first variation
-                variations = item_data.get("variations", [])
-                price = None
-                
-                if variations:
-                    variation = variations[0]
-                    variation_data = variation.get("item_variation_data", {})
-                    price_money = variation_data.get("price_money", {})
-                    if price_money:
-                        # Convert cents to dollars
-                        price = price_money.get("amount", 0) / 100.0
-                
-                # Skip items without price
-                if price is None:
-                    continue
-                    
-                # Check if item already exists by Square ID first
-                existing_item = db.query(models.Item).filter(
-                    models.Item.pos_id == square_item_id,
-                    models.Item.user_id == user_id
-                ).first()
-                
-                if existing_item:
-                    # Update existing item
-                    existing_item.name = name
-                    existing_item.description = description
-                    existing_item.current_price = price
-                    existing_item.updated_at = datetime.utcnow()
-                    items_updated += 1
-                    catalog_mapping[square_item_id] = existing_item.id
-                else:
-                    # Create new item
-                    new_item = models.Item(
-                        user_id=user_id,
-                        name=name,
-                        description=description,
-                        current_price=price,
-                        pos_id=square_item_id,
-                        category="Square Import",
-                        created_at=datetime.utcnow()
-                    )
-                    db.add(new_item)
-                    db.flush()  # Get the ID
-                    items_created += 1
-                    catalog_mapping[square_item_id] = new_item.id
-            
-            # Commit catalog changes
-            db.commit()
-            
-            # Step 2: Sync orders with enhanced progress tracking (25-95% progress)
-            self.update_state(state='PROGRESS', meta={
-                'progress': 25, 
-                'status': 'Starting order sync...', 
-                'stage': 'orders',
-                'orders_processed': 0
-            })
-            
-            # Calculate date range for progress tracking
-            today = datetime.now(timezone.utc)
-            sync_start_date = earliest_order_date or (today - timedelta(days=30))
-            total_days = (today - sync_start_date).days
-            
-            logger.info(f"Syncing orders from {sync_start_date} to {today} ({total_days} days)")
-            
-            # Track processed orders for progress calculation
-            total_orders_processed = 0
-            estimated_total_orders = total_days * 10  # Rough estimate: 10 orders per day
-            
-            # Sync orders for each location
-            for loc_idx, location in enumerate(locations):
-                location_id = location.get("id")
-                if not location_id:
-                    continue
-                    
-                logger.info(f"Processing orders for location {location_id}")
-                
-                try:
-                    # Get orders for this location with pagination
-                    cursor = None
-                    page_count = 0
-                    max_pages = 100 if force_sync else 20  # Limit pages to prevent memory issues
-                    
-                    while page_count < max_pages:
-                        page_count += 1
-                        
-                        # Build request payload
-                        request_payload = {
-                            "location_ids": [location_id],
-                            "query": {
-                                "filter": {
-                                    "state_filter": {"states": ["COMPLETED", "OPEN"]}
-                                },
-                                "sort": {
-                                    "sort_field": "CREATED_AT",
-                                    "sort_order": "DESC"
-                                }
-                            },
-                            "limit": 100  # Process in smaller batches
-                        }
-                        
-                        if cursor:
-                            request_payload["cursor"] = cursor
-                        
-                        # Make API request
-                        orders_response = requests.post(
-                            f"{SQUARE_API_BASE}/v2/orders/search",
-                            headers={
-                                "Authorization": f"Bearer {integration.access_token}",
-                                "Content-Type": "application/json"
-                            },
-                            json=request_payload,
-                            timeout=30
-                        )
-                        
-                        if orders_response.status_code != 200:
-                            logger.error(f"Failed to get orders for location {location_id}: {orders_response.text}")
-                            orders_failed += 1
-                            break
-                        
-                        orders_data = orders_response.json()
-                        orders = orders_data.get("orders", [])
-                        
-                        if not orders:
-                            break  # No more orders
-                        
-                        # Process orders in this batch
-                        for order_idx, order in enumerate(orders):
-                            try:
-                                total_orders_processed += 1
-                                
-                                # Update progress based on orders processed
-                                if total_orders_processed % 50 == 0:  # Update every 50 orders
-                                    progress_ratio = min(total_orders_processed / estimated_total_orders, 1.0)
-                                    progress = 25 + (progress_ratio * 70)  # 25-95% for orders
-                                    
-                                    # Calculate time-based progress if we have date info
-                                    order_date_str = order.get("created_at", "")
-                                    if order_date_str and earliest_order_date:
-                                        try:
-                                            order_date = datetime.fromisoformat(order_date_str.replace('Z', '+00:00'))
-                                            if order_date.tzinfo is None:
-                                                order_date = order_date.replace(tzinfo=timezone.utc)
-                                            
-                                            # Calculate progress based on date range
-                                            days_from_start = (today - order_date).days
-                                            date_progress_ratio = max(0, min(1 - (days_from_start / total_days), 1.0))
-                                            date_progress = 25 + (date_progress_ratio * 70)
-                                            
-                                            # Use the higher of the two progress calculations
-                                            progress = max(progress, date_progress)
-                                        except Exception as e:
-                                            logger.warning(f"Could not parse order date {order_date_str}: {e}")
-                                    
-                                    self.update_state(state='PROGRESS', meta={
-                                        'progress': int(progress),
-                                        'status': f'Processing orders... ({total_orders_processed} processed)',
-                                        'stage': 'orders',
-                                        'orders_processed': total_orders_processed,
-                                        'current_date': order_date_str[:10] if order_date_str else None
-                                    })
-                                
-                                square_order_id = order.get("id")
-                                if not square_order_id:
-                                    continue
-                                
-                                # Check if order already exists
-                                existing_order = db.query(models.Order).filter(
-                                    models.Order.pos_id == square_order_id,
-                                    models.Order.user_id == user_id
-                                ).first()
-                                
-                                if existing_order and not force_sync:
-                                    continue  # Skip existing orders unless force sync
-                                
-                                # Extract order data
-                                order_date_str = order.get("created_at", "")
-                                order_date = datetime.fromisoformat(order_date_str.replace('Z', '+00:00')) if order_date_str else datetime.utcnow()
-                                
-                                # Calculate total from line items
-                                line_items = order.get("line_items", [])
-                                total_amount = 0
-                                total_cost = 0
-                                
-                                for line_item in line_items:
-                                    base_price_money = line_item.get("base_price_money", {})
-                                    quantity = int(line_item.get("quantity", "1"))
-                                    if base_price_money:
-                                        item_total = (base_price_money.get("amount", 0) / 100.0) * quantity
-                                        total_amount += item_total
-                                
-                                if existing_order:
-                                    # Update existing order
-                                    existing_order.order_date = order_date
-                                    existing_order.total_amount = total_amount
-                                    existing_order.updated_at = datetime.utcnow()
-                                    orders_updated += 1
-                                    order_obj = existing_order
-                                else:
-                                    # Create new order
-                                    new_order = models.Order(
-                                        user_id=user_id,
-                                        order_date=order_date,
-                                        total_amount=total_amount,
-                                        pos_id=square_order_id,
-                                        created_at=datetime.utcnow()
-                                    )
-                                    db.add(new_order)
-                                    db.flush()  # Get the ID
-                                    orders_created += 1
-                                    order_obj = new_order
-                                
-                                # Process order items
-                                if not existing_order or force_sync:
-                                    # Clear existing order items if updating
-                                    if existing_order:
-                                        db.query(models.OrderItem).filter(
-                                            models.OrderItem.order_id == existing_order.id
-                                        ).delete()
-                                    
-                                    # Add order items
-                                    for line_item in line_items:
-                                        catalog_object_id = line_item.get("catalog_object_id")
-                                        if catalog_object_id and catalog_object_id in catalog_mapping:
-                                            item_id = catalog_mapping[catalog_object_id]
-                                            quantity = int(line_item.get("quantity", "1"))
-                                            base_price_money = line_item.get("base_price_money", {})
-                                            unit_price = base_price_money.get("amount", 0) / 100.0 if base_price_money else 0
-                                            
-                                            order_item = models.OrderItem(
-                                                order_id=order_obj.id,
-                                                item_id=item_id,
-                                                quantity=quantity,
-                                                unit_price=unit_price,
-                                                subtotal=unit_price * quantity
-                                            )
-                                            db.add(order_item)
-                                
-                                # Commit every 100 orders to prevent memory issues
-                                if total_orders_processed % 100 == 0:
-                                    db.commit()
-                                    
-                            except Exception as e:
-                                logger.error(f"Error processing order {order.get('id', 'unknown')}: {str(e)}")
-                                orders_failed += 1
-                                continue
-                        
-                        # Get cursor for next page
-                        cursor = orders_data.get("cursor")
-                        if not cursor:
-                            break  # No more pages
-                        
-                except Exception as e:
-                    logger.error(f"Error processing location {location_id}: {str(e)}")
-                    orders_failed += 1
-                    continue
-            
-            # Final commit
-            db.commit()
-            
-            # Update progress to completion
-            self.update_state(state='PROGRESS', meta={
-                'progress': 100, 
-                'status': 'Sync completed successfully', 
-                'stage': 'completed'
-            })
-            
-            # Return results
-            result = {
-                "success": True,
-                "task_status": "COMPLETED",
-                "items_created": items_created,
-                "items_updated": items_updated,
-                "orders_created": orders_created,
-                "orders_updated": orders_updated,
-                "orders_failed": orders_failed,
-                "total_orders_processed": total_orders_processed,
-                "sync_date_range": {
-                    "start_date": sync_start_date.isoformat() if sync_start_date else None,
-                    "end_date": today.isoformat(),
-                    "total_days": total_days
-                }
-            }
-            
-            logger.info(f"Square sync completed for user {user_id}: {result}")
-            return result
-            
-        except Exception as e:
-            logger.error(f"Enhanced Square sync failed for user {user_id}: {str(e)}")
-            self.update_state(state='FAILURE', meta={
-                'progress': 0, 
-                'status': f'Sync failed: {str(e)}', 
-                'stage': 'error'
-            })
-            raise
             db.close()
 
 
