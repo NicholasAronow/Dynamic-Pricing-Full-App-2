@@ -11,6 +11,7 @@ class Order(Base):
     total_amount = Column(Float)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # Add user_id for account-specific data
     pos_id = Column(String, nullable=True, index=True)  # Store external POS system order ID (Square order ID)
+    location_id = Column(String, nullable=True, index=True)  # Store Square location ID for multi-location support
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     total_cost = Column(Float, nullable=True)

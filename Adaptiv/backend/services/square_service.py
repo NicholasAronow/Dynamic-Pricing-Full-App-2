@@ -102,6 +102,84 @@ class SquareService:
             self.db.rollback()
             raise
     
+    def fetch_and_update_location_id(self, user_id: int) -> bool:
+        """
+        Fetch location ID from Square API and update the integration.
+        For merchants with multiple locations, stores the first location as primary.
+        Returns True if successful, False otherwise.
+        """
+        try:
+            integration = self.get_user_square_integration(user_id)
+            if not integration:
+                logger.error(f"No Square integration found for user {user_id}")
+                return False
+            
+            if integration.pos_id:
+                logger.info(f"Location ID already exists for user {user_id}: {integration.pos_id}")
+                return True
+            
+            # Fetch locations from Square API
+            response = self._make_square_request(
+                '/v2/locations',
+                integration.access_token
+            )
+            
+            locations = response.get('locations', [])
+            if not locations:
+                logger.error(f"No locations found for user {user_id}")
+                return False
+            
+            logger.info(f"Found {len(locations)} location(s) for user {user_id}")
+            
+            # Use the first location as primary (most merchants have one location)
+            # For multi-location merchants, we'll search all locations in orders sync
+            location_id = locations[0].get('id')
+            if not location_id:
+                logger.error(f"Invalid location data for user {user_id}")
+                return False
+            
+            # Update the integration with the primary location ID
+            integration.pos_id = location_id
+            integration.updated_at = datetime.now()
+            self.db.commit()
+            
+            logger.info(f"Updated primary location ID for user {user_id}: {location_id}")
+            if len(locations) > 1:
+                logger.info(f"User {user_id} has {len(locations)} locations - orders will be synced from all locations")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error fetching location ID for user {user_id}: {str(e)}")
+            self.db.rollback()
+            return False
+    
+    def get_all_location_ids(self, user_id: int) -> List[str]:
+        """
+        Get all location IDs for a user from Square API.
+        Returns list of location IDs, or empty list if none found.
+        """
+        try:
+            integration = self.get_user_square_integration(user_id)
+            if not integration:
+                return []
+            
+            # Fetch locations from Square API
+            response = self._make_square_request(
+                '/v2/locations',
+                integration.access_token
+            )
+            
+            locations = response.get('locations', [])
+            location_ids = [loc.get('id') for loc in locations if loc.get('id')]
+            
+            logger.info(f"Found {len(location_ids)} location IDs for user {user_id}: {location_ids}")
+            return location_ids
+            
+        except Exception as e:
+            logger.error(f"Error fetching all location IDs for user {user_id}: {str(e)}")
+            return []
+    
     def sync_square_catalog(self, user_id: int) -> Dict[str, Any]:
         """
         Sync Square catalog items to local database.
@@ -203,12 +281,24 @@ class SquareService:
             }
             
             # location_ids is required and goes at the top level
-            if integration.pos_id:
-                request_body['location_ids'] = [integration.pos_id]
-            else:
-                # If no location_id, we can't search orders
-                logger.error(f"No location_id found for user {user_id}")
-                return {'orders_created': 0, 'orders_updated': 0, 'error': 'No location_id configured'}
+            # Get all location IDs for multi-location support
+            location_ids = self.get_all_location_ids(user_id)
+            
+            if not location_ids:
+                # Try to fetch and update location ID if none found
+                logger.info(f"No location_ids found for user {user_id}, attempting to fetch from Square API")
+                if not self.fetch_and_update_location_id(user_id):
+                    logger.error(f"Failed to fetch location_id for user {user_id}")
+                    return {'orders_created': 0, 'orders_updated': 0, 'error': 'Failed to fetch location_id'}
+                
+                # Try again to get location IDs
+                location_ids = self.get_all_location_ids(user_id)
+                if not location_ids:
+                    logger.error(f"Still no location_ids after fetch attempt for user {user_id}")
+                    return {'orders_created': 0, 'orders_updated': 0, 'error': 'No location_id available'}
+            
+            request_body['location_ids'] = location_ids
+            logger.info(f"Searching orders for user {user_id} across {len(location_ids)} location(s): {location_ids}")
             
             # Make API request to search orders
             response = self._make_square_request(
@@ -223,6 +313,7 @@ class SquareService:
             
             for order_data in response.get('orders', []):
                 order_id = order_data.get('id')
+                order_location_id = order_data.get('location_id')  # Get location ID from order data
                 
                 # Check if order already exists
                 existing_order = self.db.query(models.Order).filter(
@@ -245,6 +336,7 @@ class SquareService:
                     # Update existing order
                     existing_order.total_amount = total_amount
                     existing_order.order_date = order_date
+                    existing_order.location_id = order_location_id  # Update location ID
                     existing_order.updated_at = datetime.now()
                     orders_updated += 1
                     order_obj = existing_order
@@ -253,6 +345,7 @@ class SquareService:
                     order_obj = models.Order(
                         user_id=user_id,
                         pos_id=order_id,
+                        location_id=order_location_id,  # Store location ID
                         order_date=order_date,
                         total_amount=total_amount,
                         created_at=datetime.now(),
