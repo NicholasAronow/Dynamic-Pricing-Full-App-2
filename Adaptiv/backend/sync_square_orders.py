@@ -91,7 +91,6 @@ async def sync_user_orders(user_id: int, force_sync: bool = False):
             print("   Force sync enabled - will re-sync all data")
         
         # Use background task for sync to prevent RAM issues
-        logger.info(f"Starting background sync task for user {user_id}...")
         print(f"🚀 Starting Square sync in background for user {user_id}...")
         
         # Start the background task
