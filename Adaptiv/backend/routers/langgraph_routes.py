@@ -11,6 +11,8 @@ from pydantic import BaseModel
 from services.langgraph_service_v2 import LangGraphService, MultiAgentResponse
 from dependencies import get_current_user
 from models.core import User
+from config.database import get_db
+from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -26,17 +28,22 @@ class MultiAgentRequest(BaseModel):
 @router.post("/stream")
 async def stream_multi_agent_task(
     request: MultiAgentRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Stream multi-agent task execution with real-time updates"""
     try:
         logger.info(f"Starting streaming multi-agent task: {request.task[:100]}...")
         
+        # Create service with database session
+        langgraph_service = LangGraphService(db_session=db)
+        
         async def generate_stream():
             async for chunk in langgraph_service.stream_supervisor_workflow(
                 task=request.task,
                 context=request.context,
-                previous_messages=request.previous_messages
+                previous_messages=request.previous_messages,
+                user_id=current_user.id
             ):
                 yield f"data: {chunk}\n\n"
         
@@ -61,27 +68,32 @@ class ArchitectureInfo(BaseModel):
     agents: List[str]
     best_for: str
 
-# Initialize service
-langgraph_service = LangGraphService()
+# Service will be created per request with database session
 
 @router.post("/execute", response_model=MultiAgentResponse)
 async def execute_multi_agent_task(
     request: MultiAgentRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Execute a task using the specified multi-agent architecture"""
     try:
         logger.info(f"User {current_user.id} executing multi-agent task: {request.task[:100]}...")
         
+        # Create service with database session
+        langgraph_service = LangGraphService(db_session=db)
+        
         if request.architecture == "supervisor":
             result = await langgraph_service.execute_supervisor_workflow(
                 task=request.task,
-                context=request.context
+                context=request.context,
+                user_id=current_user.id  # Pass user_id
             )
         elif request.architecture == "swarm":
             result = await langgraph_service.execute_swarm_workflow(
                 task=request.task,
-                context=request.context
+                context=request.context,
+                user_id=current_user.id  # Pass user_id
             )
         else:
             raise HTTPException(
@@ -96,42 +108,16 @@ async def execute_multi_agent_task(
         logger.error(f"Multi-agent execution error: {e}")
         raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}")
 
-@router.post("/stream")
-async def stream_multi_agent_task(
-    request: MultiAgentRequest,
-    current_user: User = Depends(get_current_user)
-):
-    """Stream multi-agent task execution with real-time updates"""
-    try:
-        logger.info(f"Starting streaming multi-agent task: {request.task[:100]}...")
-        
-        async def generate_stream():
-            async for chunk in langgraph_service.stream_supervisor_workflow(
-                task=request.task,
-                context=request.context
-            ):
-                yield f"data: {chunk}\n\n"
-        
-        return StreamingResponse(
-            generate_stream(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no"  # Disable proxy buffering
-            }
-        )
-        
-    except Exception as e:
-        logger.error(f"Streaming execution error: {e}")
-        raise HTTPException(status_code=500, detail=f"Streaming failed: {str(e)}")
+
 
 @router.get("/architectures", response_model=List[ArchitectureInfo])
 async def get_available_architectures(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Get list of available multi-agent architectures"""
     try:
+        langgraph_service = LangGraphService(db_session=db)
         architectures = await langgraph_service.get_available_architectures()
         return [ArchitectureInfo(**arch) for arch in architectures]
         
@@ -140,11 +126,13 @@ async def get_available_architectures(
         raise HTTPException(status_code=500, detail=f"Failed to get architectures: {str(e)}")
 
 @router.get("/health")
-async def health_check():
+async def health_check(
+    db: Session = Depends(get_db)
+):
     """Health check endpoint for LangGraph service"""
     try:
         # Basic health check - ensure service can be initialized
-        service = LangGraphService()
+        service = LangGraphService(db_session=db)
         return {
             "status": "healthy",
             "service": "langgraph_multi_agent",
@@ -156,10 +144,14 @@ async def health_check():
 
 @router.post("/test")
 async def test_multi_agent_system(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Test endpoint to verify multi-agent system is working"""
     try:
+        # Create service with database session
+        langgraph_service = LangGraphService(db_session=db)
+        
         # Test with a conversational pricing question
         test_request = MultiAgentRequest(
             task="I'm launching a new wireless headphone product and need help with pricing. The market seems very competitive. What should I consider?",

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
 import {
   Card,
   Typography,
@@ -24,7 +25,8 @@ import {
   SearchOutlined,
   SettingOutlined,
   CheckCircleOutlined,
-  ClockCircleOutlined
+  ClockCircleOutlined,
+  LoadingOutlined
 } from '@ant-design/icons';
 
 import langgraphService, {
@@ -38,12 +40,10 @@ const { TextArea } = Input;
 
 interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'agent';
+  role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
   agentName?: string;
-  executionPath?: string[];
-  isThinking?: boolean;
   isStreaming?: boolean;
 }
 
@@ -52,6 +52,7 @@ interface ChatState {
   isLoading: boolean;
   currentInput: string;
   error: string | null;
+  streamingMessageId?: string; // Track which message is currently streaming
 }
 
 const Feature: React.FC = () => {
@@ -60,9 +61,8 @@ const Feature: React.FC = () => {
       {
         id: '1',
         role: 'assistant',
-        content: 'Hello! I\'m your pricing expert assistant. I can help you with pricing strategies, market analysis, and algorithm selection. What pricing challenge can I help you with today?',
-        timestamp: new Date(),
-        agentName: 'pricing_orchestrator'
+        content: 'Hello! I\'m Ada, your pricing expert assistant. I can help you with pricing strategies, market analysis, and algorithm selection. What pricing challenge can I help you with today?',
+        timestamp: new Date()
       }
     ],
     isLoading: false,
@@ -105,18 +105,28 @@ const Feature: React.FC = () => {
       timestamp: new Date()
     };
   
+    // Create placeholder for assistant message
+    const assistantMessage: ChatMessage = {
+      id: `assistant-${Date.now()}`,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+      isStreaming: true
+    };
+  
     setChatState(prev => ({
       ...prev,
-      messages: [...prev.messages, userMessage],
+      messages: [...prev.messages, userMessage, assistantMessage],
       currentInput: '',
       isLoading: true,
-      error: null
+      error: null,
+      streamingMessageId: assistantMessage.id
     }));
   
     try {
-      // Prepare conversation history (exclude system messages and thinking states)
+      // Prepare conversation history
       const previousMessages = chatState.messages
-        .filter(msg => !msg.isThinking && (msg.role === 'user' || msg.role === 'assistant'))
+        .filter(msg => msg.role === 'user' || msg.role === 'assistant')
         .map(msg => ({
           role: msg.role,
           content: msg.content
@@ -129,141 +139,77 @@ const Feature: React.FC = () => {
         previous_messages: previousMessages
       };
   
-      // Rest of the function remains the same...
-
-      let currentAgentMessage: ChatMessage | null = null;
       let currentContent = '';
-
+      let currentAgentThinking = '';
+  
       // Stream the response
       for await (const chunk of langgraphService.streamTask(request)) {
         switch (chunk.type) {
           case 'status':
-            // Show initial status
-            const statusMessage: ChatMessage = {
-              id: `status-${Date.now()}`,
-              role: 'assistant',
-              content: chunk.message,
-              timestamp: new Date(),
-              isThinking: true,
-              agentName: 'system'
-            };
-            setChatState(prev => ({
-              ...prev,
-              messages: [...prev.messages, statusMessage]
-            }));
-            break;
-
           case 'agent_start':
-            // Agent starts thinking
-            const thinkingMessage: ChatMessage = {
-              id: `thinking-${chunk.agent}-${Date.now()}`,
-              role: 'assistant',
-              content: chunk.message,
-              timestamp: new Date(),
-              isThinking: true,
-              agentName: chunk.agent
-            };
+            // Show agent thinking in a subtle way (like ChatGPT's "Analyzing...")
+            currentAgentThinking = chunk.message || 'Thinking...';
             setChatState(prev => ({
               ...prev,
-              messages: [...prev.messages.filter(m => !m.isThinking || m.agentName !== chunk.agent), thinkingMessage]
+              messages: prev.messages.map(m => 
+                m.id === assistantMessage.id 
+                  ? { ...m, content: currentContent || currentAgentThinking, agentName: chunk.agent }
+                  : m
+              )
             }));
             break;
-
-          case 'message_start':
-            // Start of a new message from an agent
-            currentContent = '';
-            const newAgentMessage: ChatMessage = {
-              id: `message-${chunk.agent}-${Date.now()}`,
-              role: 'assistant',
-              content: '',
-              timestamp: new Date(),
-              agentName: chunk.agent,
-              isStreaming: true
-            };
-            currentAgentMessage = newAgentMessage;
-            setChatState(prev => ({
-              ...prev,
-              messages: [...prev.messages.filter(m => m && !m.isThinking), newAgentMessage]
-            }));
-            break;
-
-          // Replace the case 'message_chunk' section:
+  
           case 'message_chunk':
-            // Streaming content chunk
-            if (currentAgentMessage && chunk.content) {
+            // Accumulate content
+            if (chunk.content) {
               currentContent += chunk.content;
-              const updatedMessage = {
-                ...currentAgentMessage,
-                content: currentContent
-              };
               setChatState(prev => ({
                 ...prev,
                 messages: prev.messages.map(m => 
-                  m && currentAgentMessage && m.id === currentAgentMessage.id ? updatedMessage : m
+                  m.id === assistantMessage.id 
+                    ? { ...m, content: currentContent }
+                    : m
                 )
               }));
             }
             break;
-
-            case 'message_complete':
-              // Message streaming complete
-              if (currentAgentMessage) {
-                const finalMessage = {
-                  ...currentAgentMessage,
-                  isStreaming: false
-                };
-                setChatState(prev => ({
-                  ...prev,
-                  messages: prev.messages.map(m => 
-                    m && currentAgentMessage && m.id === currentAgentMessage.id ? finalMessage : m
-                  )
-                }));
-                currentAgentMessage = null;
-                currentContent = ''; // Reset content buffer
-              }
-              break;
-
-          // Replace the case 'complete' section:
+  
+          case 'message_complete':
+            // Message from an agent is complete, but keep streaming
+            break;
+  
           case 'complete':
-            // Final completion
+            // All done
             setChatState(prev => ({
               ...prev,
               isLoading: false,
-              messages: prev.messages.filter(m => m && !m.isThinking)
-            }));
-            // Log execution info
-            console.log('Execution complete:', {
-              path: chunk.execution_path,
-              time: chunk.total_execution_time,
-              messageCount: chunk.messages?.length
-            });
-            break;
-
-          case 'complete':
-            // Final completion
-            setChatState(prev => ({
-              ...prev,
-              isLoading: false,
-              messages: prev.messages.filter(m => !m.isThinking)
+              streamingMessageId: undefined,
+              messages: prev.messages.map(m => 
+                m.id === assistantMessage.id 
+                  ? { ...m, isStreaming: false }
+                  : m
+              )
             }));
             break;
-
+  
           case 'error':
             setChatState(prev => ({
               ...prev,
               isLoading: false,
               error: chunk.message,
-              messages: prev.messages.filter(m => !m.isThinking)
+              streamingMessageId: undefined,
+              messages: prev.messages.filter(m => m.id !== assistantMessage.id)
             }));
             break;
         }
       }
-
+  
     } catch (error: any) {
       setChatState(prev => ({
         ...prev,
-        messages: prev.messages.filter(m => !m.isThinking),
+        messages: prev.messages.filter(m => m.id !== assistantMessage.id),
         isLoading: false,
+        streamingMessageId: undefined,
         error: error.message || 'Failed to get response'
       }));
     }
@@ -278,11 +224,7 @@ const Feature: React.FC = () => {
 
   const getMessageIcon = (msg: ChatMessage) => {
     if (msg.role === 'user') {
-      return <Avatar icon={<UserOutlined />} style={{ backgroundColor: '#1890ff' }} />;
-    }
-    
-    if (msg.isThinking) {
-      return <Avatar icon={<Spin size="small" />} style={{ backgroundColor: '#52c41a' }} />;
+      return ;
     }
     
     switch (msg.agentName) {
@@ -297,102 +239,241 @@ const Feature: React.FC = () => {
 
   const getAgentName = (msg: ChatMessage) => {
     if (msg.role === 'user') return 'You';
-    if (msg.isThinking) return 'Pricing Expert (thinking...)';
-    
-    switch (msg.agentName) {
-      case 'web_researcher':
-        return 'Market Researcher';
-      case 'algorithm_selector':
-        return 'Algorithm Specialist';
-      case 'pricing_orchestrator':
-      default:
-        return 'Pricing Expert';
-    }
+    else return "Ada"
   };
 
   return (
-    <>
-      <style>
-        {`
-          @keyframes blink {
-            0%, 50% { opacity: 1; }
-            51%, 100% { opacity: 0; }
-          }
-        `}
-      </style>
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <Card 
-        title={
-          <Space>
-            <RobotOutlined style={{ color: '#52c41a' }} />
-            <Title level={4} style={{ margin: 0 }}>Pricing Expert Chat</Title>
-          </Space>
-        }
-        style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
-        bodyStyle={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 0 }}
-      >
-        {/* Chat Messages Area */}
-        <div 
-          style={{ 
-            flex: 1, 
-            overflowY: 'auto', 
-            padding: '16px',
-            backgroundColor: '#fafafa'
-          }}
-        >
+    <div style={{ 
+      height: '100vh', 
+      display: 'flex', 
+      flexDirection: 'column',
+      backgroundColor: '#f7f7f8'
+    }}>
+      {/* Header */}
+      <div style={{
+        backgroundColor: '#fff',
+        borderBottom: '1px solid #e5e5e5',
+        padding: '16px 24px',
+        flexShrink: 0
+      }}>
+        <div style={{ maxWidth: '768px', margin: '0 auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <RobotOutlined style={{ color: '#1890ff', fontSize: '24px' }} />
+          <Title level={4} style={{ margin: 0 }}>Ada - Pricing Expert</Title>
+        </div>
+      </div>
+  
+      {/* Chat Messages Area */}
+      <div style={{ 
+        flex: 1, 
+        overflowY: 'auto',
+        paddingBottom: '20px'
+      }}>
+        <div style={{ maxWidth: '768px', margin: '0 auto', padding: '20px' }}>
           <List
-            dataSource={chatState.messages.filter(msg => msg && msg.id)}
+            dataSource={chatState.messages}
             renderItem={(msg) => (
               <List.Item
                 style={{
                   border: 'none',
-                  padding: '8px 0',
-                  justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start'
+                  padding: '16px 0',
+                  display: 'block'
                 }}
               >
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
-                    alignItems: 'flex-start',
-                    maxWidth: '80%',
-                    gap: '8px'
-                  }}
-                >
-                  {getMessageIcon(msg)}
-                  <div
-                    style={{
-                      backgroundColor: msg.role === 'user' ? '#1890ff' : '#ffffff',
-                      color: msg.role === 'user' ? '#ffffff' : '#000000',
-                      padding: '12px 16px',
-                      borderRadius: '12px',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-                      maxWidth: '100%'
-                    }}
-                  >
-                    <div style={{ fontSize: '12px', opacity: 0.8, marginBottom: '4px' }}>
-                      {getAgentName(msg)}
+                <div style={{
+                  display: 'flex',
+                  gap: '16px',
+                  alignItems: 'flex-start'
+                }}>
+                  {/* Avatar */}
+                  <div style={{ flexShrink: 0 }}>
+                    {msg.role === 'user' ? (
+                      <Avatar 
+                        icon={<UserOutlined />} 
+                        style={{ backgroundColor: '#f0f0f0', color: '#666' }}
+                        size={36}
+                      />
+                    ) : (
+                      <Avatar 
+                        icon={<RobotOutlined />} 
+                        style={{ backgroundColor: '#1890ff' }}
+                        size={36}
+                      />
+                    )}
+                  </div>
+  
+                  {/* Message Content */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ 
+                      fontWeight: 600, 
+                      marginBottom: '4px',
+                      color: '#030303'
+                    }}>
+                      {msg.role === 'user' ? 'You' : 'Ada'}
                     </div>
-                    <div style={{ whiteSpace: 'pre-wrap' }}>
-                      {msg.content}
-                      {msg.isStreaming && !msg.isThinking && (
-                        <span style={{ 
-                          animation: 'blink 1s infinite',
-                          marginLeft: '2px',
-                          fontSize: '16px'
-                        }}>
-                          |
-                        </span>
+                    
+                    <div style={{ 
+                      color: '#030303',
+                      lineHeight: '1.5',
+                      fontSize: '15px'
+                    }}>
+                      {msg.role === 'user' ? (
+                        <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                      ) : (
+                        <>
+                          <ReactMarkdown
+                            components={{
+                              // Paragraphs
+                              p: ({children}) => <p style={{margin: '0 0 16px 0', lineHeight: '1.6'}}>{children}</p>,
+                              
+                              // Headers
+                              h1: ({children}) => <h1 style={{fontSize: '28px', fontWeight: '600', margin: '24px 0 16px 0', lineHeight: '1.3'}}>{children}</h1>,
+                              h2: ({children}) => <h2 style={{fontSize: '22px', fontWeight: '600', margin: '20px 0 12px 0', lineHeight: '1.3'}}>{children}</h2>,
+                              h3: ({children}) => <h3 style={{fontSize: '18px', fontWeight: '600', margin: '16px 0 8px 0', lineHeight: '1.4'}}>{children}</h3>,
+                              h4: ({children}) => <h4 style={{fontSize: '16px', fontWeight: '600', margin: '12px 0 8px 0', lineHeight: '1.4'}}>{children}</h4>,
+                              h5: ({children}) => <h5 style={{fontSize: '14px', fontWeight: '600', margin: '12px 0 8px 0', lineHeight: '1.4'}}>{children}</h5>,
+                              h6: ({children}) => <h6 style={{fontSize: '13px', fontWeight: '600', margin: '12px 0 8px 0', lineHeight: '1.4'}}>{children}</h6>,
+                              
+                              // Lists
+                              ul: ({children}) => <ul style={{margin: '12px 0', paddingLeft: '28px', lineHeight: '1.6'}}>{children}</ul>,
+                              ol: ({children}) => <ol style={{margin: '12px 0', paddingLeft: '28px', lineHeight: '1.6'}}>{children}</ol>,
+                              li: ({children}) => <li style={{margin: '4px 0', paddingLeft: '4px'}}>{children}</li>,
+                              
+                              // Code
+                              code: ({children, ...props}: any) => {
+                                const isInline = !props.className || !props.className.includes('language-');
+                                return isInline ? (
+                                  <code style={{
+                                    backgroundColor: '#f0f2f5',
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    fontSize: '85%',
+                                    fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+                                    color: '#c41d7f'
+                                  }}>{children}</code>
+                                ) : (
+                                  <code style={{
+                                    display: 'block',
+                                    backgroundColor: '#f6f8fa',
+                                    padding: '16px',
+                                    borderRadius: '6px',
+                                    fontSize: '14px',
+                                    fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+                                    overflowX: 'auto'
+                                  }}>{children}</code>
+                                );
+                              },
+                              
+                              pre: ({children}) => (
+                                <pre style={{
+                                  backgroundColor: '#f6f8fa',
+                                  border: '1px solid #e1e4e8',
+                                  borderRadius: '6px',
+                                  padding: '16px',
+                                  overflow: 'auto',
+                                  fontSize: '14px',
+                                  lineHeight: '1.45',
+                                  margin: '16px 0',
+                                  fontFamily: 'Consolas, Monaco, "Courier New", monospace'
+                                }}>{children}</pre>
+                              ),
+                              
+                              // Blockquotes
+                              blockquote: ({children}) => (
+                                <blockquote style={{
+                                  borderLeft: '4px solid #1890ff',
+                                  paddingLeft: '16px',
+                                  margin: '16px 0',
+                                  color: '#57606a',
+                                  fontStyle: 'italic'
+                                }}>{children}</blockquote>
+                              ),
+                              
+                              // Text formatting
+                              strong: ({children}) => <strong style={{fontWeight: '600', color: '#24292f'}}>{children}</strong>,
+                              em: ({children}) => <em style={{fontStyle: 'italic'}}>{children}</em>,
+                              del: ({children}) => <del style={{textDecoration: 'line-through', opacity: 0.7}}>{children}</del>,
+                              
+                              // Links
+                              a: ({href, children}) => (
+                                <a 
+                                  href={href} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  style={{
+                                    color: '#1890ff',
+                                    textDecoration: 'none',
+                                    borderBottom: '1px solid transparent',
+                                    transition: 'border-color 0.2s'
+                                  }}
+                                  onMouseEnter={(e) => e.currentTarget.style.borderBottomColor = '#1890ff'}
+                                  onMouseLeave={(e) => e.currentTarget.style.borderBottomColor = 'transparent'}
+                                >{children}</a>
+                              ),
+                              
+                              // Horizontal rule
+                              hr: () => <hr style={{border: 'none', borderTop: '1px solid #e1e4e8', margin: '24px 0'}} />,
+                              
+                              // Tables
+                              table: ({children}) => (
+                                <div style={{overflowX: 'auto', margin: '16px 0'}}>
+                                  <table style={{
+                                    borderCollapse: 'collapse',
+                                    width: '100%',
+                                    fontSize: '14px'
+                                  }}>{children}</table>
+                                </div>
+                              ),
+                              thead: ({children}) => <thead style={{backgroundColor: '#f6f8fa'}}>{children}</thead>,
+                              tbody: ({children}) => <tbody>{children}</tbody>,
+                              tr: ({children}) => <tr style={{borderTop: '1px solid #e1e4e8'}}>{children}</tr>,
+                              th: ({children}) => (
+                                <th style={{
+                                  padding: '12px 16px',
+                                  fontWeight: '600',
+                                  textAlign: 'left',
+                                  borderTop: '1px solid #e1e4e8'
+                                }}>{children}</th>
+                              ),
+                              td: ({children}) => (
+                                <td style={{
+                                  padding: '12px 16px',
+                                  borderTop: '1px solid #e1e4e8'
+                                }}>{children}</td>
+                              ),
+                              
+                              // Images
+                              img: ({src, alt}) => (
+                                <img 
+                                  src={src} 
+                                  alt={alt} 
+                                  style={{
+                                    maxWidth: '100%',
+                                    height: 'auto',
+                                    borderRadius: '6px',
+                                    margin: '16px 0'
+                                  }} 
+                                />
+                              )
+                            }}
+                          >
+                            {msg.content || ''}
+                          </ReactMarkdown>
+                          
+                          {/* Show subtle loading indicator while streaming */}
+                          {msg.isStreaming && msg.id === chatState.streamingMessageId && (
+                            <span style={{ 
+                              display: 'inline-block',
+                              width: '8px',
+                              height: '16px',
+                              backgroundColor: '#1890ff',
+                              animation: 'blink 1s infinite',
+                              marginLeft: '2px',
+                              verticalAlign: 'text-bottom'
+                            }} />
+                          )}
+                        </>
                       )}
                     </div>
-                    {msg.executionPath && msg.executionPath.length > 1 && (
-                      <div style={{ marginTop: '8px', fontSize: '12px', opacity: 0.7 }}>
-                        <Space size={4}>
-                          <BulbOutlined />
-                          <Text>Consulted: {msg.executionPath.join(' → ')}</Text>
-                        </Space>
-                      </div>
-                    )}
                   </div>
                 </div>
               </List.Item>
@@ -400,59 +481,90 @@ const Feature: React.FC = () => {
           />
           <div ref={messagesEndRef} />
         </div>
-
-        {/* Error Display */}
-        {chatState.error && (
+      </div>
+  
+      {/* Error Display */}
+      {chatState.error && (
+        <div style={{ maxWidth: '768px', margin: '0 auto', padding: '0 20px' }}>
           <Alert
             message={chatState.error}
             type="error"
             closable
             onClose={() => setChatState(prev => ({ ...prev, error: null }))}
-            style={{ margin: '16px' }}
+            style={{ marginBottom: '16px' }}
           />
-        )}
-
-        {/* Input Area */}
-        <div style={{ padding: '16px', backgroundColor: '#ffffff', borderTop: '1px solid #f0f0f0' }}>
-          <Space.Compact style={{ width: '100%' }}>
+        </div>
+      )}
+  
+      {/* Input Area */}
+      <div style={{ 
+        backgroundColor: '#fff',
+        borderTop: '1px solid #e5e5e5',
+        padding: '16px 0',
+        flexShrink: 0
+      }}>
+        <div style={{ maxWidth: '768px', margin: '0 auto', padding: '0 20px' }}>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
             <TextArea
               ref={inputRef}
               value={chatState.currentInput}
               onChange={(e) => setChatState(prev => ({ ...prev, currentInput: e.target.value }))}
               onKeyPress={handleKeyPress}
-              placeholder="Ask me about pricing strategies, market analysis, or algorithm selection..."
-              autoSize={{ minRows: 1, maxRows: 4 }}
+              placeholder="Ask about pricing strategies, market analysis, or algorithm selection..."
+              autoSize={{ minRows: 1, maxRows: 6 }}
               disabled={chatState.isLoading}
-              style={{ resize: 'none' }}
+              style={{ 
+                resize: 'none',
+                fontSize: '15px',
+                border: '1px solid #d9d9d9',
+                borderRadius: '8px',
+                padding: '10px 12px'
+              }}
             />
             <Button
               type="primary"
-              icon={<SendOutlined />}
+              icon={chatState.isLoading ? <LoadingOutlined /> : <SendOutlined />}
               onClick={handleSendMessage}
-              loading={chatState.isLoading}
-              disabled={!chatState.currentInput.trim()}
-              style={{ height: 'auto' }}
+              disabled={!chatState.currentInput.trim() || chatState.isLoading}
+              style={{ 
+                height: '40px',
+                borderRadius: '8px',
+                padding: '0 20px'
+              }}
             >
-              Send
+              {chatState.isLoading ? '' : 'Send'}
             </Button>
-          </Space.Compact>
-          
-          <div style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
-            <Space>
-              <CheckCircleOutlined style={{ color: '#52c41a' }} />
-              <Text>Connected to Pricing Expert System</Text>
-              {architectures.length > 0 && (
-                <>
-                  <Divider type="vertical" />
-                  <Text>Architecture: {architectures[0]?.title}</Text>
-                </>
-              )}
-            </Space>
           </div>
         </div>
-      </Card>
       </div>
-    </>
+  
+      <style>
+        {`
+          @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+          }
+          
+          /* Custom scrollbar */
+          ::-webkit-scrollbar {
+            width: 8px;
+          }
+          
+          ::-webkit-scrollbar-track {
+            background: transparent;
+          }
+          
+          ::-webkit-scrollbar-thumb {
+            background: #d9d9d9;
+            border-radius: 4px;
+          }
+          
+          ::-webkit-scrollbar-thumb:hover {
+            background: #bfbfbf;
+          }
+        `}
+      </style>
+    </div>
   );
 };
 

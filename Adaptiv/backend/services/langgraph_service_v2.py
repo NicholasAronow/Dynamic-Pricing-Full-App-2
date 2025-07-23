@@ -20,6 +20,9 @@ from langgraph.graph import StateGraph, MessagesState, START
 from langgraph.types import Command
 from langgraph.prebuilt import create_react_agent, InjectedState
 
+from services.database_service import DatabaseService
+from config.database import get_db
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -80,6 +83,180 @@ class PricingTools:
             
         return f"SELECTED ALGORITHM: {algorithms[selected]}. Rationale: Based on {product_type} product type, {market_conditions} market conditions, and {business_goals} business goals, this algorithm will optimize for your specific situation."
 
+class DatabaseTools:
+    """Tools for accessing database information"""
+    
+    def __init__(self, user_id: int = None, db_session=None):
+        self.db_session = db_session
+        self.user_id = user_id
+    
+    def _get_db_service(self):
+        """Get database service with current session"""
+        if not self.db_session:
+            # Get a fresh database session using the generator
+            db_gen = get_db()
+            self.db_session = next(db_gen)
+        return DatabaseService(self.db_session)
+    
+    def create_get_user_items_data(self):
+        """Create the tool with proper context"""
+        @tool
+        def get_user_items_data() -> str:
+            """Get all menu items for the current user from the database"""
+            try:
+                if not self.user_id:
+                    return "Error: No user ID available for database query"
+                
+                db_service = self._get_db_service()
+                items = db_service.get_user_items(self.user_id)
+                
+                if not items:
+                    return f"No menu items found for user {self.user_id}"
+                
+                items_info = []
+                for item in items:
+                    item_info = f"- {item.name}: ${item.current_price:.2f}"
+                    if hasattr(item, 'category') and item.category:
+                        item_info += f" (Category: {item.category})"
+                    if hasattr(item, 'description') and item.description:
+                        item_info += f" - {item.description[:100]}..."
+                    items_info.append(item_info)
+                
+                return f"Found {len(items)} menu items:\n" + "\n".join(items_info)
+            except Exception as e:
+                return f"Error retrieving items: {str(e)}"
+        
+        return get_user_items_data
+    
+    def create_get_user_sales_data(self):
+        """Create the sales data tool"""
+        @tool
+        def get_user_sales_data(limit: int = 10) -> str:
+            """Get recent sales/orders data for the current user from the database"""
+            try:
+                if not self.user_id:
+                    return "Error: No user ID available for database query"
+                    
+                db_service = self._get_db_service()
+                orders = db_service.get_user_orders(self.user_id, limit=limit)
+                
+                if not orders:
+                    return f"No recent orders found for user {self.user_id}"
+                
+                total_revenue = sum(order.total_amount for order in orders if order.total_amount)
+                order_count = len(orders)
+                avg_order_value = total_revenue / order_count if order_count > 0 else 0
+                
+                recent_orders = []
+                for order in orders[:5]:  # Show top 5 recent orders
+                    order_info = f"- Order #{order.id}: ${order.total_amount:.2f} on {order.order_date.strftime('%Y-%m-%d')}"
+                    recent_orders.append(order_info)
+                
+                return f"Sales Summary (last {limit} orders):\n" + \
+                       f"Total Revenue: ${total_revenue:.2f}\n" + \
+                       f"Order Count: {order_count}\n" + \
+                       f"Average Order Value: ${avg_order_value:.2f}\n\n" + \
+                       f"Recent Orders:\n" + "\n".join(recent_orders)
+            except Exception as e:
+                return f"Error retrieving sales data: {str(e)}"
+        
+        return get_user_sales_data
+    
+    def create_get_competitor_data(self):
+        """Create the competitor data tool"""
+        @tool
+        def get_competitor_data() -> str:
+            """Get competitor analysis data for the current user from the database"""
+            try:
+                if not self.user_id:
+                    return "Error: No user ID available for database query"
+                    
+                db_service = self._get_db_service()
+                competitor_report = db_service.get_latest_competitor_report(self.user_id)
+                
+                result = []
+                
+                if competitor_report:
+                    result.append(f"Latest Competitor Report (from {competitor_report.created_at.strftime('%Y-%m-%d')}):")
+                    if hasattr(competitor_report, 'summary') and competitor_report.summary:
+                        result.append(competitor_report.summary[:500] + "...")
+                    if hasattr(competitor_report, 'insights') and competitor_report.insights:
+                        result.append("\nKey Insights:")
+                        for insight in competitor_report.insights[:3]:
+                            result.append(f"- {insight}")
+                
+                return "\n".join(result) if result else f"No competitor data found for user {self.user_id}"
+            except Exception as e:
+                return f"Error retrieving competitor data: {str(e)}"
+        
+        return get_competitor_data
+    
+    def create_get_price_history_data(self):
+        """Create the price history tool"""
+        @tool
+        def get_price_history_data(item_name: str = None) -> str:
+            """Get price history data for the current user's items"""
+            try:
+                if not self.user_id:
+                    return "Error: No user ID available for database query"
+                    
+                db_service = self._get_db_service()
+                items = db_service.get_user_items(self.user_id)
+                
+                if not items:
+                    return f"No items found for user {self.user_id}"
+                
+                # Filter by item name if provided
+                if item_name:
+                    items = [item for item in items if item_name.lower() in item.name.lower()]
+                    if not items:
+                        return f"No items found matching '{item_name}' for user {self.user_id}"
+                
+                price_histories = []
+                for item in items[:5]:  # Limit to 5 items
+                    history = db_service.get_price_history(item.id)
+                    if history:
+                        price_histories.append(f"\n{item.name} price history:")
+                        for price_change in history[:3]:  # Show last 3 changes
+                            price_histories.append(f"  - ${price_change.previous_price:.2f} → ${price_change.new_price:.2f} on {price_change.changed_at.strftime('%Y-%m-%d')}")
+                
+                return "\n".join(price_histories) if price_histories else "No price history found"
+            except Exception as e:
+                return f"Error retrieving price history: {str(e)}"
+        
+        return get_price_history_data
+    
+    def create_get_business_profile_data(self):
+        """Create the business profile tool"""
+        @tool
+        def get_business_profile_data() -> str:
+            """Get business profile information for the current user"""
+            try:
+                if not self.user_id:
+                    return "Error: No user ID available for database query"
+                    
+                db_service = self._get_db_service()
+                profile = db_service.get_business_profile(self.user_id)
+                
+                if not profile:
+                    return f"No business profile found for user {self.user_id}"
+                
+                profile_info = []
+                if hasattr(profile, 'business_name') and profile.business_name:
+                    profile_info.append(f"Business: {profile.business_name}")
+                if hasattr(profile, 'industry') and profile.industry:
+                    profile_info.append(f"Industry: {profile.industry}")
+                if hasattr(profile, 'company_size') and profile.company_size:
+                    profile_info.append(f"Company Size: {profile.company_size}")
+                if hasattr(profile, 'description') and profile.description:
+                    profile_info.append(f"Description: {profile.description[:200]}...")
+                
+                return "\n".join(profile_info) if profile_info else "Business profile found but no details available"
+            except Exception as e:
+                return f"Error retrieving business profile: {str(e)}"
+        
+        return get_business_profile_data
+
 def create_handoff_tool(*, agent_name: str, description: str | None = None):
     """Create a handoff tool for agent-to-agent communication"""
     name = f"transfer_to_{agent_name}"
@@ -106,9 +283,18 @@ def create_handoff_tool(*, agent_name: str, description: str | None = None):
 class LangGraphService:
     """Pricing Expert Orchestrator with Sub-Agents"""
     
-    def __init__(self):
-        self.model = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)  # Slightly higher temp for conversational responses
+    def __init__(self, db_session=None):
+        self.model = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
         self.tools = PricingTools()
+        self.db_session = db_session
+        self.database_tools = None  # Will be initialized when user_id is available
+        
+        # Don't create agents here - they'll be created when needed
+        self.pricing_orchestrator = None
+        self.web_researcher = None
+        self.algorithm_selector = None
+        self.database_agent = None
+        self.supervisor_graph = None
         
         # Create handoff tools for sub-agents
         self.transfer_to_web_researcher = create_handoff_tool(
@@ -119,6 +305,10 @@ class LangGraphService:
             agent_name="algorithm_selector",
             description="Transfer to algorithm selection agent for pricing strategy recommendations"
         )
+        self.transfer_to_database_agent = create_handoff_tool(
+            agent_name="database_agent",
+            description="Transfer to database agent to retrieve business data, sales history, menu items, and competitor information from the database"
+        )
         
         # Initialize agents
         self._create_agents()
@@ -126,6 +316,31 @@ class LangGraphService:
         # Build supervisor graph (main architecture)
         self.supervisor_graph = self._build_supervisor_graph()
     
+    def _initialize_agents_with_context(self, user_id: int):
+        """Initialize or reinitialize agents with user context"""
+        # Initialize database tools with user_id
+        self.database_tools = DatabaseTools(user_id=user_id, db_session=self.db_session)
+        
+        # Create handoff tools
+        self.transfer_to_web_researcher = create_handoff_tool(
+            agent_name="web_researcher",
+            description="Transfer to web research agent for market data and competitor analysis"
+        )
+        self.transfer_to_algorithm_selector = create_handoff_tool(
+            agent_name="algorithm_selector",
+            description="Transfer to algorithm selection agent for pricing strategy recommendations"
+        )
+        self.transfer_to_database_agent = create_handoff_tool(
+            agent_name="database_agent",
+            description="Transfer to database agent to retrieve business data, sales history, menu items, and competitor information from the database"
+        )
+        
+        # Create agents
+        self._create_agents()
+        
+        # Build supervisor graph
+        self.supervisor_graph = self._build_supervisor_graph()
+
     def _create_agents(self):
         """Create the pricing orchestrator and specialized sub-agents"""
         
@@ -134,7 +349,8 @@ class LangGraphService:
             model=self.model,
             tools=[
                 self.transfer_to_web_researcher,
-                self.transfer_to_algorithm_selector
+                self.transfer_to_algorithm_selector,
+                self.transfer_to_database_agent
             ],
             prompt="""You are an expert pricing consultant and orchestrator. You help businesses make informed pricing decisions through conversational interaction.
             
@@ -142,17 +358,20 @@ class LangGraphService:
             - Engage in natural conversation about pricing challenges
             - Ask clarifying questions to understand the business context
             - Coordinate with specialized sub-agents when needed:
-              * Web Researcher: For market data and competitor analysis
-              * Algorithm Selector: For choosing optimal pricing strategies
+            * Web Researcher: For market data and competitor analysis
+            * Algorithm Selector: For choosing optimal pricing strategies
+            * Database Agent: For retrieving business data, sales history, menu items, and competitor information
             - Provide expert pricing advice and recommendations
             - Explain pricing concepts in accessible terms
             
             Workflow:
             1. Understand the user's pricing question or challenge
-            2. Ask follow-up questions if needed for context
-            3. Use sub-agents to gather market data or select algorithms when appropriate
-            4. Synthesize information into actionable pricing recommendations
-            5. Engage conversationally and be ready to answer follow-up questions
+            2. If you need specific data, delegate to the appropriate sub-agent ONCE
+            3. Once you have sufficient information, provide a comprehensive final answer
+            4. Do NOT repeatedly call the same sub-agent or transfer control unnecessarily
+            5. Always aim to provide a complete, helpful response based on available information
+            
+            IMPORTANT: After gathering information from sub-agents, provide your final answer directly. Do not keep transferring control back and forth. Be decisive and conclusive in your responses.
             
             Always be helpful, professional, and focus on practical pricing solutions.""",
             name="pricing_orchestrator"
@@ -198,6 +417,47 @@ class LangGraphService:
             Always explain your selection clearly and provide implementation guidance.""",
             name="algorithm_selector"
         )
+        
+        # Database Agent - use factory methods if database_tools exists
+        if self.database_tools:
+            self.database_agent = create_react_agent(
+                model=self.model,
+                tools=[
+                    self.database_tools.create_get_user_items_data(),
+                    self.database_tools.create_get_user_sales_data(),
+                    self.database_tools.create_get_competitor_data(),
+                    self.database_tools.create_get_price_history_data(),
+                    self.database_tools.create_get_business_profile_data()
+                ],
+                prompt="""You are a database specialist who retrieves and analyzes business data to support pricing decisions.
+                
+                Your role is to:
+                - Access and retrieve business data from the database
+                - Analyze sales history, menu items, and pricing trends
+                - Provide competitor data and market positioning insights
+                - Extract relevant business profile information
+                - Present data in a clear, actionable format for pricing decisions
+                
+                Available data includes:
+                - Menu items and current pricing
+                - Sales history and revenue trends
+                - Competitor pricing data
+                - Price change history
+                - Business profile and market information
+                
+                IMPORTANT: Retrieve the requested data efficiently and provide a comprehensive summary. Do not make multiple redundant tool calls. Provide your analysis and return control to the orchestrator promptly.
+                
+                Always provide specific, data-driven insights that directly support pricing strategy decisions.""",
+                name="database_agent"
+            )
+        else:
+            # Create a dummy database agent that returns error messages
+            self.database_agent = create_react_agent(
+                model=self.model,
+                tools=[],
+                prompt="You are a database specialist but no database connection is available. Inform the user that database access is not configured.",
+                name="database_agent"
+            )
     
     def _build_supervisor_graph(self):
         """Build the pricing expert orchestrator graph"""
@@ -206,16 +466,25 @@ class LangGraphService:
             .add_node("pricing_orchestrator", self.pricing_orchestrator)
             .add_node("web_researcher", self.web_researcher)
             .add_node("algorithm_selector", self.algorithm_selector)
+            .add_node("database_agent", self.database_agent)
             .add_edge(START, "pricing_orchestrator")  # Always start with the main orchestrator
             .compile()
         )
         return graph
     
-    async def execute_supervisor_workflow(self, task: str, context: str = "") -> MultiAgentResponse:
+    async def execute_supervisor_workflow(self, task: str, context: str = "", user_id: int = None) -> MultiAgentResponse:
         """Execute pricing consultation using the orchestrator"""
         start_time = datetime.now()
-        
+    
         try:
+            # Initialize agents with user context if provided
+            if user_id:
+                self._initialize_agents_with_context(user_id)
+            elif not self.supervisor_graph:
+                # Initialize without user context if not already initialized
+                self._create_agents()
+                self.supervisor_graph = self._build_supervisor_graph()
+        
             # Prepare conversational message
             initial_message = task
             if context:
@@ -257,12 +526,20 @@ class LangGraphService:
             logger.error(f"Pricing orchestrator workflow error: {e}")
             raise
     
-    async def stream_supervisor_workflow(self, task: str, context: str = "", previous_messages: List[Dict] = None) -> AsyncGenerator[str, None]:
+    async def stream_supervisor_workflow(self, task: str, context: str = "", previous_messages: List[Dict] = None, user_id: int = None) -> AsyncGenerator[str, None]:
         """Stream the pricing orchestrator workflow with real-time updates"""
         try:
             start_time = datetime.now()
             execution_path = []
             
+            # Initialize agents with user context if provided
+            if user_id:
+                self._initialize_agents_with_context(user_id)
+            elif not self.supervisor_graph:
+                # Initialize without user context if not already initialized
+                self._create_agents()
+                self.supervisor_graph = self._build_supervisor_graph()
+        
             # Build initial state with conversation history
             messages = []
             
@@ -291,8 +568,12 @@ class LangGraphService:
             # Stream the graph execution
             result = None
             current_agent = None
+            previous_message_count = len(initial_state["messages"])  # Track initial message count
             
-            async for chunk in self.supervisor_graph.astream(initial_state):
+            async for chunk in self.supervisor_graph.astream(
+                initial_state,
+                config={"recursion_limit": 50}
+            ):
                 for node_name, node_output in chunk.items():
                     if node_name not in execution_path:
                         execution_path.append(node_name)
@@ -302,7 +583,8 @@ class LangGraphService:
                         agent_display_name = {
                             "pricing_orchestrator": "💼 Pricing Expert",
                             "web_researcher": "🔍 Market Researcher", 
-                            "algorithm_selector": "⚙️ Algorithm Specialist"
+                            "algorithm_selector": "⚙️ Algorithm Specialist",
+                            "database_agent": "🗄️ Database Specialist"
                         }.get(node_name, f"🤖 {node_name}")
                         
                         yield json.dumps({
@@ -315,38 +597,46 @@ class LangGraphService:
                     
                     result = node_output
                     
-                    # Extract and stream any new messages
+                    # Extract and stream only NEW messages (beyond the initial conversation)
                     if "messages" in node_output and node_output["messages"]:
-                        # Get the last message that's an AI message
-                        for msg in node_output["messages"]:
-                            if isinstance(msg, AIMessage) and msg.content:
-                                # Only stream if this is a new message from the current agent
-                                content = msg.content
-                                
-                                # Yield message start
-                                yield json.dumps({
-                                    "type": "message_start",
-                                    "agent": current_agent,
-                                    "timestamp": datetime.now().isoformat()
-                                })
-                                
-                                # Stream words with small delays
-                                words = content.split()
-                                for i, word in enumerate(words):
+                        current_messages = node_output["messages"]
+                        
+                        # Only process messages that are new (beyond the initial count)
+                        if len(current_messages) > previous_message_count:
+                            # Get only the new messages
+                            new_messages = current_messages[previous_message_count:]
+                            
+                            for msg in new_messages:
+                                if isinstance(msg, AIMessage) and msg.content:
+                                    content = msg.content
+                                    
+                                    # Yield message start
                                     yield json.dumps({
-                                        "type": "message_chunk",
+                                        "type": "message_start",
                                         "agent": current_agent,
-                                        "content": word + (" " if i < len(words) - 1 else ""),
                                         "timestamp": datetime.now().isoformat()
                                     })
-                                    await asyncio.sleep(0.02)  # Reduced delay for better UX
-                                
-                                # Yield message complete
-                                yield json.dumps({
-                                    "type": "message_complete",
-                                    "agent": current_agent,
-                                    "timestamp": datetime.now().isoformat()
-                                })
+                                    
+                                    # Stream words with small delays
+                                    words = content.split()
+                                    for i, word in enumerate(words):
+                                        yield json.dumps({
+                                            "type": "message_chunk",
+                                            "agent": current_agent,
+                                            "content": word + (" " if i < len(words) - 1 else ""),
+                                            "timestamp": datetime.now().isoformat()
+                                        })
+                                        await asyncio.sleep(0.02)  # Reduced delay for better UX
+                                    
+                                    # Yield message complete
+                                    yield json.dumps({
+                                        "type": "message_complete",
+                                        "agent": current_agent,
+                                        "timestamp": datetime.now().isoformat()
+                                    })
+                            
+                            # Update the previous message count
+                            previous_message_count = len(current_messages)
             
             # Final result
             final_result = self._extract_final_result(result["messages"]) if result else "No response generated"
