@@ -289,11 +289,17 @@ class TaskService:
                 validation_results['errors'].append("Square access token missing")
                 validation_results['valid'] = False
             
-            # Check if integration is active
+            # Check if integration is active (has access token and not expired)
             if integration:
-                validation_results['checks']['integration_active'] = integration.is_active
-                if not integration.is_active:
-                    validation_results['errors'].append("Square integration is inactive")
+                from datetime import datetime, timezone
+                is_active = (
+                    integration.access_token is not None and 
+                    integration.access_token.strip() != "" and
+                    (integration.expires_at is None or integration.expires_at > datetime.now(timezone.utc))
+                )
+                validation_results['checks']['integration_active'] = is_active
+                if not is_active:
+                    validation_results['errors'].append("Square integration is inactive or expired")
                     validation_results['valid'] = False
             
             return validation_results
