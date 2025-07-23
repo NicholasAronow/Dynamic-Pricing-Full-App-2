@@ -390,14 +390,24 @@ class SquareService:
                 logger.info(f"Starting full sync from {start_date.isoformat()}")
             
             # Build search query with date filter
+            # Format the date properly for Square API (ISO 8601 with timezone)
+            start_date_str = start_date.strftime('%Y-%m-%dT%H:%M:%S+00:00')
+            
             request_body = {
                 'query': {
                     'filter': {
                         'date_time_filter': {
-                            'created_at': {
-                                'start_at': start_date.isoformat() + 'Z'
+                            'closed_at': {
+                                'start_at': start_date_str
                             }
+                        },
+                        'state_filter': {
+                            'states': ['COMPLETED']
                         }
+                    },
+                    'sort': {
+                        'sort_field': 'CLOSED_AT',
+                        'sort_order': 'DESC'
                     }
                 }
             }
