@@ -410,103 +410,132 @@ class SquareService:
             request_body['location_ids'] = location_ids
             logger.info(f"Searching orders for user {user_id} across {len(location_ids)} location(s): {location_ids}")
             
-            # Make API request to search orders
-            response = self._make_square_request_with_refresh(
-                '/v2/orders/search',
-                user_id,
-                method='POST',
-                data=request_body
-            )
-            
             orders_created = 0
             orders_updated = 0
+            cursor = None
+            page_count = 0
             
-            for order_data in response.get('orders', []):
-                order_id = order_data.get('id')
-                order_location_id = order_data.get('location_id')  # Get location ID from order data
+            # Handle pagination - keep fetching until no more pages
+            while True:
+                page_count += 1
                 
-                # Check if order already exists
-                existing_order = self.db.query(models.Order).filter(
-                    and_(
-                        models.Order.user_id == user_id,
-                        models.Order.pos_id == order_id
-                    )
-                ).first()
+                # Add cursor to request if we have one (for pagination)
+                current_request = request_body.copy()
+                if cursor:
+                    current_request['cursor'] = cursor
                 
-                # Parse order date
-                order_date = datetime.fromisoformat(
-                    order_data.get('created_at', '').replace('Z', '+00:00')
+                logger.info(f"Fetching orders page {page_count} for user {user_id}" + (f" (cursor: {cursor[:20]}...)" if cursor else ""))
+                
+                # Make API request to search orders
+                response = self._make_square_request_with_refresh(
+                    '/v2/orders/search',
+                    user_id,
+                    method='POST',
+                    data=current_request
                 )
                 
-                # Calculate total amount
-                total_money = order_data.get('total_money', {})
-                total_amount = float(total_money.get('amount', 0)) / 100 if total_money.get('amount') else 0
+                orders_in_page = response.get('orders', [])
+                logger.info(f"Processing {len(orders_in_page)} orders from page {page_count}")
                 
-                if existing_order:
-                    # Update existing order
-                    existing_order.total_amount = total_amount
-                    existing_order.order_date = order_date
-                    existing_order.location_id = order_location_id  # Update location ID
-                    existing_order.updated_at = datetime.now()
-                    orders_updated += 1
-                    order_obj = existing_order
-                else:
-                    # Create new order
-                    order_obj = models.Order(
-                        user_id=user_id,
-                        pos_id=order_id,
-                        location_id=order_location_id,  # Store location ID
-                        order_date=order_date,
-                        total_amount=total_amount,
-                        created_at=datetime.now(),
-                        updated_at=datetime.now()
-                    )
-                    self.db.add(order_obj)
-                    self.db.flush()  # Get the order ID
-                    orders_created += 1
+                if not orders_in_page:
+                    logger.info(f"No orders found on page {page_count}, stopping pagination")
+                    break
                 
-                # Process line items
-                line_items = order_data.get('line_items', [])
-                for line_item in line_items:
-                    catalog_object_id = line_item.get('catalog_object_id')
-                    if not catalog_object_id:
-                        continue
+                # Process orders in this page
+                for order_data in orders_in_page:
+                    order_id = order_data.get('id')
+                    order_location_id = order_data.get('location_id')  # Get location ID from order data
                     
-                    # Find the corresponding item
-                    item = self.db.query(models.Item).filter(
+                    # Check if order already exists
+                    existing_order = self.db.query(models.Order).filter(
                         and_(
-                            models.Item.user_id == user_id,
-                            models.Item.pos_id == catalog_object_id
+                            models.Order.user_id == user_id,
+                            models.Order.pos_id == order_id
                         )
                     ).first()
                     
-                    if item:
-                        quantity = int(line_item.get('quantity', 1))
-                        unit_price = float(line_item.get('base_price_money', {}).get('amount', 0)) / 100
+                    # Parse order date
+                    order_date = datetime.fromisoformat(
+                        order_data.get('created_at', '').replace('Z', '+00:00')
+                    )
+                    
+                    # Calculate total amount
+                    total_money = order_data.get('total_money', {})
+                    total_amount = float(total_money.get('amount', 0)) / 100 if total_money.get('amount') else 0
+                    
+                    if existing_order:
+                        # Update existing order
+                        existing_order.total_amount = total_amount
+                        existing_order.order_date = order_date
+                        existing_order.location_id = order_location_id  # Update location ID
+                        existing_order.updated_at = datetime.now()
+                        orders_updated += 1
+                        order_obj = existing_order
+                    else:
+                        # Create new order
+                        order_obj = models.Order(
+                            user_id=user_id,
+                            pos_id=order_id,
+                            location_id=order_location_id,  # Store location ID
+                            order_date=order_date,
+                            total_amount=total_amount,
+                            created_at=datetime.now(),
+                            updated_at=datetime.now()
+                        )
+                        self.db.add(order_obj)
+                        self.db.flush()  # Get the order ID
+                        orders_created += 1
+                    
+                    # Process line items
+                    line_items = order_data.get('line_items', [])
+                    for line_item in line_items:
+                        catalog_object_id = line_item.get('catalog_object_id')
+                        if not catalog_object_id:
+                            continue
                         
-                        # Check if order item already exists
-                        existing_order_item = self.db.query(models.OrderItem).filter(
+                        # Find the corresponding item
+                        item = self.db.query(models.Item).filter(
                             and_(
-                                models.OrderItem.order_id == order_obj.id,
-                                models.OrderItem.item_id == item.id
+                                models.Item.user_id == user_id,
+                                models.Item.pos_id == catalog_object_id
                             )
                         ).first()
                         
-                        if not existing_order_item:
-                            order_item = models.OrderItem(
-                                order_id=order_obj.id,
-                                item_id=item.id,
-                                quantity=quantity,
-                                unit_price=unit_price
-                            )
-                            self.db.add(order_item)
+                        if item:
+                            quantity = int(line_item.get('quantity', 1))
+                            unit_price = float(line_item.get('base_price_money', {}).get('amount', 0)) / 100
+                            
+                            # Check if order item already exists
+                            existing_order_item = self.db.query(models.OrderItem).filter(
+                                and_(
+                                    models.OrderItem.order_id == order_obj.id,
+                                    models.OrderItem.item_id == item.id
+                                )
+                            ).first()
+                            
+                            if not existing_order_item:
+                                order_item = models.OrderItem(
+                                    order_id=order_obj.id,
+                                    item_id=item.id,
+                                    quantity=quantity,
+                                    unit_price=unit_price
+                                )
+                                self.db.add(order_item)
+                
+                # Check if there's a cursor for next page
+                cursor = response.get('cursor')
+                if not cursor:
+                    logger.info(f"No more pages available, pagination complete for user {user_id}")
+                    break
             
             self.db.commit()
+            logger.info(f"Orders sync completed for user {user_id}: {orders_created} created, {orders_updated} updated across {page_count} pages")
             
             return {
                 'orders_created': orders_created,
                 'orders_updated': orders_updated,
-                'total_processed': orders_created + orders_updated
+                'total_processed': orders_created + orders_updated,
+                'pages_processed': page_count
             }
             
         except Exception as e:
