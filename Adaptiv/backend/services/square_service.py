@@ -77,7 +77,7 @@ class SquareService:
                 existing_integration.access_token = access_token
                 existing_integration.refresh_token = refresh_token
                 existing_integration.merchant_id = merchant_id
-                existing_integration.location_id = location_id
+                existing_integration.pos_id = location_id  # Store location_id in pos_id field
                 existing_integration.updated_at = datetime.now()
                 integration = existing_integration
             else:
@@ -88,8 +88,7 @@ class SquareService:
                     access_token=access_token,
                     refresh_token=refresh_token,
                     merchant_id=merchant_id,
-                    location_id=location_id,
-                    is_active=True,
+                    pos_id=location_id,  # Store location_id in pos_id field
                     created_at=datetime.now(),
                     updated_at=datetime.now()
                 )
@@ -201,8 +200,8 @@ class SquareService:
                 }
             }
             
-            if integration.location_id:
-                search_query['location_ids'] = [integration.location_id]
+            if integration.pos_id:
+                search_query['location_ids'] = [integration.pos_id]
             
             # Make API request to search orders
             response = self._make_square_request(
@@ -333,15 +332,23 @@ class SquareService:
                 )
             ).count()
             
+            # Check if integration is active (has access token and not expired)
+            from datetime import datetime, timezone
+            is_active = (
+                integration.access_token is not None and 
+                integration.access_token.strip() != "" and
+                (integration.expires_at is None or integration.expires_at > datetime.now(timezone.utc))
+            )
+            
             return {
                 'status': 'connected',
                 'integration_id': integration.id,
                 'merchant_id': integration.merchant_id,
-                'location_id': integration.location_id,
+                'location_id': integration.pos_id,  # Use pos_id as location identifier
                 'last_sync': integration.updated_at.isoformat() if integration.updated_at else None,
                 'synced_items': item_count,
                 'synced_orders_30_days': order_count,
-                'is_active': integration.is_active
+                'is_active': is_active
             }
             
         except Exception as e:
