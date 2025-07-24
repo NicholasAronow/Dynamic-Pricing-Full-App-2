@@ -43,7 +43,13 @@ class SquareService:
             return response.json()
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"Square API request failed: {e}")
+            error_details = ""
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_details = f" - Response: {e.response.text}"
+                except:
+                    error_details = " - Could not read response text"
+            logger.error(f"Square API request failed: {e}{error_details}")
             raise
     
     def _make_square_request_with_refresh(self, endpoint: str, user_id: int, method: str = 'GET', data: Dict = None) -> Dict[str, Any]:
@@ -391,7 +397,6 @@ class SquareService:
             
             # Build search query with date filter
             # Format the date properly for Square API (ISO 8601 with timezone)
-            start_date = datetime.now() - timedelta(days=200)
             start_date_str = start_date.strftime('%Y-%m-%dT%H:%M:%S+00:00')
             
             request_body = {
@@ -466,6 +471,7 @@ class SquareService:
                     current_request['cursor'] = cursor
                 
                 logger.info(f"Fetching orders page {page_count} for user {user_id}")
+                logger.debug(f"Request body: {json.dumps(current_request, indent=2)}")
                 
                 response = self._make_square_request_with_refresh(
                     '/v2/orders/search',
