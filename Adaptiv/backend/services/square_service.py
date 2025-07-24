@@ -396,11 +396,11 @@ class SquareService:
             request_body = {
                 'query': {
                     'filter': {
-                        'date_time_filter': {
-                            'closed_at': {
-                                'start_at': start_date_str
-                            }
-                        },
+                        #'date_time_filter': {
+                            #'closed_at': {
+                            #    'start_at': start_date_str
+                            #}
+                        #},
                         'state_filter': {
                             'states': ['COMPLETED', 'CANCELLED']
                         }
