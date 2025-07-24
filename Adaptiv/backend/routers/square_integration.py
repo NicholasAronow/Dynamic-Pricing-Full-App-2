@@ -248,8 +248,20 @@ async def process_square_callback(
             logger.info(f"Square OAuth: After commit - access_token present: {bool(existing_integration.access_token)}")
             logger.info(f"Square OAuth: User pos_connected set to {current_user.pos_connected}")
             
-            # Initial sync of data
-            await sync_initial_data(current_user.id, db)
+            # Start initial sync as a background task
+            logger.info(f"Starting initial Square sync as background task for user {current_user.id}")
+            from tasks import sync_square_data_task
+
+            # Force sync = True for initial sync to get all historical data
+            initial_sync_task = sync_square_data_task.delay(current_user.id, force_sync=True)
+            logger.info(f"Initial sync task started with ID: {initial_sync_task.id}")
+
+            # Store the task ID in the integration metadata for tracking
+            new_integration.metadata = {
+                "initial_sync_task_id": initial_sync_task.id,
+                "initial_sync_started_at": datetime.now().isoformat()
+            }
+            db.commit()
             
             return {"success": True, "message": "Square integration updated successfully"}
         
@@ -291,8 +303,20 @@ async def process_square_callback(
         # Mark related action item as completed if exists
         await _update_pos_action_item(current_user.id, db)
         
-        # Initial sync of data
-        await sync_initial_data(current_user.id, db)
+        # Start initial sync as a background task
+        logger.info(f"Starting initial Square sync as background task for user {current_user.id}")
+        from tasks import sync_square_data_task
+
+        # Force sync = True for initial sync to get all historical data
+        initial_sync_task = sync_square_data_task.delay(current_user.id, force_sync=True)
+        logger.info(f"Initial sync task started with ID: {initial_sync_task.id}")
+
+        # Store the task ID in the integration metadata for tracking
+        new_integration.metadata = {
+            "initial_sync_task_id": initial_sync_task.id,
+            "initial_sync_started_at": datetime.now().isoformat()
+        }
+        db.commit()
         
         return {"success": True, "message": "Square integration created successfully"}
         
