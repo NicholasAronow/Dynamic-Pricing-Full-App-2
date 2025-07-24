@@ -55,14 +55,14 @@ const Dashboard: React.FC = () => {
   const { user } = useAuth();
   const { isSubscribed, currentPlan } = useSubscription();
   const navigate = useNavigate();
-  const [timeFrame, setTimeFrame] = useState('7d');
+  const [timeFrame, setTimeFrame] = useState('1m');
   const [salesData, setSalesData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Removed profit margin toggle - only showing sales now
   const [productsLoading, setProductsLoading] = useState(true);
   const [productPerformance, setProductPerformance] = useState<any[]>([]);
-  const [itemsTimeFrame, setItemsTimeFrame] = useState('7d');
+  const [itemsTimeFrame, setItemsTimeFrame] = useState('1m');
   const [competitors, setCompetitors] = useState<any[]>([]);
   const [competitorsLoading, setCompetitorsLoading] = useState(true);
   // Use pos_connected field from the user object

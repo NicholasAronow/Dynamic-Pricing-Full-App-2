@@ -62,12 +62,9 @@ const handleSquareIntegration = async () => {
 const PriceRecommendations: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [timeFrame, setTimeFrame] = useState<string>('7d');
+  const [timeFrame, setTimeFrame] = useState<string>('1m');
   const [loading, setLoading] = useState<boolean>(true);
   const [recommendations, setRecommendations] = useState<PriceRecommendation[]>([]);
-  const [editingRow, setEditingRow] = useState<number | null>(null);
-  const [editPrice, setEditPrice] = useState<number | null>(null);
-  const [savingPrice, setSavingPrice] = useState<number | null>(null);
   const [usingMock, setUsingMock] = useState<boolean>(false);
   // Use pos_connected field from the user object
   const isPosConnected = user?.pos_connected ?? false;
