@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from 'antd';
 import { GoogleOutlined } from '@ant-design/icons';
@@ -14,7 +14,6 @@ declare global {
       accounts: {
         id: {
           initialize: (config: any) => void;
-          renderButton: (element: HTMLElement, options: any) => void;
           prompt: () => void;
         };
       };
@@ -24,7 +23,8 @@ declare global {
 
 const GoogleSignInButton: React.FC<GoogleSignInButtonProps> = ({ onSuccess, onError }) => {
   const { googleLogin } = useAuth();
-  const googleButtonRef = useRef<HTMLDivElement>(null);
+  const [isGoogleLoaded, setIsGoogleLoaded] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   
   useEffect(() => {
     // Load the Google Sign-In script
@@ -39,7 +39,7 @@ const GoogleSignInButton: React.FC<GoogleSignInButtonProps> = ({ onSuccess, onEr
 
     // Initialize Google Sign-In
     const initializeGoogleSignIn = () => {
-      if (window.google && googleButtonRef.current) {
+      if (window.google) {
         // Get client ID from environment or use the one we know works for localhost
         const clientId = process.env.REACT_APP_GOOGLE_CLIENT_ID || '';
         console.log('Initializing Google Sign-In with client ID:', clientId);
@@ -49,39 +49,36 @@ const GoogleSignInButton: React.FC<GoogleSignInButtonProps> = ({ onSuccess, onEr
           callback: handleCredentialResponse,
           auto_select: false,
         });
-
-        window.google.accounts.id.renderButton(
-          googleButtonRef.current,
-          { 
-            type: 'standard',
-            theme: 'outline', 
-            size: 'large',
-            text: 'signin_with',
-            width: '100%',
-          }
-        );
+        
+        setIsGoogleLoaded(true);
       }
     };
 
     // Handle the sign in response
     const handleCredentialResponse = async (response: any) => {
       console.log("Google sign-in response:", response);
+      setIsLoading(true);
       try {
         await googleLogin(response.credential);
         if (onSuccess) onSuccess();
       } catch (error) {
         console.error("Error with Google sign-in:", error);
         if (onError) onError(error);
+      } finally {
+        setIsLoading(false);
       }
     };
 
     loadGoogleScript();
   }, [googleLogin, onSuccess, onError]);
 
-  // If Google script fails to load, provide a fallback button
-  const handleFallbackClick = () => {
-    if (window.google) {
+  // Handle static button click
+  const handleStaticButtonClick = () => {
+    if (window.google && isGoogleLoaded) {
+      setIsLoading(true);
       window.google.accounts.id.prompt();
+      // Reset loading state after a delay in case prompt is cancelled
+      setTimeout(() => setIsLoading(false), 3000);
     } else {
       console.error("Google sign-in script not loaded");
     }
@@ -89,18 +86,29 @@ const GoogleSignInButton: React.FC<GoogleSignInButtonProps> = ({ onSuccess, onEr
 
   return (
     <div style={{ marginBottom: '16px' }}>
-      <div ref={googleButtonRef}></div>
-      {/* Fallback button if Google script doesn't load */}
-      <div style={{ display: 'none' }}>
-        <Button 
-          icon={<GoogleOutlined />} 
-          onClick={handleFallbackClick} 
-          block 
-          size="large"
-        >
-          Sign in with Google
-        </Button>
-      </div>
+      <Button 
+        icon={<GoogleOutlined />} 
+        onClick={handleStaticButtonClick}
+        loading={isLoading}
+        disabled={!isGoogleLoaded}
+        block 
+        size="large"
+        style={{
+          height: '48px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '16px',
+          fontWeight: 500,
+          border: '1px solid #dadce0',
+          borderRadius: '4px',
+          backgroundColor: '#fff',
+          color: '#3c4043',
+          transition: 'all 0.2s ease'
+        }}
+      >
+        Sign in with Google
+      </Button>
     </div>
   );
 };
