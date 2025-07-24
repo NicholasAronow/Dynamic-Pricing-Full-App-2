@@ -309,7 +309,7 @@ const PriceRecommendations: React.FC = () => {
       ),
     },
     {
-      title: 'Performance',
+      title: 'Revenue',
       key: 'performance',
       sorter: (a: any, b: any) => {
         // Primary sort by revenue
@@ -325,23 +325,8 @@ const PriceRecommendations: React.FC = () => {
         <Space direction="vertical" size={1}>
           <div>
             <Text strong>${formatNumberWithCommas(Number((record.revenue || 0).toFixed(2)))}</Text>
-            <Text type="secondary" style={{ fontSize: '0.85em', marginLeft: 4 }}>revenue</Text>
           </div>
           <div>
-            {/* <Tooltip title="Units Sold"> */}
-            {/* <Text>{formatNumberWithCommas(record.quantity !== undefined ? record.quantity : 0)} units</Text> */}
-            {/* </Tooltip> */}
-            <span style={{ marginLeft: 8 }}>
-              {(record.growth || 0) > 0 ? (
-                <Text style={{ color: '#3f8600' }}>
-                  <ArrowUpOutlined /> {record.growth || 0}%
-                </Text>
-              ) : (
-                <Text style={{ color: '#cf1322' }}>
-                  <ArrowDownOutlined /> {Math.abs(record.growth || 0)}%
-                </Text>
-              )}
-            </span>
           </div>
         </Space>
       ),

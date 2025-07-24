@@ -117,11 +117,15 @@ export const pricingService = {
 
       const items = itemsResponse.data;
       const performanceResponse = analyticsResponse.data;
-      const performanceData = performanceResponse.products || [];
+      // The backend returns the array directly, not wrapped in a products property
+      const performanceData = Array.isArray(performanceResponse) ? performanceResponse : [];
       
       console.log('Fetched items:', items.length);
       console.log('Fetched performance data:', performanceData.length);
       console.log('Performance response structure:', performanceResponse);
+      console.log('Performance data sample:', performanceData.slice(0, 2));
+      console.log('Item IDs:', items.map((item: Item) => item.id));
+      console.log('Performance data IDs:', performanceData.map((p: any) => p.id));
       
       // Extract all item IDs for batch fetching
       const itemIds = items.map((item: Item) => item.id);
@@ -187,20 +191,28 @@ const generateRecommendationsFromData = (
   return items.map((item: Item) => {
     // Find performance data for this item
     const performance = safePerformanceData.find(p => p.id === item.id) || {
-      quantity_sold: 0,
+      quantity: 0,
       revenue: 0,
-      growth: 0,
-      profit_margin: 0
+      marginPercentage: 0
     };
     
     // Get the price history for this item from our organized data structure 
     const priceHistory = priceHistoryByItemId[item.id] || [];
     
     console.log(`Processing item: ${item.name} (ID: ${item.id}), Current price: ${item.current_price}`);
+    console.log(`Performance data found:`, performance);
     console.log(`Price history records found: ${priceHistory.length}`);
     
+    // Calculate growth based on price history if available
+    let growth = 0;
+    if (priceHistory.length >= 2) {
+      const oldPrice = priceHistory[priceHistory.length - 2].new_price;
+      const currentPrice = item.current_price;
+      growth = ((currentPrice - oldPrice) / oldPrice) * 100;
+    }
+    
     // Use profit margin from performance data or calculate if not available
-    const profitMargin = performance.profit_margin ? performance.profit_margin / 100 : 
+    const profitMargin = performance.marginPercentage ? performance.marginPercentage / 100 : 
       (item.cost ? (item.current_price - item.cost) / item.current_price : 0.4); // Default 40% if no cost data
     
     return {
@@ -210,9 +222,9 @@ const generateRecommendationsFromData = (
       currentPrice: item.current_price,
       previousPrice: null,
       lastPriceChangeDate: null,
-      quantity: performance.quantity_sold || 0,
+      quantity: performance.quantity || 0,
       revenue: performance.revenue || 0,
-      growth: performance.growth || 0,
+      growth: Math.round(growth * 100) / 100, // Round to 2 decimal places
       profitMargin,
       elasticity: null,
       optimizationReason: null,
