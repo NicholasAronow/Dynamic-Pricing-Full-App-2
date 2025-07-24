@@ -397,7 +397,6 @@ class SquareService:
             
             # Build search query with date filter
             # Format the date properly for Square API (ISO 8601 with timezone)
-            start_date = datetime.now() - timedelta(days=200)
             start_date_str = start_date.strftime('%Y-%m-%dT%H:%M:%S+00:00')
             
             request_body = {
