@@ -60,7 +60,7 @@ const MainLayout: React.FC = () => {
   return (
     <Layout style={{ background: '#fff' }}>
       <Sider 
-        width={260} 
+        width={200} 
         style={{ 
           background: '#fff', 
           borderRight: '1px solid #f1f3f4',
@@ -461,7 +461,7 @@ const MainLayout: React.FC = () => {
           </div>
         </div>
       </Sider>
-      <Layout className="site-layout" style={{ background: '#fff', marginLeft: '260px' }}>
+      <Layout className="site-layout" style={{ background: '#fff', marginLeft: '200px' }}>
         <Header className="site-layout-background" style={{ padding: 0, borderBottom: '1px solid #e8e8e8', height: '64px', display: 'flex', alignItems: 'center', background: '#fff' }}>
           <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', paddingRight: 24, width: '100%' }}>
             <Dropdown overlay={userMenu} placement="bottomRight">
