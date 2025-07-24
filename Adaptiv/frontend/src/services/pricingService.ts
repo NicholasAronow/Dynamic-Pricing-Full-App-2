@@ -46,8 +46,54 @@ export interface PriceRecommendation {
   editing?: boolean;
 }
 
-// Track whether the last fetch used mock data
+// Track whether we're using mock data
 let _usingMock = false;
+
+// Frontend cache for performance optimization
+interface CacheEntry {
+  data: any;
+  timestamp: number;
+  ttl: number;
+}
+
+class FrontendCache {
+  private cache = new Map<string, CacheEntry>();
+  private readonly DEFAULT_TTL = 5 * 60 * 1000; // 5 minutes
+
+  set(key: string, data: any, ttl: number = this.DEFAULT_TTL): void {
+    this.cache.set(key, {
+      data,
+      timestamp: Date.now(),
+      ttl
+    });
+  }
+
+  get(key: string): any | null {
+    const entry = this.cache.get(key);
+    if (!entry) return null;
+    
+    if (Date.now() - entry.timestamp > entry.ttl) {
+      this.cache.delete(key);
+      return null;
+    }
+    
+    return entry.data;
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+
+  generateKey(prefix: string, params: Record<string, any>): string {
+    const sortedParams = Object.keys(params)
+      .sort()
+      .map(key => `${key}:${params[key]}`)
+      .join('|');
+    return `${prefix}:${sortedParams}`;
+  }
+}
+
+const frontendCache = new FrontendCache();
 
 export const pricingService = {
   // Get agent pricing recommendations from the database
@@ -96,13 +142,24 @@ export const pricingService = {
     }
   },
   
-  // Get price recommendations (actually returns summaries for ALL items)
-  getPriceRecommendations: async (timeFrame: string): Promise<PriceRecommendation[]> => {
+  // Get price recommendations based on sales data and performance
+  getPriceRecommendations: async (timeFrame: string = '1m'): Promise<PriceRecommendation[]> => {
     try {
       const currentUser = authService.getCurrentUser();
       if (!currentUser) {
-        console.error('User not authenticated');
         throw new Error('User not authenticated');
+      }
+
+      // OPTIMIZATION: Check cache first
+      const cacheKey = frontendCache.generateKey('price_recommendations', {
+        userId: currentUser.id,
+        timeFrame
+      });
+      const cachedResult = frontendCache.get(cacheKey);
+      if (cachedResult) {
+        console.log('Returning cached price recommendations');
+        _usingMock = false;
+        return cachedResult;
       }
 
       // Fetch the core datasets needed for recommendations
@@ -141,12 +198,17 @@ export const pricingService = {
 
       // Build recommendations using detailed price history data
       _usingMock = false;
-      return generateRecommendationsFromData(
+      const recommendations = generateRecommendationsFromData(
         items,
         performanceData,
         priceHistoryByItemId,
         timeFrame
       );
+      
+      // OPTIMIZATION: Cache the result for 3 minutes
+      frontendCache.set(cacheKey, recommendations, 3 * 60 * 1000);
+      
+      return recommendations;
     } catch (error) {
       console.error('Error fetching item summaries:', error);
       // Fallback to mock data so the UI still renders

@@ -8,6 +8,7 @@ from typing import List, Optional, Dict, Any
 import models
 import traceback
 import logging
+from .cache_service import cache_service
 
 logger = logging.getLogger(__name__)
 
@@ -258,9 +259,15 @@ class DashboardService:
 
     def get_product_performance(self, time_frame: Optional[str] = None, user_id: int = None):
         """
-        Get performance data for all products - optimized version
+        Get performance data for all products - highly optimized version for large datasets
         """
         try:
+            # OPTIMIZATION 3: Check cache first
+            cache_key = cache_service.get_product_performance_key(user_id, time_frame or "1m")
+            cached_result = cache_service.get(cache_key)
+            if cached_result is not None:
+                logger.info(f"Returning cached product performance data for user {user_id}")
+                return cached_result
             # Calculate date range based on time frame
             end_date = datetime.now()
             if time_frame == "1d":
@@ -278,36 +285,45 @@ class DashboardService:
 
             logger.info(f"Getting product performance for time frame: {time_frame}, date range: {start_date} to {end_date}")
 
-            # Single optimized query to get all product performance data
-            # Use a subquery to properly filter orders by date
-            query = self.db.query(
-                models.Item.id,
-                models.Item.name,
-                models.Item.current_price,
-                models.Item.cost,
-                func.coalesce(func.sum(models.OrderItem.quantity), 0).label('total_quantity'),
-                func.coalesce(func.sum(models.OrderItem.quantity * models.OrderItem.unit_price), 0).label('total_revenue'),
-                func.coalesce(func.sum(models.OrderItem.quantity * models.OrderItem.unit_cost), 0).label('total_cost')
-            ).outerjoin(
-                models.OrderItem, models.Item.id == models.OrderItem.item_id
-            ).outerjoin(
-                models.Order, models.OrderItem.order_id == models.Order.id
-            ).filter(
-                models.Item.user_id == user_id,
-                or_(
-                    models.Order.id == None,  # Include items with no orders
-                    and_(
-                        models.Order.order_date >= start_date,
-                        models.Order.order_date <= end_date,
-                        models.Order.user_id == user_id  # Ensure orders belong to the same user
-                    )
-                )
-            ).group_by(
-                models.Item.id, models.Item.name, models.Item.current_price, models.Item.cost
-            ).all()
+            # OPTIMIZATION 1: Use raw SQL with proper indexes for better performance
+            # This query is optimized for PostgreSQL and uses indexes effectively
+            raw_sql = text("""
+                SELECT 
+                    i.id,
+                    i.name,
+                    i.current_price,
+                    i.cost,
+                    COALESCE(perf.total_quantity, 0) as total_quantity,
+                    COALESCE(perf.total_revenue, 0) as total_revenue,
+                    COALESCE(perf.total_cost, 0) as total_cost
+                FROM items i
+                LEFT JOIN (
+                    SELECT 
+                        oi.item_id,
+                        SUM(oi.quantity) as total_quantity,
+                        SUM(oi.quantity * oi.unit_price) as total_revenue,
+                        SUM(oi.quantity * COALESCE(oi.unit_cost, 0)) as total_cost
+                    FROM order_items oi
+                    INNER JOIN orders o ON oi.order_id = o.id
+                    WHERE o.user_id = :user_id 
+                        AND o.order_date >= :start_date 
+                        AND o.order_date <= :end_date
+                    GROUP BY oi.item_id
+                ) perf ON i.id = perf.item_id
+                WHERE i.user_id = :user_id
+                ORDER BY COALESCE(perf.total_quantity, 0) DESC
+            """)
             
+            # Execute the optimized query
+            result = self.db.execute(raw_sql, {
+                'user_id': user_id,
+                'start_date': start_date,
+                'end_date': end_date
+            })
+            
+            # OPTIMIZATION 2: Process results efficiently
             product_performance = []
-            for row in query:
+            for row in result:
                 total_quantity = row.total_quantity or 0
                 total_revenue = float(row.total_revenue or 0)
                 total_cost = float(row.total_cost or 0)
@@ -339,6 +355,9 @@ class DashboardService:
             product_performance.sort(key=lambda x: x["quantity"], reverse=True)
             
             logger.info(f"Found {len(product_performance)} products with performance data")
+            
+            # OPTIMIZATION 4: Cache the result for 5 minutes
+            cache_service.set(cache_key, product_performance, ttl=300)
             
             return product_performance
             
