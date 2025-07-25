@@ -3555,36 +3555,75 @@ Remember: You're not just retrieving data - you're uncovering the story that dat
                     
                     result = node_output
                     
-                    # Extract and stream only NEW messages (beyond the initial conversation)
-                    # Add this after the agent activation yield block
                     # Monitor for tool calls in the messages
                     if "messages" in node_output and node_output["messages"]:
                         current_messages = node_output["messages"]
                         
                         # Check for tool calls in new messages
                         for msg in current_messages[previous_message_count:]:
-                            # Check if this message contains tool calls
-                            if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                                for tool_call in msg.tool_calls:
+                            # Check if this is an AIMessage with tool calls
+                            if hasattr(msg, 'additional_kwargs') and 'tool_calls' in msg.additional_kwargs:
+                                tool_calls = msg.additional_kwargs['tool_calls']
+                                for tool_call in tool_calls:
                                     yield json.dumps({
                                         "type": "tool_call",
                                         "agent": current_agent,
-                                        "tool_name": tool_call.get('name', 'Unknown Tool'),
+                                        "tool_name": tool_call.get('function', {}).get('name', 'Unknown Tool'),
                                         "tool_id": tool_call.get('id', ''),
                                         "timestamp": datetime.now().isoformat()
                                     })
                                     await asyncio.sleep(0.01)
                             
-                            # Also check for tool response messages
-                            if hasattr(msg, 'name') and hasattr(msg, 'tool_call_id'):
-                                # This is a tool response
+                            # Check for ToolMessage (tool responses)
+                            if hasattr(msg, '__class__') and msg.__class__.__name__ == 'ToolMessage':
                                 yield json.dumps({
                                     "type": "tool_response",
                                     "agent": current_agent,
-                                    "tool_name": msg.name,
-                                    "tool_call_id": msg.tool_call_id,
+                                    "tool_name": getattr(msg, 'name', 'Unknown Tool'),
+                                    "tool_call_id": getattr(msg, 'tool_call_id', ''),
                                     "timestamp": datetime.now().isoformat()
                                 })
+
+                    # Extract and stream only NEW messages (beyond the initial conversation)
+                    if "messages" in node_output and node_output["messages"]:
+                        current_messages = node_output["messages"]
+                        
+                        # Only process messages that are new (beyond the initial count)
+                        if len(current_messages) > previous_message_count:
+                            # Get only the new messages
+                            new_messages = current_messages[previous_message_count:]
+                            
+                            for msg in new_messages:
+                                if isinstance(msg, AIMessage) and msg.content:
+                                    content = msg.content
+                                    
+                                    # Yield message start
+                                    yield json.dumps({
+                                        "type": "message_start",
+                                        "agent": current_agent,
+                                        "timestamp": datetime.now().isoformat()
+                                    })
+                                    
+                                    # Stream words with small delays
+                                    words = content.split()
+                                    for i, word in enumerate(words):
+                                        yield json.dumps({
+                                            "type": "message_chunk",
+                                            "agent": current_agent,
+                                            "content": word + (" " if i < len(words) - 1 else ""),
+                                            "timestamp": datetime.now().isoformat()
+                                        })
+                                        await asyncio.sleep(0.02)  # Reduced delay for better UX
+                                    
+                                    # Yield message complete
+                                    yield json.dumps({
+                                        "type": "message_complete",
+                                        "agent": current_agent,
+                                        "timestamp": datetime.now().isoformat()
+                                    })
+                            
+                            # Update the previous message count
+                            previous_message_count = len(current_messages)
             
             # Final result
             final_result = self._extract_final_result(result["messages"]) if result else "No response generated"

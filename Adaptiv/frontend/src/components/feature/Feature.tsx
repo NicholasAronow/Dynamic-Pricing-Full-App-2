@@ -45,6 +45,7 @@ interface ChatMessage {
   timestamp: Date;
   agentName?: string;
   isStreaming?: boolean;
+  toolsUsed?: { [agent: string]: string[] }; // Add this
 }
 
 interface ChatState {
@@ -52,7 +53,8 @@ interface ChatState {
   isLoading: boolean;
   currentInput: string;
   error: string | null;
-  streamingMessageId?: string; // Track which message is currently streaming
+  streamingMessageId?: string;
+  activeTools?: { [agent: string]: string[] }; // Add this
 }
 
 const Feature: React.FC = () => {
@@ -67,7 +69,8 @@ const Feature: React.FC = () => {
     ],
     isLoading: false,
     currentInput: '',
-    error: null
+    error: null,
+    activeTools: {} // Add this
   });
   
   const [architectures, setArchitectures] = useState<ArchitectureInfo[]>([]);
@@ -145,9 +148,16 @@ const Feature: React.FC = () => {
       // Stream the response
       for await (const chunk of langgraphService.streamTask(request)) {
         switch (chunk.type) {
-          case 'status':
           case 'agent_start':
-            // Show agent thinking in a subtle way (like ChatGPT's "Analyzing...")
+            // Clear tools for this agent when it starts
+            setChatState(prev => ({
+              ...prev,
+              activeTools: {
+                ...(prev.activeTools || {}),
+                [chunk.agent]: []
+              }
+            }));
+            // Show agent thinking in a subtle way
             currentAgentThinking = chunk.message || 'Thinking...';
             setChatState(prev => ({
               ...prev,
@@ -158,7 +168,25 @@ const Feature: React.FC = () => {
               )
             }));
             break;
-  
+        
+          case 'tool_call':
+            // Add tool to active tools list
+            setChatState(prev => ({
+              ...prev,
+              activeTools: {
+                ...(prev.activeTools || {}),
+                [chunk.agent]: [
+                  ...(prev.activeTools?.[chunk.agent] || []),
+                  chunk.tool_name
+                ].filter((v, i, a) => a.indexOf(v) === i) // Remove duplicates
+              }
+            }));
+            break;
+        
+          case 'tool_response':
+            // Tool completed, keep them to show what was used
+            break;
+        
           case 'message_chunk':
             // Accumulate content
             if (chunk.content) {
@@ -173,31 +201,37 @@ const Feature: React.FC = () => {
               }));
             }
             break;
-  
+        
           case 'message_complete':
             // Message from an agent is complete, but keep streaming
             break;
-  
-          case 'complete':
-            // All done
-            setChatState(prev => ({
-              ...prev,
-              isLoading: false,
-              streamingMessageId: undefined,
-              messages: prev.messages.map(m => 
-                m.id === assistantMessage.id 
-                  ? { ...m, isStreaming: false }
-                  : m
-              )
-            }));
-            break;
-  
+        
+            case 'complete':
+              // All done - save tools with the message
+              setChatState(prev => ({
+                ...prev,
+                isLoading: false,
+                streamingMessageId: undefined,
+                messages: prev.messages.map(m => 
+                  m.id === assistantMessage.id 
+                    ? { 
+                        ...m, 
+                        isStreaming: false,
+                        toolsUsed: { ...prev.activeTools } // Save the tools used
+                      }
+                    : m
+                ),
+                activeTools: {} // Clear active tools after saving
+              }));
+              break;
+        
           case 'error':
             setChatState(prev => ({
               ...prev,
               isLoading: false,
               error: chunk.message,
               streamingMessageId: undefined,
+              activeTools: {},
               messages: prev.messages.filter(m => m.id !== assistantMessage.id)
             }));
             break;
@@ -269,6 +303,50 @@ const Feature: React.FC = () => {
         paddingBottom: '20px'
       }}>
         <div style={{ maxWidth: '768px', margin: '0 auto', padding: '20px' }}>
+        {/* Active Tools Display */}
+        {Object.keys(chatState.activeTools || {}).length > 0 && chatState.isLoading && (
+          <div style={{ maxWidth: '768px', margin: '0 auto', padding: '0 20px 20px' }}>
+            {Object.entries(chatState.activeTools || {}).map(([agent, tools]) => {
+              if (!tools || tools.length === 0) return null;
+              
+              const agentDisplay = {
+                'database_agent': { name: '🗄️ Database Agent', color: '#1890ff' },
+                'web_researcher': { name: '🔍 Market Researcher', color: '#722ed1' },
+                'algorithm_selector': { name: '⚙️ Algorithm Specialist', color: '#fa8c16' },
+                'pricing_orchestrator': { name: '💼 Pricing Expert', color: '#52c41a' }
+              }[agent] || { name: agent, color: '#666' };
+              
+              return (
+                <Card
+                  key={agent}
+                  size="small"
+                  style={{
+                    marginBottom: '12px',
+                    borderColor: agentDisplay.color,
+                    backgroundColor: '#fafafa'
+                  }}
+                  title={
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>{agentDisplay.name}</span>
+                      <Spin size="small" />
+                    </div>
+                  }
+                >
+                  <div style={{ fontSize: '13px' }}>
+                    <Text type="secondary">Using tools:</Text>
+                    <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px' }}>
+                      {tools.map((tool, idx) => (
+                        <li key={idx} style={{ marginBottom: '4px' }}>
+                          <Text>{tool.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</Text>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        )}
           <List
             dataSource={chatState.messages}
             renderItem={(msg) => (
@@ -300,7 +378,7 @@ const Feature: React.FC = () => {
                       />
                     )}
                   </div>
-  
+
                   {/* Message Content */}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ 
@@ -310,6 +388,54 @@ const Feature: React.FC = () => {
                     }}>
                       {msg.role === 'user' ? 'You' : 'Ada'}
                     </div>
+
+                    {((msg.id === chatState.streamingMessageId && Object.keys(chatState.activeTools || {}).length > 0) ||
+                      (msg.toolsUsed && Object.keys(msg.toolsUsed).length > 0)) && (
+                      <div style={{ marginBottom: '12px' }}>
+                        {Object.entries(
+                          msg.id === chatState.streamingMessageId 
+                            ? (chatState.activeTools || {})
+                            : (msg.toolsUsed || {})
+                        ).map(([agent, tools]) => {
+                          if (!tools || tools.length === 0) return null;
+                          
+                          const agentDisplay = {
+                            'database_agent': { name: '🗄️ Database Specialist', color: '#1890ff' },
+                            'web_researcher': { name: '🔍 Market Researcher', color: '#722ed1' },
+                            'algorithm_selector': { name: '⚙️ Algorithm Specialist', color: '#fa8c16' },
+                            'pricing_orchestrator': { name: '💼 Pricing Expert', color: '#52c41a' }
+                          }[agent] || { name: agent, color: '#666' };
+                          
+                          return (
+                            <Card
+                              key={agent}
+                              size="small"
+                              style={{
+                                borderColor: agentDisplay.color,
+                                backgroundColor: '#fafafa'
+                              }}
+                              title={
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span>{agentDisplay.name}</span>
+                                  {msg.id === chatState.streamingMessageId && <Spin size="small" />}
+                                </div>
+                              }
+                            >
+                              <div style={{ fontSize: '13px' }}>
+                                <Text type="secondary">Tools used:</Text>
+                                <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px' }}>
+                                  {tools.map((tool, idx) => (
+                                    <li key={idx} style={{ marginBottom: '4px' }}>
+                                      <Text>{tool.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</Text>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </Card>
+                          );
+                        })}
+                      </div>
+                    )}
                     
                     <div style={{ 
                       color: '#030303',
