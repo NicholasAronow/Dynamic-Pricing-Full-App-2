@@ -206,7 +206,7 @@ class DatabaseTools:
                 if not items:
                     return f"No items found for user {self.user_id}"
                 
-                # Filter by item name if provided
+                # Filter by item name movided
                 if item_name:
                     items = [item for item in items if item_name.lower() in item.name.lower()]
                     if not items:
@@ -3005,6 +3005,13 @@ You are the lead pricing strategist coordinating a team of specialized sub-agent
 7. **B2B vs B2C**: Adjust for different buying behaviors and decision processes
 </common_pricing_scenarios>
 
+When formatting responses:
+- Always add a blank line before starting a list
+- Use proper markdown list syntax:
+  - For bullet points: `- item`
+  - For numbered lists: `1. item`
+- Ensure lists have proper spacing for readability
+
 Remember: You are the strategic pricing expert that businesses rely on for critical revenue decisions. Every recommendation should be thoughtful, data-driven, and actionable.
 """,
             name="pricing_orchestrator"
@@ -3509,14 +3516,19 @@ Remember: You're not just retrieving data - you're uncovering the story that dat
         
             # Build initial state with conversation history
             messages = []
-            
-            # Add previous messages if provided
+            # Add previous messages if provided, but only the content exchanges
             if previous_messages:
-                for msg in previous_messages:
+                # Only keep the last few exchanges to maintain context without tool call history
+                recent_messages = previous_messages[-6:]  # Keep last 3 exchanges
+                for msg in recent_messages:
                     if msg.get('role') == 'user':
                         messages.append(HumanMessage(content=msg.get('content', '')))
-                    elif msg.get('role') == 'assistant':
+                    elif msg.get('role') == 'assistant' and msg.get('content', '').strip():
+                        # Create a clean AIMessage without tool calls
                         messages.append(AIMessage(content=msg.get('content', '')))
+
+            # Add the new user message
+            messages.append(HumanMessage(content=task))
             
             # Add the new user message
             messages.append(HumanMessage(content=task))
@@ -3544,14 +3556,6 @@ Remember: You're not just retrieving data - you're uncovering the story that dat
                             "algorithm_selector": "⚙️ Algorithm Specialist",
                             "database_agent": "🗄️ Database Specialist"
                         }.get(node_name, f"🤖 {node_name}")
-                        
-                        yield json.dumps({
-                            "type": "agent_start",
-                            "agent": node_name,
-                            "agent_name": agent_display_name,
-                            "message": f"{agent_display_name} is thinking...",
-                            "timestamp": datetime.now().isoformat()
-                        })
                     
                     result = node_output
                     
@@ -3605,15 +3609,30 @@ Remember: You're not just retrieving data - you're uncovering the story that dat
                                     })
                                     
                                     # Stream words with small delays
-                                    words = content.split()
+                                    # Stream words with small delays
+                                    words = content.split(' ')  # Split by space only
                                     for i, word in enumerate(words):
+                                        # Skip empty words
+                                        if not word:
+                                            continue
+                                            
+                                        # Check if this word starts a list item
+                                        if word.startswith('-') or (len(word) > 0 and word[0].isdigit() and '.' in word):
+                                            # Add newline before list items if not at start
+                                            if i > 0 and formatted_content:
+                                                formatted_content = '\n' + word
+                                            else:
+                                                formatted_content = word
+                                        else:
+                                            formatted_content = word
+                                        
                                         yield json.dumps({
                                             "type": "message_chunk",
                                             "agent": current_agent,
-                                            "content": word + (" " if i < len(words) - 1 else ""),
+                                            "content": formatted_content + (" " if i < len(words) - 1 else ""),
                                             "timestamp": datetime.now().isoformat()
                                         })
-                                        await asyncio.sleep(0.02)  # Reduced delay for better UX
+                                        await asyncio.sleep(0.02)
                                     
                                     # Yield message complete
                                     yield json.dumps({

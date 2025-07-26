@@ -130,6 +130,7 @@ const Feature: React.FC = () => {
       // Prepare conversation history
       const previousMessages = chatState.messages
         .filter(msg => msg.role === 'user' || msg.role === 'assistant')
+        .slice(0, -1)  // Exclude the current assistant message placeholder
         .map(msg => ({
           role: msg.role,
           content: msg.content
@@ -303,50 +304,6 @@ const Feature: React.FC = () => {
         paddingBottom: '20px'
       }}>
         <div style={{ maxWidth: '768px', margin: '0 auto', padding: '20px' }}>
-        {/* Active Tools Display */}
-        {Object.keys(chatState.activeTools || {}).length > 0 && chatState.isLoading && (
-          <div style={{ maxWidth: '768px', margin: '0 auto', padding: '0 20px 20px' }}>
-            {Object.entries(chatState.activeTools || {}).map(([agent, tools]) => {
-              if (!tools || tools.length === 0) return null;
-              
-              const agentDisplay = {
-                'database_agent': { name: '🗄️ Database Agent', color: '#1890ff' },
-                'web_researcher': { name: '🔍 Market Researcher', color: '#722ed1' },
-                'algorithm_selector': { name: '⚙️ Algorithm Specialist', color: '#fa8c16' },
-                'pricing_orchestrator': { name: '💼 Pricing Expert', color: '#52c41a' }
-              }[agent] || { name: agent, color: '#666' };
-              
-              return (
-                <Card
-                  key={agent}
-                  size="small"
-                  style={{
-                    marginBottom: '12px',
-                    borderColor: agentDisplay.color,
-                    backgroundColor: '#fafafa'
-                  }}
-                  title={
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span>{agentDisplay.name}</span>
-                      <Spin size="small" />
-                    </div>
-                  }
-                >
-                  <div style={{ fontSize: '13px' }}>
-                    <Text type="secondary">Using tools:</Text>
-                    <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px' }}>
-                      {tools.map((tool, idx) => (
-                        <li key={idx} style={{ marginBottom: '4px' }}>
-                          <Text>{tool.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</Text>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-        )}
           <List
             dataSource={chatState.messages}
             renderItem={(msg) => (
@@ -460,9 +417,10 @@ const Feature: React.FC = () => {
                               h6: ({children}) => <h6 style={{fontSize: '13px', fontWeight: '600', margin: '12px 0 8px 0', lineHeight: '1.4'}}>{children}</h6>,
                               
                               // Lists
-                              ul: ({children}) => <ul style={{margin: '12px 0', paddingLeft: '28px', lineHeight: '1.6'}}>{children}</ul>,
-                              ol: ({children}) => <ol style={{margin: '12px 0', paddingLeft: '28px', lineHeight: '1.6'}}>{children}</ol>,
-                              li: ({children}) => <li style={{margin: '4px 0', paddingLeft: '4px'}}>{children}</li>,
+                              ul: ({children}) => <ul style={{margin: '16px 0', paddingLeft: '28px', lineHeight: '1.6'}}>{children}</ul>,
+                              ol: ({children}) => <ol style={{margin: '16px 0', paddingLeft: '28px', lineHeight: '1.6'}}>{children}</ol>,
+                              li: ({children}) => <li style={{margin: '6px 0', paddingLeft: '4px'}}>{children}</li>,
+                              
                               
                               // Code
                               code: ({children, ...props}: any) => {
@@ -582,7 +540,7 @@ const Feature: React.FC = () => {
                               )
                             }}
                           >
-                            {msg.content || ''}
+                            {(msg.content || '').replace(/\\n/g, '\n')}
                           </ReactMarkdown>
                           
                           {/* Show subtle loading indicator while streaming */}
