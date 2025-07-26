@@ -368,18 +368,19 @@ const Feature: React.FC = () => {
                               key={agent}
                               size="small"
                               style={{
-                                borderColor: agentDisplay.color,
-                                backgroundColor: '#fafafa'
+                                borderColor: '#cacaca',
+                                backgroundColor: '#e8e9ea',
+                                position: 'relative',
+                                overflow: 'hidden',
+                                paddingTop: '4px',
+                                marginBottom: '8px',
                               }}
-                              title={
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                  <span>{agentDisplay.name}</span>
-                                  {msg.id === chatState.streamingMessageId && <Spin size="small" />}
-                                </div>
-                              }
+
                             >
-                              <div style={{ fontSize: '13px' }}>
-                                <Text type="secondary">Tools used:</Text>
+                              {msg.id === chatState.streamingMessageId && (
+                                <div className="shimmer-overlay" />
+                              )}
+                              <div style={{ fontSize: '13px', position: 'relative' }}>
                                 <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px' }}>
                                   {tools.map((tool, idx) => (
                                     <li key={idx} style={{ marginBottom: '4px' }}>
@@ -627,6 +628,62 @@ const Feature: React.FC = () => {
           @keyframes blink {
             0%, 50% { opacity: 1; }
             51%, 100% { opacity: 0; }
+          }
+          
+          @keyframes shimmer {
+            0% {
+              transform: translateX(-100%);
+            }
+            100% {
+              transform: translateX(100%);
+            }
+          }
+          
+          @keyframes shimmerPulse {
+            0%, 100% {
+              opacity: 0.6;
+            }
+            50% {
+              opacity: 1;
+            }
+          }
+          
+          .shimmer-container {
+            position: relative;
+            overflow: hidden;
+            background: linear-gradient(90deg, #f0f2f5 25%, #e6f7ff 50%, #f0f2f5 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 4px;
+            padding: 2px 8px;
+            font-size: 12px;
+            color: #1890ff;
+            font-weight: 500;
+          }
+          
+          .shimmer-text {
+            animation: shimmerPulse 1.5s infinite;
+          }
+          
+          .shimmer-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(
+              90deg,
+              transparent 0%,
+              rgba(255, 255, 255, 0.5) 25%,
+              rgba(255, 255, 255, 0.8) 50%,
+              rgba(255, 255, 255, 0.5) 75%,
+              transparent 100%
+            );
+            background-size: 300% 100%;
+            animation: shimmer 1.8s infinite;
+            pointer-events: none;
+            z-index: 2;
+            border-radius: 6px;
           }
           
           /* Custom scrollbar */
