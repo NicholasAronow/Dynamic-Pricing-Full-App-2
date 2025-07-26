@@ -125,6 +125,13 @@ const Feature: React.FC = () => {
       error: null,
       streamingMessageId: assistantMessage.id
     }));
+
+    // Focus the input after clearing it
+    setTimeout(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
+    }, 100);
   
     try {
       // Prepare conversation history
@@ -224,6 +231,12 @@ const Feature: React.FC = () => {
                 ),
                 activeTools: {} // Clear active tools after saving
               }));
+              // Focus input when response is complete
+              setTimeout(() => {
+                if (inputRef.current) {
+                  inputRef.current.focus();
+                }
+              }, 100);
               break;
         
           case 'error':
@@ -317,31 +330,27 @@ const Feature: React.FC = () => {
                 <div style={{
                   display: 'flex',
                   gap: '16px',
-                  alignItems: 'flex-start'
+                  alignItems: 'flex-start',
+                  flexDirection: msg.role === 'user' ? 'row-reverse' : 'row'
                 }}>
                   {/* Avatar */}
-                  <div style={{ flexShrink: 0 }}>
-                    {msg.role === 'user' ? (
-                      <Avatar 
-                        icon={<UserOutlined />} 
-                        style={{ backgroundColor: '#f0f0f0', color: '#666' }}
-                        size={36}
-                      />
-                    ) : (
-                      <Avatar 
-                        icon={<RobotOutlined />} 
-                        style={{ backgroundColor: '#1890ff' }}
-                        size={36}
-                      />
-                    )}
-                  </div>
+                  
 
                   {/* Message Content */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ 
+                    flex: msg.role === 'user' ? 'none' : 1, 
+                    minWidth: 0,
+                    maxWidth: msg.role === 'user' ? '70%' : '100%',
+                    width: msg.role === 'user' ? '70%' : 'auto',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start'
+                  }}>
                     <div style={{ 
                       fontWeight: 600, 
                       marginBottom: '4px',
-                      color: '#030303'
+                      color: '#030303',
+                      textAlign: msg.role === 'user' ? 'right' : 'left'
                     }}>
                       {msg.role === 'user' ? 'You' : 'Ada'}
                     </div>
@@ -401,7 +410,17 @@ const Feature: React.FC = () => {
                       fontSize: '15px'
                     }}>
                       {msg.role === 'user' ? (
-                        <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                        <div style={{ 
+                          whiteSpace: 'pre-wrap',
+                          backgroundColor: '#e5e5ea',
+                          padding: '12px 16px',
+                          borderRadius: '18px',
+                          display: 'inline-block',
+                          maxWidth: '100%',
+                          wordWrap: 'break-word'
+                        }}>
+                          {msg.content}
+                        </div>
                       ) : (
                         <>
                           <ReactMarkdown
@@ -583,42 +602,61 @@ const Feature: React.FC = () => {
   
       {/* Input Area */}
       <div style={{ 
-        backgroundColor: '#fff',
-        borderTop: '1px solid #e5e5e5',
-        padding: '16px 0',
+        backgroundColor: '#f9f9f9',
+        padding: '20px 0 32px 0',
         flexShrink: 0
       }}>
         <div style={{ maxWidth: '768px', margin: '0 auto', padding: '0 20px' }}>
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
+          <div style={{ 
+            position: 'relative',
+            backgroundColor: '#fff',
+            borderRadius: '24px',
+            border: '1px solid #e5e5e5',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+            padding: '12px 16px',
+            display: 'flex',
+            alignItems: 'flex-end',
+            gap: '8px'
+          }}>
             <TextArea
               ref={inputRef}
               value={chatState.currentInput}
               onChange={(e) => setChatState(prev => ({ ...prev, currentInput: e.target.value }))}
               onKeyPress={handleKeyPress}
-              placeholder="Ask about pricing strategies, market analysis, or algorithm selection..."
+              placeholder="Ask anything"
               autoSize={{ minRows: 1, maxRows: 6 }}
               disabled={chatState.isLoading}
               style={{ 
                 resize: 'none',
-                fontSize: '15px',
-                border: '1px solid #d9d9d9',
-                borderRadius: '8px',
-                padding: '10px 12px'
+                fontSize: '16px',
+                border: 'none',
+                outline: 'none',
+                boxShadow: 'none',
+                backgroundColor: 'transparent',
+                padding: '4px 0',
+                flex: 1
               }}
             />
             <Button
-              type="primary"
+              type="text"
               icon={chatState.isLoading ? <LoadingOutlined /> : <SendOutlined />}
               onClick={handleSendMessage}
               disabled={!chatState.currentInput.trim() || chatState.isLoading}
               style={{ 
-                height: '40px',
-                borderRadius: '8px',
-                padding: '0 20px'
+                width: '32px',
+                height: '32px',
+                borderRadius: '16px',
+                backgroundColor: chatState.currentInput.trim() && !chatState.isLoading ? '#000' : '#e5e5e5',
+                color: chatState.currentInput.trim() && !chatState.isLoading ? '#fff' : '#999',
+                border: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 0,
+                minWidth: '32px',
+                flexShrink: 0
               }}
-            >
-              {chatState.isLoading ? '' : 'Send'}
-            </Button>
+            />
           </div>
         </div>
       </div>
