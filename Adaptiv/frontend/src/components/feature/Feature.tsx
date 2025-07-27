@@ -59,14 +59,7 @@ interface ChatState {
 
 const Feature: React.FC = () => {
   const [chatState, setChatState] = useState<ChatState>({
-    messages: [
-      {
-        id: '1',
-        role: 'assistant',
-        content: 'Hello! I\'m Ada, your pricing expert assistant. I can help you with pricing strategies, market analysis, and algorithm selection. What pricing challenge can I help you with today?',
-        timestamp: new Date()
-      }
-    ],
+    messages: [], // Start with empty messages to show welcome screen
     isLoading: false,
     currentInput: '',
     error: null,
@@ -270,63 +263,125 @@ const Feature: React.FC = () => {
     }
   };
 
-  const getMessageIcon = (msg: ChatMessage) => {
-    if (msg.role === 'user') {
-      return ;
-    }
-    
-    switch (msg.agentName) {
-      case 'web_researcher':
-        return <Avatar icon={<SearchOutlined />} style={{ backgroundColor: '#722ed1' }} />;
-      case 'algorithm_selector':
-        return <Avatar icon={<SettingOutlined />} style={{ backgroundColor: '#fa8c16' }} />;
-      default:
-        return <Avatar icon={<RobotOutlined />} style={{ backgroundColor: '#52c41a' }} />;
-    }
-  };
-
-  const getAgentName = (msg: ChatMessage) => {
-    if (msg.role === 'user') return 'You';
-    else return "Ada"
-  };
+  // Check if this is the initial state (no messages)
+  const isInitialState = chatState.messages.length === 0;
 
   return (
     <div style={{ 
-      height: '100vh', 
+      height: '90vh', 
       display: 'flex', 
       flexDirection: 'column',
-      backgroundColor: '#f7f7f8'
+      backgroundColor: '#fafafa'
     }}>
-      {/* Header */}
-      <div style={{
-        backgroundColor: '#fff',
-        borderBottom: '1px solid #e5e5e5',
-        padding: '16px 24px',
-        flexShrink: 0
-      }}>
-        <div style={{ maxWidth: '768px', margin: '0 auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <RobotOutlined style={{ color: '#1890ff', fontSize: '24px' }} />
-          <Title level={4} style={{ margin: 0 }}>Ada - Pricing Expert</Title>
+      
+      {isInitialState ? (
+        /* Welcome Screen - Centered */
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '40px 20px'
+        }}>
+          <div style={{ textAlign: 'center', marginBottom: '40px' }}>
+            <Title level={1} style={{ 
+              fontSize: '48px', 
+              fontWeight: '700',
+              margin: '0 0 16px 0',
+              background: 'linear-gradient(135deg, #1890ff 0%, #722ed1 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text'
+            }}>
+              Ada
+            </Title>
+            <Text style={{ 
+              fontSize: '20px', 
+              color: '#666',
+              display: 'block',
+              maxWidth: '600px',
+              lineHeight: '1.5'
+            }}>
+              Ask Ada about your menu, pricing, competitors, and more!
+            </Text>
+          </div>
+          
+          {/* Centered Input Box */}
+          <div style={{ 
+            width: '100%',
+            maxWidth: '600px',
+            position: 'relative',
+            backgroundColor: '#fff',
+            borderRadius: '24px',
+            border: '1px solid #e5e5e5',
+            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.1)',
+            padding: '16px 20px',
+            display: 'flex',
+            alignItems: 'flex-end',
+            gap: '12px'
+          }}>
+            <TextArea
+              ref={inputRef}
+              value={chatState.currentInput}
+              onChange={(e) => setChatState(prev => ({ ...prev, currentInput: e.target.value }))}
+              onKeyPress={handleKeyPress}
+              placeholder="What would you like to know about your business?"
+              autoSize={{ minRows: 1, maxRows: 6 }}
+              disabled={chatState.isLoading}
+              style={{ 
+                resize: 'none',
+                fontSize: '16px',
+                border: 'none',
+                outline: 'none',
+                boxShadow: 'none',
+                backgroundColor: 'transparent',
+                padding: '8px 0',
+                flex: 1
+              }}
+            />
+            <Button
+              type="text"
+              icon={chatState.isLoading ? <LoadingOutlined /> : <SendOutlined />}
+              onClick={handleSendMessage}
+              disabled={!chatState.currentInput.trim() || chatState.isLoading}
+              style={{ 
+                width: '40px',
+                height: '40px',
+                borderRadius: '20px',
+                backgroundColor: chatState.currentInput.trim() && !chatState.isLoading ? '#000' : '#e5e5e5',
+                color: chatState.currentInput.trim() && !chatState.isLoading ? '#fff' : '#999',
+                border: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 0,
+                minWidth: '40px',
+                flexShrink: 0
+              }}
+            />
+          </div>
         </div>
-      </div>
-  
-      {/* Chat Messages Area */}
-      <div style={{ 
-        flex: 1, 
-        overflowY: 'auto',
-        paddingBottom: '20px'
-      }}>
-        <div style={{ maxWidth: '768px', margin: '0 auto', padding: '20px' }}>
-          <List
-            dataSource={chatState.messages}
-            renderItem={(msg) => (
-              <List.Item
-                style={{
-                  border: 'none',
-                  padding: '16px 0',
-                  display: 'block'
-                }}
-              >
+      ) : (
+        /* Normal Chat Layout */
+        <>
+          {/* Chat Messages Area */}
+          <div style={{ 
+            flex: 1, 
+            overflowY: 'auto',
+            paddingBottom: '20px'
+          }}>
+            <div style={{ maxWidth: '768px', margin: '0 auto', padding: '20px' }}>
+              <List
+                dataSource={chatState.messages}
+                renderItem={(msg) => (
+                  <List.Item
+                    style={{
+                      border: 'none',
+                      padding: '16px 0',
+                      display: 'block'
+                    }}
+                  >
                 <div style={{
                   display: 'flex',
                   gap: '16px',
@@ -594,83 +649,85 @@ const Feature: React.FC = () => {
               </List.Item>
             )}
           />
-          <div ref={messagesEndRef} />
-        </div>
-      </div>
-  
-      {/* Error Display */}
-      {chatState.error && (
-        <div style={{ maxWidth: '768px', margin: '0 auto', padding: '0 20px' }}>
-          <Alert
-            message={chatState.error}
-            type="error"
-            closable
-            onClose={() => setChatState(prev => ({ ...prev, error: null }))}
-            style={{ marginBottom: '16px' }}
-          />
-        </div>
-      )}
-  
-      {/* Input Area */}
-      <div style={{ 
-        backgroundColor: '#f9f9f9',
-        padding: '20px 0 32px 0',
-        flexShrink: 0
-      }}>
-        <div style={{ maxWidth: '768px', margin: '0 auto', padding: '0 20px' }}>
-          <div style={{ 
-            position: 'relative',
-            backgroundColor: '#fff',
-            borderRadius: '24px',
-            border: '1px solid #e5e5e5',
-            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-            padding: '12px 16px',
-            display: 'flex',
-            alignItems: 'flex-end',
-            gap: '8px'
-          }}>
-            <TextArea
-              ref={inputRef}
-              value={chatState.currentInput}
-              onChange={(e) => setChatState(prev => ({ ...prev, currentInput: e.target.value }))}
-              onKeyPress={handleKeyPress}
-              placeholder="Ask anything"
-              autoSize={{ minRows: 1, maxRows: 6 }}
-              disabled={chatState.isLoading}
-              style={{ 
-                resize: 'none',
-                fontSize: '16px',
-                border: 'none',
-                outline: 'none',
-                boxShadow: 'none',
-                backgroundColor: 'transparent',
-                padding: '4px 0',
-                flex: 1
-              }}
-            />
-            <Button
-              type="text"
-              icon={chatState.isLoading ? <LoadingOutlined /> : <SendOutlined />}
-              onClick={handleSendMessage}
-              disabled={!chatState.currentInput.trim() || chatState.isLoading}
-              style={{ 
-                width: '32px',
-                height: '32px',
-                borderRadius: '16px',
-                backgroundColor: chatState.currentInput.trim() && !chatState.isLoading ? '#000' : '#e5e5e5',
-                color: chatState.currentInput.trim() && !chatState.isLoading ? '#fff' : '#999',
-                border: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: 0,
-                minWidth: '32px',
-                flexShrink: 0
-              }}
-            />
+              <div ref={messagesEndRef} />
+            </div>
           </div>
-        </div>
-      </div>
+      
+          {/* Error Display */}
+          {chatState.error && (
+            <div style={{ maxWidth: '768px', margin: '0 auto', padding: '0 20px' }}>
+              <Alert
+                message={chatState.error}
+                type="error"
+                closable
+                onClose={() => setChatState(prev => ({ ...prev, error: null }))}
+                style={{ marginBottom: '16px' }}
+              />
+            </div>
+          )}
+      
+          {/* Input Area */}
+          <div style={{ 
+            backgroundColor: '#f9f9f9',
+            padding: '20px 0 32px 0',
+            flexShrink: 0
+          }}>
+            <div style={{ maxWidth: '768px', margin: '0 auto', padding: '0 20px' }}>
+              <div style={{ 
+                position: 'relative',
+                backgroundColor: '#fff',
+                borderRadius: '24px',
+                border: '1px solid #e5e5e5',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                padding: '12px 16px',
+                display: 'flex',
+                alignItems: 'flex-end',
+                gap: '8px'
+              }}>
+                <TextArea
+                  ref={inputRef}
+                  value={chatState.currentInput}
+                  onChange={(e) => setChatState(prev => ({ ...prev, currentInput: e.target.value }))}
+                  onKeyPress={handleKeyPress}
+                  placeholder="Ask anything"
+                  autoSize={{ minRows: 1, maxRows: 6 }}
+                  disabled={chatState.isLoading}
+                  style={{ 
+                    resize: 'none',
+                    fontSize: '16px',
+                    border: 'none',
+                    outline: 'none',
+                    boxShadow: 'none',
+                    backgroundColor: 'transparent',
+                    padding: '4px 0',
+                    flex: 1
+                  }}
+                />
+                <Button
+                  type="text"
+                  icon={chatState.isLoading ? <LoadingOutlined /> : <SendOutlined />}
+                  onClick={handleSendMessage}
+                  disabled={!chatState.currentInput.trim() || chatState.isLoading}
+                  style={{ 
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '16px',
+                    backgroundColor: chatState.currentInput.trim() && !chatState.isLoading ? '#000' : '#e5e5e5',
+                    color: chatState.currentInput.trim() && !chatState.isLoading ? '#fff' : '#999',
+                    border: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: 0,
+                    minWidth: '32px',
+                    flexShrink: 0
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        </>
+      )}
   
       <style>
         {`
