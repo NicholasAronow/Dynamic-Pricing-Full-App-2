@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     # External APIs
     openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
     google_client_id: Optional[str] = os.getenv("GOOGLE_CLIENT_ID")
+    google_api_key: Optional[str] = os.getenv("GOOGLE_API_KEY")
+    google_search_engine_id: Optional[str] = os.getenv("GOOGLE_SEARCH_ENGINE_ID")
     stripe_secret_key: Optional[str] = os.getenv("STRIPE_SECRET_KEY")
     
     # Square Integration

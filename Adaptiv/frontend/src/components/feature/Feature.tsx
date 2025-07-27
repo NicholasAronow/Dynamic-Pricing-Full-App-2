@@ -18,7 +18,7 @@ import {
   Tooltip
 } from 'antd';
 import {
-  SendOutlined,
+  ArrowUpOutlined,
   RobotOutlined,
   UserOutlined,
   BulbOutlined,
@@ -28,6 +28,7 @@ import {
   ClockCircleOutlined,
   LoadingOutlined
 } from '@ant-design/icons';
+import { ReactComponent as AiSparkleIcon } from '../../assets/icons/ai_sparkle.svg';
 
 import langgraphService, {
   MultiAgentResponse,
@@ -292,7 +293,8 @@ const Feature: React.FC = () => {
               background: 'linear-gradient(135deg, #1890ff 0%, #722ed1 100%)',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text'
+              backgroundClip: 'text',
+              filter: 'drop-shadow(0 0 2px rgba(114, 46, 209, 0.3))'
             }}>
               Ada
             </Title>
@@ -313,7 +315,7 @@ const Feature: React.FC = () => {
             maxWidth: '600px',
             position: 'relative',
             backgroundColor: '#fff',
-            borderRadius: '24px',
+            borderRadius: '36px',
             border: '1px solid #e5e5e5',
             boxShadow: '0 4px 20px rgba(0, 0, 0, 0.1)',
             padding: '16px 20px',
@@ -321,35 +323,55 @@ const Feature: React.FC = () => {
             alignItems: 'flex-end',
             gap: '12px'
           }}>
-            <TextArea
-              ref={inputRef}
-              value={chatState.currentInput}
-              onChange={(e) => setChatState(prev => ({ ...prev, currentInput: e.target.value }))}
-              onKeyPress={handleKeyPress}
-              placeholder="What would you like to know about your business?"
-              autoSize={{ minRows: 1, maxRows: 6 }}
-              disabled={chatState.isLoading}
-              style={{ 
-                resize: 'none',
-                fontSize: '16px',
-                border: 'none',
-                outline: 'none',
-                boxShadow: 'none',
-                backgroundColor: 'transparent',
-                padding: '8px 0',
-                flex: 1
-              }}
-            />
+            <div style={{ display: 'flex', alignItems: 'center', flex: 1, gap: '8px' }}>
+              <div style={{ position: 'relative', flexShrink: 0 }}>
+                <svg width="0" height="0">
+                  <defs>
+                    <linearGradient id="sparkleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#1890ff" />
+                      <stop offset="100%" stopColor="#722ed1" />
+                    </linearGradient>
+                  </defs>
+                </svg>
+                <AiSparkleIcon style={{ 
+                  width: '24px', 
+                  height: '24px', 
+                  fill: 'url(#sparkleGradient)', 
+                  opacity: 0.7,
+                  filter: 'drop-shadow(0 0 2px rgba(114, 46, 209, 0.3))',
+                  flexShrink: 0
+                }} />
+              </div>
+              <TextArea
+                ref={inputRef}
+                value={chatState.currentInput}
+                onChange={(e) => setChatState(prev => ({ ...prev, currentInput: e.target.value }))}
+                onKeyPress={handleKeyPress}
+                placeholder="What would you like to know about your business?"
+                autoSize={{ minRows: 1, maxRows: 6 }}
+                disabled={chatState.isLoading}
+                style={{ 
+                  resize: 'none',
+                  fontSize: '16px',
+                  border: 'none',
+                  outline: 'none',
+                  boxShadow: 'none',
+                  backgroundColor: 'transparent',
+                  padding: '8px 0',
+                  flex: 1,
+                }}
+              />
+            </div>
             <Button
               type="text"
-              icon={chatState.isLoading ? <LoadingOutlined /> : <SendOutlined />}
+              icon={chatState.isLoading ? <LoadingOutlined /> : <ArrowUpOutlined style={{ fontSize: '18px' }} />}
               onClick={handleSendMessage}
               disabled={!chatState.currentInput.trim() || chatState.isLoading}
               style={{ 
                 width: '40px',
                 height: '40px',
                 borderRadius: '20px',
-                backgroundColor: chatState.currentInput.trim() && !chatState.isLoading ? '#000' : '#e5e5e5',
+                background: chatState.currentInput.trim() && !chatState.isLoading ? 'linear-gradient(135deg, #1890ff 0%, #722ed1 100%)' : '#e5e5e5',
                 color: chatState.currentInput.trim() && !chatState.isLoading ? '#fff' : '#999',
                 border: 'none',
                 display: 'flex',
@@ -387,9 +409,38 @@ const Feature: React.FC = () => {
                   gap: '16px',
                   alignItems: 'flex-start',
                   flexDirection: msg.role === 'user' ? 'row-reverse' : 'row'
-                }}>
+                 }}>
                   {/* Avatar */}
-                  
+                  <div style={{ flexShrink: 0 }}>
+                    {msg.role === 'assistant' ? (
+                      <div style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '50%',
+                        background: 'linear-gradient(135deg, #1890ff 0%, #722ed1 100%)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: '0 2px 8px rgba(24, 144, 255, 0.2)'
+                      }}>
+                        <AiSparkleIcon 
+                          style={{ 
+                            width: '18px', 
+                            height: '18px',
+                            fill: 'white'
+                          }} 
+                        />
+                      </div>
+                    ) : (
+                      <Avatar 
+                        icon={<UserOutlined />} 
+                        style={{ 
+                          backgroundColor: '#f0f0f0',
+                          color: '#666'
+                        }} 
+                      />
+                    )}
+                  </div>
 
                   {/* Message Content */}
                   <div style={{ 
@@ -705,7 +756,7 @@ const Feature: React.FC = () => {
                 />
                 <Button
                   type="text"
-                  icon={chatState.isLoading ? <LoadingOutlined /> : <SendOutlined />}
+                  icon={chatState.isLoading ? <LoadingOutlined /> : <ArrowUpOutlined style={{ fontSize: '18px' }} />}
                   onClick={handleSendMessage}
                   disabled={!chatState.currentInput.trim() || chatState.isLoading}
                   style={{ 
