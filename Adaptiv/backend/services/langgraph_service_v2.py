@@ -19,6 +19,7 @@ from langchain_core.tools import tool, InjectedToolCallId
 from langgraph.graph import StateGraph, MessagesState, START
 from langgraph.types import Command
 from langgraph.prebuilt import create_react_agent, InjectedState
+from langchain_core.messages import ToolMessage
 
 from services.database_service import DatabaseService
 from config.database import get_db
@@ -2839,12 +2840,12 @@ def create_handoff_tool(*, agent_name: str, description: str | None = None):
         state: Annotated[MessagesState, InjectedState], 
         tool_call_id: Annotated[str, InjectedToolCallId],
     ) -> Command:
-        tool_message = {
-            "role": "tool",
-            "content": f"Successfully transferred to {agent_name}",
-            "name": name,
-            "tool_call_id": tool_call_id,
-        }
+        
+        tool_message = ToolMessage(
+            content=f"Successfully transferred to {agent_name}",
+            name=name,
+            tool_call_id=tool_call_id,
+        )
         return Command(  
             goto=agent_name,  
             update={"messages": state["messages"] + [tool_message]},  
@@ -3517,15 +3518,35 @@ Remember: You're not just retrieving data - you're uncovering the story that dat
             # Build initial state with conversation history
             messages = []
             # Add previous messages if provided, but only the content exchanges
+            # Add previous messages if provided, but only the content exchanges
             if previous_messages:
-                # Only keep the last few exchanges to maintain context without tool call history
-                recent_messages = previous_messages[-6:]  # Keep last 3 exchanges
-                for msg in recent_messages:
+                # Process messages in reverse to find the last meaningful exchange
+                for i in range(len(previous_messages) - 1, -1, -1):
+                    msg = previous_messages[i]
+                    
+                    # Always include user messages
                     if msg.get('role') == 'user':
-                        messages.append(HumanMessage(content=msg.get('content', '')))
+                        messages.insert(0, HumanMessage(content=msg.get('content', '')))
+                    
+                    # For assistant messages, only include those with actual content and no handoff tool calls
                     elif msg.get('role') == 'assistant' and msg.get('content', '').strip():
-                        # Create a clean AIMessage without tool calls
-                        messages.append(AIMessage(content=msg.get('content', '')))
+                        # Check if this message has handoff tool calls
+                        tool_calls = msg.get('tool_calls') or msg.get('additional_kwargs', {}).get('tool_calls', [])
+                        has_handoff = any(
+                            'transfer_to_' in tc.get('function', {}).get('name', '') 
+                            for tc in tool_calls
+                        ) if tool_calls else False
+                        
+                        # Only add if it's not a handoff message
+                        if not has_handoff:
+                            messages.insert(0, AIMessage(content=msg.get('content', '')))
+                    
+                    # Stop after collecting a few exchanges (to keep context manageable)
+                    if len(messages) >= 6:  # 3 exchanges
+                        break
+                
+                # Ensure messages are in chronological order
+                messages = list(reversed(messages))
 
             # Add the new user message
             messages.append(HumanMessage(content=task))
@@ -3692,8 +3713,7 @@ Remember: You're not just retrieving data - you're uncovering the story that dat
         return "No AI response generated"
     
     def _convert_messages_to_dict(self, messages: List[Any]) -> List[Dict[str, Any]]:
-        """Convert LangGraph message objects to dictionaries for JSON serialization"""
-        from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+        from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
         
         converted_messages = []
         for msg in messages:
@@ -3704,10 +3724,22 @@ Remember: You're not just retrieving data - you're uncovering the story that dat
                     "type": "human"
                 })
             elif isinstance(msg, AIMessage):
-                converted_messages.append({
+                msg_dict = {
                     "role": "assistant", 
                     "content": msg.content,
                     "type": "ai"
+                }
+                # Include tool calls if present
+                if hasattr(msg, 'additional_kwargs') and 'tool_calls' in msg.additional_kwargs:
+                    msg_dict['tool_calls'] = msg.additional_kwargs['tool_calls']
+                converted_messages.append(msg_dict)
+            elif isinstance(msg, ToolMessage):
+                converted_messages.append({
+                    "role": "tool",
+                    "content": msg.content,
+                    "tool_call_id": msg.tool_call_id,
+                    "name": msg.name,
+                    "type": "tool"
                 })
             elif isinstance(msg, SystemMessage):
                 converted_messages.append({
