@@ -44,17 +44,33 @@ END $$;
 
 -- Step 3: Migrate existing competitor data
 -- Create CompetitorEntity records for each unique competitor_name
-INSERT INTO competitor_entities (user_id, name, created_at, updated_at)
-SELECT 
-    1 as user_id, -- Default to user_id = 1, modify as needed
-    competitor_name,
-    MIN(created_at) as created_at,
-    NOW() as updated_at
-FROM competitor_items 
-WHERE competitor_name IS NOT NULL 
-    AND competitor_name != ''
-    AND competitor_name NOT IN (SELECT name FROM competitor_entities)
-GROUP BY competitor_name;
+-- First, get the first available user ID
+DO $$
+DECLARE
+    first_user_id INTEGER;
+BEGIN
+    -- Get the first user ID that exists
+    SELECT id INTO first_user_id FROM users ORDER BY id LIMIT 1;
+    
+    IF first_user_id IS NULL THEN
+        RAISE EXCEPTION 'No users found in database. Cannot create CompetitorEntity records.';
+    END IF;
+    
+    -- Create CompetitorEntity records using the first available user ID
+    INSERT INTO competitor_entities (user_id, name, created_at, updated_at)
+    SELECT 
+        first_user_id as user_id,
+        competitor_name,
+        MIN(created_at) as created_at,
+        NOW() as updated_at
+    FROM competitor_items 
+    WHERE competitor_name IS NOT NULL 
+        AND competitor_name != ''
+        AND competitor_name NOT IN (SELECT name FROM competitor_entities)
+    GROUP BY competitor_name;
+    
+    RAISE NOTICE 'Created CompetitorEntity records using user_id: %', first_user_id;
+END $$;
 
 -- Step 4: Update competitor_items to reference CompetitorEntity records
 UPDATE competitor_items 

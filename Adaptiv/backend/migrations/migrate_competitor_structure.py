@@ -178,17 +178,20 @@ def run_migration():
                         # We'll assign to user_id = 1 as default, or you can modify this logic
                         # to determine the correct user based on your business logic
                         
-                        # Try to find a user who has items for this competitor
+                        # Find the first available user ID from the users table
                         user_result = conn.execute(text("""
-                            SELECT DISTINCT ci.batch_id
-                            FROM competitor_items ci
-                            WHERE ci.competitor_name = :name
+                            SELECT id FROM users 
+                            ORDER BY id 
                             LIMIT 1;
-                        """), {"name": competitor_name})
+                        """))
                         
-                        # For now, we'll use user_id = 1 as default
-                        # You may want to modify this based on your specific needs
-                        default_user_id = 1
+                        user_row = user_result.fetchone()
+                        if not user_row:
+                            logger.error("❌ No users found in database. Cannot create CompetitorEntity records.")
+                            raise Exception("No users found in database")
+                        
+                        default_user_id = user_row[0]
+                        logger.info(f"   📝 Using user_id {default_user_id} for competitor entities")
                         
                         result = conn.execute(text("""
                             INSERT INTO competitor_entities 
