@@ -85,10 +85,21 @@ export interface CompetitorScrapeRequest {
 }
 
 export interface CompetitorScrapeResponse {
-  success: boolean;
-  competitor_id?: number;
-  items_added: number;
-  message?: string;
+  task_id: string;
+  message: string;
+  status: string;
+}
+
+export interface CompetitorScrapeStatusResponse {
+  task_id: string;
+  status: string;
+  result?: {
+    success: boolean;
+    competitor_id?: number;
+    items_added: number;
+    message?: string;
+    error?: string;
+  };
   error?: string;
 }
 
@@ -303,10 +314,22 @@ class CompetitorEntityService {
   async scrapeCompetitor(request: CompetitorScrapeRequest): Promise<CompetitorScrapeResponse> {
     try {
       const response = await api.post(`${this.baseUrl}/scrape`, request);
-      console.log('Scrape response:', response.data); // Add this line for debugging
+      console.log('Scrape response:', response.data);
       return response.data;
     } catch (error) {
       console.error('Error scraping competitor:', error);
+      throw error;
+    }
+  }
+
+  // Check the status of a scraping task
+  async getScrapeStatus(taskId: string): Promise<CompetitorScrapeStatusResponse> {
+    try {
+      const response = await api.get(`${this.baseUrl}/scrape/status/${taskId}`);
+      console.log('Scrape status response:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Error getting scrape status:', error);
       throw error;
     }
   }

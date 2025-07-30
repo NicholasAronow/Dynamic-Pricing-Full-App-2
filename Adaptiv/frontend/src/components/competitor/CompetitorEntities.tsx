@@ -39,7 +39,8 @@ import competitorEntityService, {
   CompetitorEntityUpdate,
   CompetitorStats,
   CompetitorScrapeRequest,
-  CompetitorScrapeResponse
+  CompetitorScrapeResponse,
+  CompetitorScrapeStatusResponse
 } from '../../services/competitorEntityService';
 import moment from 'moment';
 import { useAuth } from 'context/AuthContext';
@@ -199,45 +200,95 @@ const CompetitorEntities: React.FC = () => {
     }
   };
 
-  // Handle competitor scraping
+  // Handle competitor scraping with task polling
   const handleScrapeCompetitor = async (values: CompetitorScrapeRequest) => {
     try {
       setScrapingLoading(true);
       
-      // Add user_id to the request if needed
-      const requestData = {
-        ...values,
-        user_id: user?.id // Add this if your backend expects it
-      };
+      // Start the scraping task
+      const response = await competitorEntityService.scrapeCompetitor(values);
       
-      const response = await competitorEntityService.scrapeCompetitor(requestData);
+      console.log('Scrape task started:', response);
       
-      console.log('Scrape response received:', response);
-      
-      if (response.success) {
-        message.success(
-          `Successfully scraped ${values.restaurant_name}! Found ${response.items_added} menu items.`
-        );
-        setScrapingModalVisible(false);
-        scrapeForm.resetFields();
+      if (response.task_id) {
+        message.info(`Started scraping ${values.restaurant_name}. Please wait...`);
         
-        // Force a complete refresh
-        setCompetitors([]);
-        
-        // Wait a bit then reload
-        setTimeout(async () => {
-          await loadCompetitors();
-          await loadSummary();
-        }, 500);
+        // Poll for task completion
+        await pollScrapeStatus(response.task_id, values.restaurant_name);
       } else {
-        message.error(response.error || 'Failed to scrape competitor data');
+        message.error('Failed to start scraping task');
       }
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || 'Failed to scrape competitor';
+      const errorMessage = error.response?.data?.detail || 'Failed to start scraping task';
       message.error(errorMessage);
-    } finally {
       setScrapingLoading(false);
     }
+  };
+
+  // Poll for scraping task status
+  const pollScrapeStatus = async (taskId: string, restaurantName: string) => {
+    const maxAttempts = 60; // 5 minutes with 5-second intervals
+    let attempts = 0;
+    
+    const poll = async () => {
+      try {
+        attempts++;
+        const statusResponse = await competitorEntityService.getScrapeStatus(taskId);
+        
+        console.log(`Polling attempt ${attempts}:`, statusResponse);
+        
+        if (statusResponse.status === 'SUCCESS' && statusResponse.result) {
+          // Task completed successfully
+          if (statusResponse.result.success) {
+            message.success(
+              `Successfully scraped ${restaurantName}! Found ${statusResponse.result.items_added} menu items.`
+            );
+            setScrapingModalVisible(false);
+            scrapeForm.resetFields();
+            
+            // Refresh the data
+            setTimeout(async () => {
+              await loadCompetitors();
+              await loadSummary();
+            }, 500);
+          } else {
+            message.error(statusResponse.result.error || 'Scraping failed');
+          }
+          setScrapingLoading(false);
+        } else if (statusResponse.status === 'FAILURE') {
+          // Task failed
+          message.error(statusResponse.error || 'Scraping task failed');
+          setScrapingLoading(false);
+        } else if (statusResponse.status === 'PENDING' || statusResponse.status === 'PROGRESS') {
+          // Task still running, continue polling
+          if (attempts < maxAttempts) {
+            setTimeout(poll, 5000); // Poll every 5 seconds
+          } else {
+            message.warning('Scraping is taking longer than expected. Please check back later.');
+            setScrapingLoading(false);
+          }
+        } else {
+          // Unknown status, continue polling for a bit
+          if (attempts < maxAttempts) {
+            setTimeout(poll, 5000);
+          } else {
+            message.error('Scraping task status unknown. Please try again.');
+            setScrapingLoading(false);
+          }
+        }
+      } catch (error: any) {
+        console.error('Error polling scrape status:', error);
+        if (attempts < maxAttempts) {
+          setTimeout(poll, 5000); // Continue polling on error
+        } else {
+          message.error('Failed to check scraping status. Please try again.');
+          setScrapingLoading(false);
+        }
+      }
+    };
+    
+    // Start polling after a short delay
+    setTimeout(poll, 2000);
   };
 
   // Open modal for scraping new competitor
