@@ -110,7 +110,6 @@ const CompetitorEntities: React.FC = () => {
   };
 
   // Load summary statistics
-  // Load summary statistics
   const loadSummary = async () => {
     try {
       const summaryData = await competitorEntityService.getCompetitorSummary();
@@ -200,24 +199,6 @@ const CompetitorEntities: React.FC = () => {
     }
   };
 
-  // Handle migrate legacy data
-  const handleMigrateLegacyData = async () => {
-    try {
-      setMigrationLoading(true);
-      const result = await competitorEntityService.migrateLegacyData();
-      message.success(
-        `Migration completed: ${result.details.migrated_competitors} competitors migrated, ${result.details.existing_competitors} already existed`
-      );
-      loadCompetitors();
-      loadSummary();
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || 'Failed to migrate legacy data';
-      message.error(errorMessage);
-    } finally {
-      setMigrationLoading(false);
-    }
-  };
-
   // Handle competitor scraping
   const handleScrapeCompetitor = async (values: CompetitorScrapeRequest) => {
     try {
@@ -297,7 +278,6 @@ const CompetitorEntities: React.FC = () => {
           <Text strong>{text}</Text>
           {record.is_selected && (
             <Tag color="green" icon={<CheckCircleOutlined />}>
-              Tracking
             </Tag>
           )}
         </Space>
@@ -316,7 +296,7 @@ const CompetitorEntities: React.FC = () => {
       ),
     },
     {
-      title: 'Address',
+      title: 'Location',
       dataIndex: 'address',
       key: 'address',
       render: (address: string) => address || (
@@ -395,335 +375,799 @@ const CompetitorEntities: React.FC = () => {
   ];
 
   return (
-    <div style={{ padding: '24px' }}>
-      <div style={{ marginBottom: '24px' }}>
-        <Title level={2}>Competitor Management</Title>
-        <Paragraph>
-          Manage your competitor entities and track their pricing data.
-        </Paragraph>
-      </div>
+    <div style={{ 
+      padding: '0px 0px',
+      background: '#fafbfc',
+      minHeight: '100vh'
+    }}>
+      <div style={{ 
+        maxWidth: '100vw', 
+        margin: '0 auto' 
+      }}>
+        {/* Header Section */}
+        <div style={{ 
+          marginBottom: '48px',
+          animation: 'fadeIn 0.5s ease-out'
+        }}>
+          <Title level={2} style={{
+            fontSize: '32px',
+            fontWeight: '600',
+            color: '#0a0a0a',
+            marginBottom: '8px',
+            letterSpacing: '-0.02em'
+          }}>
+            Competitor Management
+          </Title>
+          <Paragraph style={{
+            fontSize: '16px',
+            color: '#666',
+            margin: 0,
+            fontWeight: '400'
+          }}>
+            Manage your competitor entities and track their pricing data.
+          </Paragraph>
+        </div>
 
-      {/* Summary Statistics */}
-      <Row gutter={16} style={{ marginBottom: '24px' }}>
-        <Col span={8}>
-          <Card>
-            <Statistic
-              title="Total Competitors"
-              value={summary.total_competitors}
-              prefix={<BarChartOutlined />}
-            />
-          </Card>
-        </Col>
-        <Col span={8}>
-          <Card>
-            <Statistic
-              title="Tracking"
-              value={summary.selected_competitors}
-              prefix={<CheckCircleOutlined />}
-              valueStyle={{ color: '#3f8600' }}
-            />
-          </Card>
-        </Col>
-        <Col span={8}>
-          <Card>
-            <Statistic
-              title="Total Items"
-              value={summary.total_items}
-              prefix={<EyeOutlined />}
-            />
-          </Card>
-        </Col>
-      </Row>
-
-      {/* Action Bar */}
-      <Card style={{ marginBottom: '24px' }}>
-        <Space>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={handleCreateCompetitor}
-            loading={scrapingLoading}
-          >
-            Scrape Competitor
-          </Button>
-          
-          <Button
-            icon={<PlusOutlined />}
-            onClick={handleManualCreateCompetitor}
-          >
-            Manual Entry
-          </Button>
-          
-          <Button
-            icon={<SyncOutlined />}
-            onClick={loadCompetitors}
-            loading={loading}
-          >
-            Refresh
-          </Button>
-          
-          <Button
-            icon={<SyncOutlined />}
-            onClick={handleMigrateLegacyData}
-            loading={migrationLoading}
-          >
-            Migrate Legacy Data
-          </Button>
-        </Space>
-      </Card>
-
-      {/* Competitors Table */}
-      <Card>
-        <Table
-          columns={columns}
-          dataSource={competitors}
-          rowKey="id"
-          loading={loading}
-          locale={{
-            emptyText: (
-              <Empty
-                description="No competitors found"
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
+        {/* Summary Statistics */}
+        <Row gutter={24} style={{ marginBottom: '32px' }}>
+          <Col span={8}>
+            <Card style={{
+              border: 'none',
+              borderRadius: '12px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              transition: 'all 0.3s ease',
+              cursor: 'pointer',
+              background: '#fff',
+              height: '100%'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)';
+            }}>
+              <Statistic
+                title={<span style={{ 
+                  color: '#8e8e93', 
+                  fontSize: '13px',
+                  fontWeight: '500',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em'
+                }}>Total Competitors</span>}
+                value={summary.total_competitors}
+                prefix={<BarChartOutlined style={{ 
+                  fontSize: '20px',
+                  color: '#007AFF'
+                }} />}
+                valueStyle={{
+                  fontSize: '36px',
+                  fontWeight: '600',
+                  color: '#0a0a0a',
+                  letterSpacing: '-0.02em'
+                }}
               />
-            ),
-          }}
-        />
-      </Card>
-
-      {/* Create/Edit Modal */}
-      <Modal
-        title={editingCompetitor ? 'Edit Competitor' : 'Add New Competitor'}
-        open={modalVisible}
-        onCancel={() => {
-          setModalVisible(false);
-          setEditingCompetitor(null);
-          form.resetFields();
-        }}
-        footer={null}
-      >
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={handleSaveCompetitor}
-        >
-          <Form.Item
-            name="name"
-            label="Competitor Name"
-            rules={[
-              { required: true, message: 'Please enter competitor name' },
-              { min: 2, message: 'Name must be at least 2 characters' }
-            ]}
-          >
-            <Input placeholder="Enter competitor name" />
-          </Form.Item>
-
-          <Form.Item
-            name="website"
-            label="Website"
-            rules={[
-              { type: 'url', message: 'Please enter a valid URL' }
-            ]}
-          >
-            <Input placeholder="https://competitor-website.com" />
-          </Form.Item>
-
-          <Form.Item
-            name="address"
-            label="Address"
-          >
-            <Input placeholder="Enter competitor address" />
-          </Form.Item>
-
-          <Form.Item
-            name="category"
-            label="Category"
-          >
-            <Input placeholder="e.g., restaurant, cafe, fast food" />
-          </Form.Item>
-
-          <Form.Item
-            name="menu_url"
-            label="Menu URL"
-            rules={[
-              { type: 'url', message: 'Please enter a valid URL' }
-            ]}
-          >
-            <Input placeholder="https://competitor-menu-url.com" />
-          </Form.Item>
-
-          <Form.Item
-            name="is_selected"
-            label="Track this competitor"
-            valuePropName="checked"
-          >
-            <Switch />
-          </Form.Item>
-
-          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
-            <Space>
-              <Button
-                onClick={() => {
-                  setModalVisible(false);
-                  setEditingCompetitor(null);
-                  form.resetFields();
+            </Card>
+          </Col>
+          <Col span={8}>
+            <Card style={{
+              border: 'none',
+              borderRadius: '12px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              transition: 'all 0.3s ease',
+              cursor: 'pointer',
+              background: '#fff',
+              height: '100%'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)';
+            }}>
+              <Statistic
+                title={<span style={{ 
+                  color: '#8e8e93', 
+                  fontSize: '13px',
+                  fontWeight: '500',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em'
+                }}>Tracking</span>}
+                value={summary.selected_competitors}
+                prefix={<CheckCircleOutlined style={{ 
+                  fontSize: '20px',
+                  color: '#34C759'
+                }} />}
+                valueStyle={{ 
+                  fontSize: '36px',
+                  fontWeight: '600',
+                  color: '#34C759',
+                  letterSpacing: '-0.02em'
                 }}
-              >
-                Cancel
-              </Button>
-              <Button type="primary" htmlType="submit">
-                {editingCompetitor ? 'Update' : 'Create'}
-              </Button>
-            </Space>
-          </Form.Item>
-        </Form>
-      </Modal>
+              />
+            </Card>
+          </Col>
+          <Col span={8}>
+            <Card style={{
+              border: 'none',
+              borderRadius: '12px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              transition: 'all 0.3s ease',
+              cursor: 'pointer',
+              background: '#fff',
+              height: '100%'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)';
+            }}>
+              <Statistic
+                title={<span style={{ 
+                  color: '#8e8e93', 
+                  fontSize: '13px',
+                  fontWeight: '500',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em'
+                }}>Total Items</span>}
+                value={summary.total_items}
+                prefix={<EyeOutlined style={{ 
+                  fontSize: '20px',
+                  color: '#5856D6'
+                }} />}
+                valueStyle={{
+                  fontSize: '36px',
+                  fontWeight: '600',
+                  color: '#0a0a0a',
+                  letterSpacing: '-0.02em'
+                }}
+              />
+            </Card>
+          </Col>
+        </Row>
 
-      {/* Statistics Modal */}
-      <Modal
-        title="Competitor Statistics"
-        open={statsModalVisible}
-        onCancel={() => {
-          setStatsModalVisible(false);
-          setSelectedCompetitorStats(null);
-        }}
-        footer={[
-          <Button key="close" onClick={() => setStatsModalVisible(false)}>
-            Close
-          </Button>
-        ]}
-        width={800}
-      >
-        {statsLoading ? (
-          <div style={{ textAlign: 'center', padding: '40px' }}>
-            <Spin size="large" />
-          </div>
-        ) : selectedCompetitorStats ? (
-          <div>
-            <Title level={4}>{selectedCompetitorStats.competitor_name}</Title>
+        {/* Action Bar */}
+        <Card style={{ 
+          marginBottom: '32px',
+          border: 'none',
+          borderRadius: '12px',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+          background: '#fff',
+          padding: '20px 24px'
+        }}>
+          <Space size={16}>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={handleCreateCompetitor}
+              loading={scrapingLoading}
+              style={{
+                background: '#007AFF',
+                border: 'none',
+                height: '40px',
+                padding: '0 24px',
+                borderRadius: '8px',
+                fontSize: '15px',
+                fontWeight: '500',
+                boxShadow: '0 2px 8px rgba(0,122,255,0.2)',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#0051D5';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,122,255,0.3)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#007AFF';
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,122,255,0.2)';
+              }}
+            >
+              Scrape Competitor
+            </Button>
             
-            <Row gutter={16} style={{ marginBottom: '24px' }}>
-              <Col span={8}>
-                <Statistic
-                  title="Total Items"
-                  value={selectedCompetitorStats.total_items}
-                />
-              </Col>
-              <Col span={8}>
-                <Statistic
-                  title="Average Price"
-                  value={selectedCompetitorStats.price_stats.avg_price}
-                  precision={2}
-                  prefix="$"
-                />
-              </Col>
-              <Col span={8}>
-                <Statistic
-                  title="Price Range"
-                  value={`$${selectedCompetitorStats.price_stats.min_price.toFixed(2)} - $${selectedCompetitorStats.price_stats.max_price.toFixed(2)}`}
-                />
-              </Col>
-            </Row>
+            <Button
+              icon={<PlusOutlined />}
+              onClick={handleManualCreateCompetitor}
+              style={{
+                background: '#fff',
+                border: '1px solid #e5e5e7',
+                height: '40px',
+                padding: '0 24px',
+                borderRadius: '8px',
+                fontSize: '15px',
+                fontWeight: '500',
+                color: '#0a0a0a',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = '#007AFF';
+                e.currentTarget.style.color = '#007AFF';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = '#e5e5e7';
+                e.currentTarget.style.color = '#0a0a0a';
+              }}
+            >
+              Manual Entry
+            </Button>
+            
+            <Button
+              icon={<SyncOutlined />}
+              onClick={loadCompetitors}
+              loading={loading}
+              style={{
+                background: '#fff',
+                border: '1px solid #e5e5e7',
+                height: '40px',
+                padding: '0 20px',
+                borderRadius: '8px',
+                fontSize: '15px',
+                fontWeight: '500',
+                color: '#0a0a0a',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = '#007AFF';
+                e.currentTarget.style.color = '#007AFF';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = '#e5e5e7';
+                e.currentTarget.style.color = '#0a0a0a';
+              }}
+            >
+              Refresh
+            </Button>
+          </Space>
+        </Card>
 
-            <Title level={5}>Category Breakdown</Title>
-            <Table
-              dataSource={selectedCompetitorStats.category_breakdown}
-              columns={[
-                {
-                  title: 'Category',
-                  dataIndex: 'category',
-                  key: 'category',
-                },
-                {
-                  title: 'Items',
-                  dataIndex: 'item_count',
-                  key: 'item_count',
-                },
-                {
-                  title: 'Avg Price',
-                  dataIndex: 'avg_price',
-                  key: 'avg_price',
-                  render: (price: number) => `$${price.toFixed(2)}`,
-                },
-              ]}
-              pagination={false}
-              size="small"
-            />
-          </div>
-        ) : null}
-      </Modal>
+        {/* Competitors Table */}
+        <Card style={{
+          border: 'none',
+          borderRadius: '12px',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+          background: '#fff',
+          overflow: 'hidden'
+        }}>
+          <Table
+            columns={columns}
+            dataSource={competitors}
+            rowKey="id"
+            loading={loading}
+            style={{
+              fontSize: '12px',
+              background: '#fff',
+              borderBottom: '1px solid #e5e5e7',
+              color: '#8e8e93',
+              fontWeight: '300',
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              padding: '16px',
+            }}
+            locale={{
+              emptyText: (
+                <Empty
+                  description={
+                    <span style={{ color: '#8e8e93', fontSize: '15px' }}>
+                      No competitors found
+                    </span>
+                  }
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  style={{ padding: '60px 0' }}
+                />
+              ),
+            }}
+          />
+        </Card>
 
-      {/* Competitor Scraping Modal */}
-      <Modal
-        title="Scrape Competitor Menu"
-        open={scrapingModalVisible}
-        onCancel={() => {
-          setScrapingModalVisible(false);
-          scrapeForm.resetFields();
-        }}
-        footer={null}
-        width={600}
-      >
-        <Alert
-          message="AI-Powered Menu Scraping"
-          description="Enter a restaurant name and location. Our AI will automatically find their website, scrape their menu, and add it to your competitor database."
-          type="info"
-          showIcon
-          style={{ marginBottom: '24px' }}
-        />
-        
-        <Form
-          form={scrapeForm}
-          layout="vertical"
-          onFinish={handleScrapeCompetitor}
+        {/* Create/Edit Modal */}
+        <Modal
+          title={
+            <span style={{
+              fontSize: '20px',
+              fontWeight: '600',
+              color: '#0a0a0a'
+            }}>
+              {editingCompetitor ? 'Edit Competitor' : 'Add New Competitor'}
+            </span>
+          }
+          open={modalVisible}
+          onCancel={() => {
+            setModalVisible(false);
+            setEditingCompetitor(null);
+            form.resetFields();
+          }}
+          footer={null}
+          style={{
+            top: 80
+          }}
+          bodyStyle={{
+            padding: '32px'
+          }}
         >
-          <Form.Item
-            name="restaurant_name"
-            label="Restaurant Name"
-            rules={[
-              { required: true, message: 'Please enter restaurant name' },
-              { min: 2, message: 'Name must be at least 2 characters' }
-            ]}
+          <Form
+            form={form}
+            layout="vertical"
+            onFinish={handleSaveCompetitor}
+            style={{
+              fontSize: '14px',
+              fontWeight: '200',
+              color: '#0a0a0a'
+            }}
           >
-            <Input 
-              placeholder="e.g., McDonald's, Starbucks, Local Bistro"
-              disabled={scrapingLoading}
-            />
-          </Form.Item>
-
-          <Form.Item
-            name="location"
-            label="Location (Optional)"
-            extra="Helps find the correct restaurant if there are multiple locations"
-          >
-            <Input 
-              placeholder="e.g., New York, NY or 123 Main St, Boston"
-              disabled={scrapingLoading}
-            />
-          </Form.Item>
-
-          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
-            <Space>
-              <Button
-                onClick={() => {
-                  setScrapingModalVisible(false);
-                  scrapeForm.resetFields();
+            <Form.Item
+              name="name"
+              label="Competitor Name"
+              rules={[
+                { required: true, message: 'Please enter competitor name' },
+                { min: 2, message: 'Name must be at least 2 characters' }
+              ]}
+              style={{ marginBottom: '24px' }}
+            >
+              <Input 
+                placeholder="Enter competitor name" 
+                style={{
+                  height: '40px',
+                  borderRadius: '8px',
+                  fontSize: '15px',
+                  border: '1px solid #e5e5e7',
+                  transition: 'all 0.3s ease'
                 }}
+              />
+            </Form.Item>
+
+            <Form.Item
+              name="website"
+              label="Website"
+              rules={[
+                { type: 'url', message: 'Please enter a valid URL' }
+              ]}
+              style={{ marginBottom: '24px' }}
+            >
+              <Input 
+                placeholder="https://competitor-website.com" 
+                style={{
+                  height: '40px',
+                  borderRadius: '8px',
+                  fontSize: '15px',
+                  border: '1px solid #e5e5e7',
+                  transition: 'all 0.3s ease'
+                }}
+              />
+            </Form.Item>
+
+            <Form.Item
+              name="address"
+              label="Location"
+              style={{ marginBottom: '24px' }}
+            >
+              <Input 
+                placeholder="Enter competitor address" 
+                style={{
+                  height: '40px',
+                  borderRadius: '8px',
+                  fontSize: '15px',
+                  border: '1px solid #e5e5e7',
+                  transition: 'all 0.3s ease'
+                }}
+              />
+            </Form.Item>
+
+            <Form.Item
+              name="category"
+              label="Category"
+              style={{ marginBottom: '24px' }}
+            >
+              <Input 
+                placeholder="e.g., restaurant, cafe, fast food" 
+                style={{
+                  height: '40px',
+                  borderRadius: '8px',
+                  fontSize: '15px',
+                  border: '1px solid #e5e5e7',
+                  transition: 'all 0.3s ease'
+                }}
+              />
+            </Form.Item>
+
+            <Form.Item
+              name="menu_url"
+              label="Menu URL"
+              rules={[
+                { type: 'url', message: 'Please enter a valid URL' }
+              ]}
+              style={{ marginBottom: '24px' }}
+            >
+              <Input 
+                placeholder="https://competitor-menu-url.com" 
+                style={{
+                  height: '40px',
+                  borderRadius: '8px',
+                  fontSize: '15px',
+                  border: '1px solid #e5e5e7',
+                  transition: 'all 0.3s ease'
+                }}
+              />
+            </Form.Item>
+
+            <Form.Item
+              name="is_selected"
+              label="Track this competitor"
+              valuePropName="checked"
+              style={{ marginBottom: '32px' }}
+            >
+              <Switch 
+                style={{
+                  background: '#e5e5e7'
+                }}
+              />
+            </Form.Item>
+
+            <Form.Item style={{ marginBottom: 0 }}>
+              <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+                <Button
+                  onClick={() => {
+                    setModalVisible(false);
+                    setEditingCompetitor(null);
+                    form.resetFields();
+                  }}
+                  style={{
+                    height: '40px',
+                    padding: '0 24px',
+                    borderRadius: '8px',
+                    fontSize: '15px',
+                    fontWeight: '500',
+                    border: '1px solid #e5e5e7',
+                    background: '#fff',
+                    color: '#0a0a0a'
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  type="primary" 
+                  htmlType="submit"
+                  style={{
+                    height: '40px',
+                    padding: '0 24px',
+                    borderRadius: '8px',
+                    fontSize: '15px',
+                    fontWeight: '500',
+                    background: '#007AFF',
+                    border: 'none',
+                    boxShadow: '0 2px 8px rgba(0,122,255,0.2)'
+                  }}
+                >
+                  {editingCompetitor ? 'Update' : 'Create'}
+                </Button>
+              </Space>
+            </Form.Item>
+          </Form>
+        </Modal>
+
+        {/* Statistics Modal */}
+        <Modal
+          title={
+            <span style={{
+              fontSize: '20px',
+              fontWeight: '600',
+              color: '#0a0a0a'
+            }}>
+              Competitor Statistics
+            </span>
+          }
+          open={statsModalVisible}
+          onCancel={() => {
+            setStatsModalVisible(false);
+            setSelectedCompetitorStats(null);
+          }}
+          footer={[
+            <Button 
+              key="close" 
+              onClick={() => setStatsModalVisible(false)}
+              style={{
+                height: '40px',
+                padding: '0 24px',
+                borderRadius: '8px',
+                fontSize: '15px',
+                fontWeight: '500',
+                border: '1px solid #e5e5e7',
+                background: '#fff',
+                color: '#0a0a0a'
+              }}
+            >
+              Close
+            </Button>
+          ]}
+          width={800}
+          style={{ top: 80 }}
+          bodyStyle={{ padding: '32px' }}
+        >
+          {statsLoading ? (
+            <div style={{ textAlign: 'center', padding: '60px' }}>
+              <Spin size="large" />
+            </div>
+          ) : selectedCompetitorStats ? (
+            <div>
+              <Title level={4} style={{
+                fontSize: '24px',
+                fontWeight: '600',
+                color: '#0a0a0a',
+                marginBottom: '32px'
+              }}>
+                {selectedCompetitorStats.competitor_name}
+              </Title>
+              
+              <Row gutter={24} style={{ marginBottom: '40px' }}>
+                <Col span={8}>
+                  <div style={{
+                    background: '#fafbfc',
+                    padding: '24px',
+                    borderRadius: '12px',
+                    textAlign: 'center'
+                  }}>
+                    <Statistic
+                      title={<span style={{ 
+                        color: '#8e8e93', 
+                        fontSize: '13px',
+                        fontWeight: '500',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em'
+                      }}>Total Items</span>}
+                      value={selectedCompetitorStats.total_items}
+                      valueStyle={{
+                        fontSize: '32px',
+                        fontWeight: '600',
+                        color: '#0a0a0a'
+                      }}
+                    />
+                  </div>
+                </Col>
+                <Col span={8}>
+                  <div style={{
+                    background: '#fafbfc',
+                    padding: '24px',
+                    borderRadius: '12px',
+                    textAlign: 'center'
+                  }}>
+                    <Statistic
+                      title={<span style={{ 
+                        color: '#8e8e93', 
+                        fontSize: '13px',
+                        fontWeight: '500',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em'
+                      }}>Average Price</span>}
+                      value={selectedCompetitorStats.price_stats.avg_price}
+                      precision={2}
+                      prefix="$"
+                      valueStyle={{
+                        fontSize: '32px',
+                        fontWeight: '600',
+                        color: '#0a0a0a'
+                      }}
+                    />
+                  </div>
+                </Col>
+                <Col span={8}>
+                  <div style={{
+                    background: '#fafbfc',
+                    padding: '24px',
+                    borderRadius: '12px',
+                    textAlign: 'center'
+                  }}>
+                    <Statistic
+                      title={<span style={{ 
+                        color: '#8e8e93', 
+                        fontSize: '13px',
+                        fontWeight: '500',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em'
+                      }}>Price Range</span>}
+                      value={`$${selectedCompetitorStats.price_stats.min_price.toFixed(2)} - $${selectedCompetitorStats.price_stats.max_price.toFixed(2)}`}
+                      valueStyle={{
+                        fontSize: '20px',
+                        fontWeight: '600',
+                        color: '#0a0a0a'
+                      }}
+                    />
+                  </div>
+                </Col>
+              </Row>
+
+              <Title level={5} style={{
+                fontSize: '16px',
+                fontWeight: '600',
+                color: '#0a0a0a',
+                marginBottom: '16px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em'
+              }}>
+                Category Breakdown
+              </Title>
+              <Table
+                dataSource={selectedCompetitorStats.category_breakdown}
+                columns={[
+                  {
+                    title: 'Category',
+                    dataIndex: 'category',
+                    key: 'category',
+                  },
+                  {
+                    title: 'Items',
+                    dataIndex: 'item_count',
+                    key: 'item_count',
+                  },
+                  {
+                    title: 'Avg Price',
+                    dataIndex: 'avg_price',
+                    key: 'avg_price',
+                    render: (price: number) => `$${price.toFixed(2)}`,
+                  },
+                ]}
+                pagination={false}
+                size="small"
+                style={{
+                    background: '#fafbfc',
+                    borderBottom: '1px solid #e5e5e7',
+                    color: '#8e8e93',
+                    fontWeight: '600',
+                    fontSize: '12px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em'
+                }}
+              />
+            </div>
+          ) : null}
+        </Modal>
+
+        {/* Competitor Scraping Modal */}
+        <Modal
+          title={
+            <span style={{
+              fontSize: '20px',
+              fontWeight: '600',
+              color: '#0a0a0a'
+            }}>
+              Scrape Competitor Menu
+            </span>
+          }
+          open={scrapingModalVisible}
+          onCancel={() => {
+            setScrapingModalVisible(false);
+            scrapeForm.resetFields();
+          }}
+          footer={null}
+          width={600}
+          style={{ top: 80 }}
+          bodyStyle={{ padding: '32px' }}
+        >
+          <Alert
+            message={
+              <span style={{ fontWeight: '600', fontSize: '15px' }}>
+                AI-Powered Menu Scraping
+              </span>
+            }
+            description={
+              <span style={{ fontSize: '14px', lineHeight: '1.6' }}>
+                Enter a restaurant name and location. Our AI will automatically find their website, scrape their menu, and add it to your competitor database.
+              </span>
+            }
+            type="info"
+            showIcon
+            style={{ 
+              marginBottom: '32px',
+              borderRadius: '8px',
+              border: '1px solid #b3d7ff',
+              background: '#f0f8ff'
+            }}
+          />
+          
+          <Form
+            form={scrapeForm}
+            layout="vertical"
+            onFinish={handleScrapeCompetitor}
+            style={{
+              fontSize: '14px',
+              fontWeight: '500',
+              color: '#0a0a0a'
+            }}
+          >
+            <Form.Item
+              name="restaurant_name"
+              label="Restaurant Name"
+              rules={[
+                { required: true, message: 'Please enter restaurant name' },
+                { min: 2, message: 'Name must be at least 2 characters' }
+              ]}
+              style={{ marginBottom: '24px' }}
+            >
+              <Input 
+                placeholder="e.g., McDonald's, Starbucks, Local Bistro"
                 disabled={scrapingLoading}
-              >
-                Cancel
-              </Button>
-              <Button 
-                type="primary" 
-                htmlType="submit"
-                loading={scrapingLoading}
-                icon={<SyncOutlined />}
-              >
-                {scrapingLoading ? 'Scraping...' : 'Start Scraping'}
-              </Button>
-            </Space>
-          </Form.Item>
-        </Form>
-      </Modal>
+                style={{
+                  height: '40px',
+                  borderRadius: '8px',
+                  fontSize: '15px',
+                  border: '1px solid #e5e5e7',
+                  transition: 'all 0.3s ease'
+                }}
+              />
+            </Form.Item>
+
+            <Form.Item
+              name="location"
+              label="Location (Optional)"
+              extra={
+                <span style={{ fontSize: '13px', color: '#8e8e93' }}>
+                  Helps find the correct restaurant if there are multiple locations
+                </span>
+              }
+              style={{ marginBottom: '32px' }}
+            >
+              <Input 
+                placeholder="e.g., New York, NY or 123 Main St, Boston"
+                disabled={scrapingLoading}
+                style={{
+                  height: '40px',
+                  borderRadius: '8px',
+                  fontSize: '15px',
+                  border: '1px solid #e5e5e7',
+                  transition: 'all 0.3s ease'
+                }}
+              />
+            </Form.Item>
+
+            <Form.Item style={{ marginBottom: 0 }}>
+              <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+                <Button
+                  onClick={() => {
+                    setScrapingModalVisible(false);
+                    scrapeForm.resetFields();
+                  }}
+                  disabled={scrapingLoading}
+                  style={{
+                    height: '40px',
+                    padding: '0 24px',
+                    borderRadius: '8px',
+                    fontSize: '15px',
+                    fontWeight: '500',
+                    border: '1px solid #e5e5e7',
+                    background: '#fff',
+                    color: '#0a0a0a'
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  type="primary" 
+                  htmlType="submit"
+                  loading={scrapingLoading}
+                  icon={<SyncOutlined />}
+                  style={{
+                    height: '40px',
+                    padding: '0 24px',
+                    borderRadius: '8px',
+                    fontSize: '15px',
+                    fontWeight: '500',
+                    background: '#007AFF',
+                    border: 'none',
+                    boxShadow: '0 2px 8px rgba(0,122,255,0.2)'
+                  }}
+                >
+                  {scrapingLoading ? 'Scraping...' : 'Start Scraping'}
+                </Button>
+              </Space>
+            </Form.Item>
+          </Form>
+        </Modal>
+      </div>
     </div>
   );
 };
