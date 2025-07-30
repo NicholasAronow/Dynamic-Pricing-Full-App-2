@@ -120,9 +120,42 @@ class PriceSimulation(BaseModel):
     new_price: float
     change_reason: Optional[str] = "Price simulation"
 
+# Competitor Entity Schemas
+class CompetitorEntityBase(BaseModel):
+    name: str
+    address: Optional[str] = None
+    category: Optional[str] = None
+    phone: Optional[str] = None
+    website: Optional[str] = None
+    distance_km: Optional[float] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    menu_url: Optional[str] = None
+    score: Optional[float] = None
+    is_selected: Optional[bool] = False
+
+class CompetitorEntityCreate(CompetitorEntityBase):
+    pass
+
+class CompetitorEntityUpdate(CompetitorEntityBase):
+    name: Optional[str] = None
+    address: Optional[str] = None
+    category: Optional[str] = None
+    phone: Optional[str] = None
+    website: Optional[str] = None
+    distance_km: Optional[float] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    menu_url: Optional[str] = None
+    score: Optional[float] = None
+    is_selected: Optional[bool] = None
+
+
+
 # Competitor Item Schemas
 class CompetitorItemBase(BaseModel):
-    competitor_name: str
+    competitor_id: Optional[int] = None  # New foreign key to CompetitorEntity
+    competitor_name: Optional[str] = None  # Keep for backward compatibility
     item_name: str
     description: Optional[str] = None
     category: str
@@ -134,6 +167,7 @@ class CompetitorItemCreate(CompetitorItemBase):
     pass
 
 class CompetitorItemUpdate(CompetitorItemBase):
+    competitor_id: Optional[int] = None
     competitor_name: Optional[str] = None
     item_name: Optional[str] = None
     description: Optional[str] = None
@@ -149,6 +183,29 @@ class CompetitorItem(CompetitorItemBase):
     
     model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
 
+class CompetitorEntity(BaseModel):
+    id: int
+    user_id: int
+    name: str
+    address: Optional[str] = None
+    category: Optional[str] = None
+    phone: Optional[str] = None
+    website: Optional[str] = None
+    distance_km: Optional[float] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    menu_url: Optional[str] = None
+    score: Optional[float] = None
+    is_selected: bool = False
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    items: Optional[List[CompetitorItem]] = None
+
+    class Config:
+        from_attributes = True  # This is crucial for SQLAlchemy models
+        json_encoders = {
+            datetime: lambda v: v.isoformat() if v else None
+        }
 # Order Item Schemas
 class OrderItemBase(BaseModel):
     item_id: int

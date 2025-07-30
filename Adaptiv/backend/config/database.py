@@ -12,7 +12,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Database connection URL - use environment variable or default to SQLite for local development
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./adaptiv.db")
+# Use absolute path for SQLite to avoid issues when running from subdirectories
+if os.getenv("DATABASE_URL"):
+    DATABASE_URL = os.getenv("DATABASE_URL")
+else:
+    # Get the backend directory (parent of config directory)
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sqlite_path = os.path.join(backend_dir, "adaptiv.db")
+    DATABASE_URL = f"sqlite:///{sqlite_path}"
 
 # Handle special case for Render's PostgreSQL URL format
 if DATABASE_URL.startswith("postgres://"):

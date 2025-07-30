@@ -83,11 +83,41 @@ class PriceHistory(Base):
     # Relationship to Item
     item = relationship("Item", back_populates="price_history")
 
+class CompetitorEntity(Base):
+    __tablename__ = "competitor_entities"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String, nullable=False, index=True)
+    address = Column(String, nullable=True)
+    category = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    website = Column(String, nullable=True)
+    distance_km = Column(Float, nullable=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    menu_url = Column(String, nullable=True)
+    score = Column(Float, nullable=True)  # Overall competitor similarity/relevance score
+    is_selected = Column(Boolean, default=False)  # Flag to track if competitor is selected for tracking
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationship to User
+    user = relationship("User", backref="competitor_entities")
+    
+    # Relationship to CompetitorItems
+    items = relationship("CompetitorItem", cascade="all, delete-orphan")
+    
+    # Index for efficient user-specific queries
+    __table_args__ = (Index('idx_user_competitor', 'user_id', 'name'),)
+
+
 class CompetitorItem(Base):
     __tablename__ = "competitor_items"
     
     id = Column(Integer, primary_key=True, index=True)
-    competitor_name = Column(String, index=True)
+    competitor_id = Column(Integer, ForeignKey("competitor_entities.id"), nullable=False, index=True)
+    competitor_name = Column(String, index=True)  # Keep for backward compatibility during migration
     item_name = Column(String, index=True)
     description = Column(Text, nullable=True)
     category = Column(String, index=True)
@@ -99,8 +129,15 @@ class CompetitorItem(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
+    # Relationship to CompetitorEntity
+    # Foreign key reference to competitor (no back_populates to avoid circular reference)
+    # Use competitor_id to access the parent competitor
+    
     # Index for efficient batch queries
-    __table_args__ = (Index('idx_competitor_batch', 'competitor_name', 'batch_id'),)
+    __table_args__ = (
+        Index('idx_competitor_batch', 'competitor_name', 'batch_id'),
+        Index('idx_competitor_entity_batch', 'competitor_id', 'batch_id'),
+    )
 
 class ActionItem(Base):
     __tablename__ = "action_items"

@@ -20,6 +20,7 @@ from routers.profile import profile_router
 from routers.items import items_router
 from routers.price_history import price_history_router
 from routers.competitor_items import competitor_items_router
+from routers.competitor_entities import competitor_entities_router
 from routers.orders import orders_router
 from routers.dashboard import dashboard_router
 from routers.item_analytics import item_analytics_router
@@ -55,6 +56,7 @@ app.include_router(profile_router, prefix="/api/profile", tags=["Profile"])
 app.include_router(items_router, prefix="/api/items", tags=["Items"])
 app.include_router(price_history_router, prefix="/api/price-history", tags=["Price History"])
 app.include_router(competitor_items_router, prefix="/api/competitor-items", tags=["Competitor Items"])
+app.include_router(competitor_entities_router, prefix="/api/competitor-entities", tags=["Competitor Entities"])
 app.include_router(orders_router, prefix="/api/orders", tags=["Orders"])
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(item_analytics_router, prefix="/api/item-analytics", tags=["Item Analytics"])

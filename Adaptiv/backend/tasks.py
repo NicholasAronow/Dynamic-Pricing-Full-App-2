@@ -1476,47 +1476,276 @@ def get_csv_generation_status(task_id: str):
         }
 
 
-@celery_app.task
+@celery_app.task(name="adaptiv.tasks.cleanup_old_csv_files")
 def cleanup_old_csv_files():
     """
     Clean up CSV files older than 24 hours to prevent disk space issues
     """
-    import os
-    import time
-    from datetime import datetime, timedelta
-    
     try:
-        exports_dir = "/tmp/csv_exports"
-        if not os.path.exists(exports_dir):
-            return {"message": "No exports directory found"}
+        logger.info("Starting CSV file cleanup")
         
-        # Remove files older than 24 hours
-        cutoff_time = time.time() - (24 * 60 * 60)  # 24 hours ago
-        removed_count = 0
+        # Get the CSV directory
+        csv_dir = os.path.join(os.path.dirname(__file__), "static", "csv")
         
-        for filename in os.listdir(exports_dir):
-            file_path = os.path.join(exports_dir, filename)
-            if os.path.isfile(file_path):
-                file_mtime = os.path.getmtime(file_path)
-                if file_mtime < cutoff_time:
-                    try:
-                        os.remove(file_path)
-                        removed_count += 1
-                        logger.info(f"Removed old CSV file: {filename}")
-                    except Exception as e:
-                        logger.error(f"Failed to remove CSV file {filename}: {str(e)}")
+        if not os.path.exists(csv_dir):
+            logger.info("CSV directory does not exist, nothing to clean up")
+            return {"status": "success", "message": "No CSV directory found"}
         
-        logger.info(f"CSV cleanup completed. Removed {removed_count} old files.")
+        # Calculate cutoff time (24 hours ago)
+        cutoff_time = datetime.now() - timedelta(hours=24)
+        
+        files_deleted = 0
+        total_size_freed = 0
+        
+        # Iterate through all files in the CSV directory
+        for filename in os.listdir(csv_dir):
+            file_path = os.path.join(csv_dir, filename)
+            
+            # Skip if it's not a file
+            if not os.path.isfile(file_path):
+                continue
+            
+            # Check file modification time
+            file_mtime = datetime.fromtimestamp(os.path.getmtime(file_path))
+            
+            if file_mtime < cutoff_time:
+                try:
+                    file_size = os.path.getsize(file_path)
+                    os.remove(file_path)
+                    files_deleted += 1
+                    total_size_freed += file_size
+                    logger.info(f"Deleted old CSV file: {filename}")
+                except Exception as e:
+                    logger.error(f"Failed to delete file {filename}: {e}")
+        
+        logger.info(f"CSV cleanup completed: {files_deleted} files deleted, {total_size_freed} bytes freed")
+        
         return {
-            "success": True,
-            "removed_count": removed_count,
-            "message": f"Cleaned up {removed_count} old CSV files"
+            "status": "success",
+            "files_deleted": files_deleted,
+            "bytes_freed": total_size_freed
         }
         
     except Exception as e:
-        logger.exception(f"Error during CSV cleanup: {str(e)}")
+        logger.error(f"Error during CSV cleanup: {e}")
         return {
-            "success": False,
-            "error": str(e),
-            "message": f"CSV cleanup failed: {str(e)}"
+            "status": "error",
+            "error": str(e)
+        }
+
+
+@celery_app.task(name="adaptiv.tasks.scrape_competitor_task", bind=True)
+def scrape_competitor_task(self, restaurant_name: str, location: str, user_id: int) -> Dict[str, Any]:
+    """
+    Celery task to scrape competitor menu data in the background
+    
+    Args:
+        restaurant_name: Name of the restaurant to scrape
+        location: Location/address of the restaurant
+        user_id: ID of the user making the request
+        
+    Returns:
+        Dictionary with scraping results
+    """
+    import subprocess
+    
+    try:
+        logger.info(f"Starting competitor scraping task {self.request.id} for user {user_id}")
+        
+        # Update task state to PROGRESS
+        self.update_state(
+            state='PROGRESS',
+            meta={
+                'status': 'Starting scraper...',
+                'restaurant_name': restaurant_name,
+                'location': location
+            }
+        )
+        
+        # Get the path to the competitor_analysis directory
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        scraper_dir = os.path.join(current_dir, "competitor_analysis")
+        scraper_script = os.path.join(scraper_dir, "restaurant_menu_scraper.py")
+        
+        if not os.path.exists(scraper_script):
+            error_msg = f"Scraper script not found at {scraper_script}"
+            logger.error(error_msg)
+            return {
+                'status': 'error',
+                'error': error_msg,
+                'success': False
+            }
+        
+        # Prepare the command with user_id
+        cmd = [
+            "python3",
+            scraper_script,
+            restaurant_name,
+            "--location", location,
+            "--use-competitor-db",
+            "--user-id", str(user_id),
+            "--log-level", "INFO"
+        ]
+        
+        # Update task state
+        self.update_state(
+            state='PROGRESS',
+            meta={
+                'status': 'Running scraper...',
+                'restaurant_name': restaurant_name,
+                'location': location
+            }
+        )
+        
+        # Execute the scraper
+        logger.info(f"🚀 Starting scraper for user {user_id} with command: {' '.join(cmd)}")
+        logger.info(f"📁 Working directory: {scraper_dir}")
+        logger.info(f"🏪 Restaurant: {restaurant_name}")
+        logger.info(f"📍 Location: {location}")
+        
+        result = subprocess.run(
+            cmd,
+            cwd=scraper_dir,
+            capture_output=True,
+            text=True,
+            timeout=600  # 10 minute timeout for background task
+        )
+        
+        logger.info(f"📤 Scraper return code: {result.returncode}")
+        logger.info(f"📝 Scraper stdout length: {len(result.stdout)} chars")
+        logger.info(f"❌ Scraper stderr length: {len(result.stderr)} chars")
+        
+        if result.returncode != 0:
+            error_msg = f"Scraper failed with return code {result.returncode}"
+            logger.error(f"❌ {error_msg}")
+            logger.error(f"❌ Stderr: {result.stderr}")
+            logger.error(f"❌ Stdout: {result.stdout}")
+            return {
+                'status': 'error',
+                'error': f"{error_msg}: {result.stderr}",
+                'success': False,
+                'message': 'Failed to scrape competitor data'
+            }
+        
+        # Parse the output to extract success information
+        output = result.stdout
+        stderr = result.stderr
+        
+        logger.info(f"📋 Full scraper stdout:\n{output}")
+        if stderr:
+            logger.info(f"📋 Full scraper stderr:\n{stderr}")
+        
+        # Look for success indicators in the output
+        if "✅ Successfully scraped" in output:
+            # Try to extract competitor ID and items count from output
+            competitor_id = None
+            items_added = 0
+            
+            lines = output.split('\n')
+            for line in lines:
+                if "🆔 Competitor ID:" in line:
+                    try:
+                        competitor_id = int(line.split(":")[-1].strip())
+                    except (ValueError, IndexError):
+                        pass
+                elif "📍 Found" in line and "menu items" in line:
+                    try:
+                        items_added = int(line.split("Found")[1].split("menu items")[0].strip())
+                    except (ValueError, IndexError):
+                        pass
+            
+            logger.info(f"✅ Scraping completed successfully for {restaurant_name}")
+            return {
+                'status': 'completed',
+                'success': True,
+                'competitor_id': competitor_id,
+                'items_added': items_added,
+                'message': f"Successfully scraped {restaurant_name}",
+                'restaurant_name': restaurant_name,
+                'location': location
+            }
+        else:
+            logger.warning(f"⚠️ Scraping completed but no data found for {restaurant_name}")
+            return {
+                'status': 'completed',
+                'success': False,
+                'message': 'Scraping completed but no data was found',
+                'error': 'No menu items were extracted',
+                'restaurant_name': restaurant_name,
+                'location': location
+            }
+            
+    except subprocess.TimeoutExpired:
+        error_msg = "Scraper timed out after 10 minutes"
+        logger.error(error_msg)
+        return {
+            'status': 'error',
+            'error': error_msg,
+            'success': False,
+            'message': 'Scraping timed out'
+        }
+    except Exception as e:
+        error_msg = f"Unexpected error during scraping: {str(e)}"
+        logger.error(error_msg)
+        return {
+            'status': 'error',
+            'error': error_msg,
+            'success': False,
+            'message': 'Internal server error'
+        }
+
+
+@celery_app.task(name="adaptiv.tasks.get_competitor_scrape_status")
+def get_competitor_scrape_status(task_id: str, user_id: int) -> Dict[str, Any]:
+    """
+    Check the status of a competitor scraping task
+    
+    Args:
+        task_id: The Celery task ID to check
+        user_id: ID of the user making the request
+        
+    Returns:
+        Dictionary with task status information
+    """
+    try:
+        logger.info(f"Checking status for competitor scrape task {task_id} (user {user_id})")
+        
+        # Get the task result
+        task_result = celery_app.AsyncResult(task_id)
+        
+        if task_result.state == 'PENDING':
+            return {
+                'status': 'pending',
+                'message': 'Task is waiting to be processed'
+            }
+        elif task_result.state == 'PROGRESS':
+            return {
+                'status': 'progress',
+                'message': 'Task is currently running',
+                'meta': task_result.info
+            }
+        elif task_result.state == 'SUCCESS':
+            result = task_result.result
+            return {
+                'status': 'success',
+                'result': result
+            }
+        elif task_result.state == 'FAILURE':
+            return {
+                'status': 'error',
+                'error': str(task_result.info),
+                'message': 'Task failed with an error'
+            }
+        else:
+            return {
+                'status': task_result.state.lower(),
+                'message': f'Task is in {task_result.state} state'
+            }
+            
+    except Exception as e:
+        logger.error(f"Error checking competitor scrape task status: {e}")
+        return {
+            'status': 'error',
+            'error': str(e),
+            'message': 'Failed to check task status'
         }

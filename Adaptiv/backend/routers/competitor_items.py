@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from config.database import get_db
 import models, schemas
@@ -9,21 +9,34 @@ competitor_items_router = APIRouter()
 
 @competitor_items_router.get("/", response_model=List[schemas.CompetitorItem])
 def get_competitor_items(
+    competitor_id: Optional[int] = None,
     competitor_name: Optional[str] = None,
     category: Optional[str] = None,
     skip: int = 0, 
     limit: int = 100, 
-    db: Session = Depends(get_db)
-    # Temporarily removed authentication for testing
-    # current_user: models.User = Depends(get_current_user)
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
 ):
     """
-    Get all competitor items, with optional filters
+    Get all competitor items for the current user, with optional filters
     """
-    query = db.query(models.CompetitorItem)
+    # Base query with user filtering through competitor entity relationship
+    query = db.query(models.CompetitorItem).join(
+        models.CompetitorEntity,
+        models.CompetitorItem.competitor_id == models.CompetitorEntity.id
+    ).filter(
+        models.CompetitorEntity.user_id == current_user.id
+    )
+    
+    if competitor_id:
+        query = query.filter(models.CompetitorItem.competitor_id == competitor_id)
     
     if competitor_name:
-        query = query.filter(models.CompetitorItem.competitor_name == competitor_name)
+        # Support both new and legacy filtering
+        query = query.filter(
+            (models.CompetitorItem.competitor_name == competitor_name) |
+            (models.CompetitorEntity.name == competitor_name)
+        )
         
     if category:
         query = query.filter(models.CompetitorItem.category == category)
@@ -37,9 +50,16 @@ def get_competitor_item(
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Get a specific competitor item by ID
+    Get a specific competitor item by ID (with user authorization)
     """
-    competitor_item = db.query(models.CompetitorItem).filter(models.CompetitorItem.id == competitor_item_id).first()
+    competitor_item = db.query(models.CompetitorItem).join(
+        models.CompetitorEntity,
+        models.CompetitorItem.competitor_id == models.CompetitorEntity.id
+    ).filter(
+        models.CompetitorItem.id == competitor_item_id,
+        models.CompetitorEntity.user_id == current_user.id
+    ).first()
+    
     if competitor_item is None:
         raise HTTPException(status_code=404, detail="Competitor item not found")
     return competitor_item
@@ -53,6 +73,15 @@ def create_competitor_item(
     """
     Create a new competitor item
     """
+    # Verify competitor_id belongs to current user if provided
+    if competitor_item.competitor_id:
+        competitor = db.query(models.CompetitorEntity).filter(
+            models.CompetitorEntity.id == competitor_item.competitor_id,
+            models.CompetitorEntity.user_id == current_user.id
+        ).first()
+        if not competitor:
+            raise HTTPException(status_code=404, detail="Competitor entity not found")
+    
     db_competitor_item = models.CompetitorItem(**competitor_item.dict())
     db.add(db_competitor_item)
     db.commit()

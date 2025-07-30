@@ -1,5 +1,5 @@
 # Models package
-from .core import User, BusinessProfile, Item, PriceHistory, CompetitorItem, ActionItem, COGS, FixedCost, Employee
+from .core import User, BusinessProfile, Item, PriceHistory, CompetitorEntity, CompetitorItem, ActionItem, COGS, FixedCost, Employee
 from .orders import Order, OrderItem
 from .agents import (
     CompetitorReport, CustomerReport, MarketReport, PricingReport, 
@@ -14,7 +14,7 @@ from .integrations import POSIntegration
 
 __all__ = [
     # Core models
-    'User', 'BusinessProfile', 'Item', 'PriceHistory', 'CompetitorItem', 
+    'User', 'BusinessProfile', 'Item', 'PriceHistory', 'CompetitorEntity', 'CompetitorItem', 
     'ActionItem', 'COGS', 'FixedCost', 'Employee',
     
     # Order models

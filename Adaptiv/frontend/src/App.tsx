@@ -12,8 +12,8 @@ import Dashboard from './components/dashboard/Dashboard';
 import BusinessProfile from './components/profile/BusinessProfile';
 import MainLayout from './components/layout/MainLayout';
 import PriceRecommendations from './components/menu/PriceRecommendations';
-import CompetitorDetail from './components/competitor/CompetitorDetail';
-import Competitors from './components/competitor/Competitors';
+import CompetitorDetail from 'components/competitor/CompetitorDetail';
+import CompetitorEntities from './components/competitor/CompetitorEntities';
 import ProductDetail from './components/products/ProductDetail';
 import DynamicPricingAgents from './components/agents/DynamicPricingAgents';
 import Costs from './components/costs/Costs';
@@ -93,8 +93,8 @@ function App() {
               <Route path="profile" element={<BusinessProfile />} />
               <Route path="price-recommendations" element={<PriceRecommendations />} />
               <Route path="costs" element={<Costs />} />
-              <Route path="competitors" element={<Competitors />} />
-              <Route path="competitor/:competitorId" element={<CompetitorDetail />} />
+              <Route path="competitors" element={<CompetitorEntities />} />
+              <Route path="competitor/:id" element={<CompetitorDetail />} />
               <Route path="product/:productId" element={<ProductDetail />} />
               <Route path="agents" element={<DynamicPricingAgents />} />              
               {/* Subscription Management Routes */}
