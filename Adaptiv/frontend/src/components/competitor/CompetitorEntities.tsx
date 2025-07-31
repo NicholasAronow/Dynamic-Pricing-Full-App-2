@@ -228,6 +228,23 @@ const CompetitorEntities: React.FC = () => {
     }
   };
 
+  // Cancel specific scraping task
+  const cancelScrapingTask = (taskId: string, restaurantName: string) => {
+    try {
+      // Remove from localStorage and state
+      removePendingTask(taskId);
+      
+      // Show cancellation message
+      message.warning(`Cancelled scraping for ${restaurantName}`);
+      
+      // Note: We can't actually cancel the backend task, but we stop tracking it
+      // The backend task will continue but we won't show it in the UI anymore
+    } catch (error) {
+      console.error('Error cancelling scraping task:', error);
+      message.error('Failed to cancel scraping task');
+    }
+  };
+
   // Handle create/update competitor
   const handleSaveCompetitor = async (values: CompetitorEntityCreate | CompetitorEntityUpdate) => {
     try {
@@ -578,11 +595,21 @@ const CompetitorEntities: React.FC = () => {
         if (record.isLoading) {
           return (
             <Space>
-              <Tooltip title="Scraping in progress...">
+              <Tooltip title="Cancel scraping">
+                <Button
+                  type="text"
+                  danger
+                  icon={<CloseCircleOutlined />}
+                  onClick={() => cancelScrapingTask(record.taskId, record.name)}
+                  size="small"
+                  style={{ 
+                    color: '#ff4d4f',
+                    fontSize: '12px'
+                  }}
+                >
+                  Cancel
+                </Button>
               </Tooltip>
-              <Text type="secondary" style={{ fontStyle: 'italic' }}>
-                Please wait...
-              </Text>
             </Space>
           );
         }
