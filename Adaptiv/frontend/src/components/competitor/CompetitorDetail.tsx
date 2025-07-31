@@ -457,7 +457,8 @@ const CompetitorDetail: React.FC = () => {
                         borderRadius: '6px',
                         padding: '4px 12px',
                         fontSize: '13px',
-                        fontWeight: '500'
+                        fontWeight: '500',
+                        color: '#0B552A',
                       }}
                     >
                       <CheckCircleOutlined /> Tracking Active
