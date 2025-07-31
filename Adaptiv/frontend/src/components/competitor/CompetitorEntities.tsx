@@ -64,7 +64,15 @@ const CompetitorEntities: React.FC = () => {
   const [scrapingLoading, setScrapingLoading] = useState<boolean>(false);
   const [scrapingModalVisible, setScrapingModalVisible] = useState<boolean>(false);
   const [scrapeForm] = Form.useForm();
-  const { user } = useAuth(); // Add this line
+  const { user } = useAuth();
+  
+  // Loading competitors state - for showing loading rows during scraping
+  const [loadingCompetitors, setLoadingCompetitors] = useState<Map<string, {
+    taskId: string;
+    name: string;
+    location?: string;
+    startTime: number;
+  }>>(new Map());
 
   // Summary statistics
   const [summary, setSummary] = useState({
@@ -129,7 +137,96 @@ const CompetitorEntities: React.FC = () => {
   useEffect(() => {
     loadCompetitors();
     loadSummary();
+    // Check for any pending scraping tasks on component mount
+    checkPendingScrapingTasks();
   }, []);
+
+  // Check for pending scraping tasks from localStorage
+  const checkPendingScrapingTasks = () => {
+    try {
+      const pendingTasks = localStorage.getItem('pendingScrapingTasks');
+      if (pendingTasks) {
+        const tasks = JSON.parse(pendingTasks);
+        const loadingMap = new Map();
+        
+        Object.entries(tasks).forEach(([taskId, taskData]: [string, any]) => {
+          // Check if task is not too old (max 10 minutes)
+          const maxAge = 10 * 60 * 1000; // 10 minutes
+          if (Date.now() - taskData.startTime < maxAge) {
+            loadingMap.set(taskId, taskData);
+            // Resume polling for this task
+            pollScrapeStatus(taskId, taskData.name, false);
+          }
+        });
+        
+        setLoadingCompetitors(loadingMap);
+        
+        // Clean up old tasks from localStorage
+        if (loadingMap.size === 0) {
+          localStorage.removeItem('pendingScrapingTasks');
+        } else {
+          const activeTasks: any = {};
+          loadingMap.forEach((value, key) => {
+            activeTasks[key] = value;
+          });
+          localStorage.setItem('pendingScrapingTasks', JSON.stringify(activeTasks));
+        }
+      }
+    } catch (error) {
+      console.error('Error checking pending scraping tasks:', error);
+      localStorage.removeItem('pendingScrapingTasks');
+    }
+  };
+
+  // Save pending task to localStorage
+  const savePendingTask = (taskId: string, name: string, location?: string) => {
+    try {
+      const pendingTasks = JSON.parse(localStorage.getItem('pendingScrapingTasks') || '{}');
+      pendingTasks[taskId] = {
+        taskId,
+        name,
+        location,
+        startTime: Date.now()
+      };
+      localStorage.setItem('pendingScrapingTasks', JSON.stringify(pendingTasks));
+    } catch (error) {
+      console.error('Error saving pending task:', error);
+    }
+  };
+
+  // Remove completed task from localStorage and state
+  const removePendingTask = (taskId: string) => {
+    try {
+      const pendingTasks = JSON.parse(localStorage.getItem('pendingScrapingTasks') || '{}');
+      delete pendingTasks[taskId];
+      
+      if (Object.keys(pendingTasks).length === 0) {
+        localStorage.removeItem('pendingScrapingTasks');
+      } else {
+        localStorage.setItem('pendingScrapingTasks', JSON.stringify(pendingTasks));
+      }
+      
+      // Remove from state
+      setLoadingCompetitors(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(taskId);
+        return newMap;
+      });
+    } catch (error) {
+      console.error('Error removing pending task:', error);
+    }
+  };
+
+  // Manual cleanup function for stuck loading states
+  const clearAllLoadingStates = () => {
+    try {
+      localStorage.removeItem('pendingScrapingTasks');
+      setLoadingCompetitors(new Map());
+      message.info('Cleared all loading states');
+    } catch (error) {
+      console.error('Error clearing loading states:', error);
+    }
+  };
 
   // Handle create/update competitor
   const handleSaveCompetitor = async (values: CompetitorEntityCreate | CompetitorEntityUpdate) => {
@@ -211,12 +308,31 @@ const CompetitorEntities: React.FC = () => {
       console.log('Scrape task started:', response);
       
       if (response.task_id) {
-        message.info(`Started scraping ${values.restaurant_name}. Please wait...`);
+        // Immediately add loading competitor to the table
+        const taskData = {
+          taskId: response.task_id,
+          name: values.restaurant_name,
+          location: values.location,
+          startTime: Date.now()
+        };
         
-        // Poll for task completion
-        await pollScrapeStatus(response.task_id, values.restaurant_name);
+        setLoadingCompetitors(prev => new Map(prev.set(response.task_id, taskData)));
+        savePendingTask(response.task_id, values.restaurant_name, values.location);
+        
+        message.success(`Started scraping ${values.restaurant_name}. A loading row has been added to the table.`);
+        
+        // Close the modal immediately
+        setScrapingModalVisible(false);
+        scrapeForm.resetFields();
+        setScrapingLoading(false);
+        
+        // Start polling in the background (non-blocking)
+        pollScrapeStatus(response.task_id, values.restaurant_name, true).catch(error => {
+          console.error('Polling error:', error);
+        });
       } else {
         message.error('Failed to start scraping task');
+        setScrapingLoading(false);
       }
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || 'Failed to start scraping task';
@@ -226,7 +342,7 @@ const CompetitorEntities: React.FC = () => {
   };
 
   // Poll for scraping task status
-  const pollScrapeStatus = async (taskId: string, restaurantName: string) => {
+  const pollScrapeStatus = async (taskId: string, restaurantName: string, isNewTask: boolean = false) => {
     const maxAttempts = 60; // 5 minutes with 5-second intervals
     let attempts = 0;
     
@@ -235,45 +351,48 @@ const CompetitorEntities: React.FC = () => {
         attempts++;
         const statusResponse = await competitorEntityService.getScrapeStatus(taskId);
         
-        console.log(`Polling attempt ${attempts}:`, statusResponse);
+
         
-        if (statusResponse.status === 'SUCCESS' && statusResponse.result) {
+        const status = statusResponse.status?.toLowerCase();
+        
+        if (status === 'success' && statusResponse.result) {
           // Task completed successfully
           if (statusResponse.result.success) {
             message.success(
               `Successfully scraped ${restaurantName}! Found ${statusResponse.result.items_added} menu items.`
             );
-            setScrapingModalVisible(false);
-            scrapeForm.resetFields();
             
-            // Refresh the data
+            // Remove from pending tasks
+            removePendingTask(taskId);
+            
+            // Refresh the data to show the new competitor
             setTimeout(async () => {
               await loadCompetitors();
               await loadSummary();
             }, 500);
           } else {
-            message.error(statusResponse.result.error || 'Scraping failed');
+            message.error(statusResponse.result.error || `Scraping failed for ${restaurantName}`);
+            removePendingTask(taskId);
           }
-          setScrapingLoading(false);
-        } else if (statusResponse.status === 'FAILURE') {
+        } else if (status === 'failure') {
           // Task failed
-          message.error(statusResponse.error || 'Scraping task failed');
-          setScrapingLoading(false);
-        } else if (statusResponse.status === 'PENDING' || statusResponse.status === 'PROGRESS') {
+          message.error(statusResponse.error || `Scraping task failed for ${restaurantName}`);
+          removePendingTask(taskId);
+        } else if (status === 'pending' || status === 'progress') {
           // Task still running, continue polling
           if (attempts < maxAttempts) {
             setTimeout(poll, 5000); // Poll every 5 seconds
           } else {
-            message.warning('Scraping is taking longer than expected. Please check back later.');
-            setScrapingLoading(false);
+            message.warning(`Scraping ${restaurantName} is taking longer than expected. The task will continue in the background.`);
+            // Don't remove the pending task - it might still complete
           }
         } else {
           // Unknown status, continue polling for a bit
           if (attempts < maxAttempts) {
             setTimeout(poll, 5000);
           } else {
-            message.error('Scraping task status unknown. Please try again.');
-            setScrapingLoading(false);
+            message.error(`Scraping task status unknown for ${restaurantName}. Please check back later.`);
+            // Don't remove the pending task - it might still be running
           }
         }
       } catch (error: any) {
@@ -281,14 +400,14 @@ const CompetitorEntities: React.FC = () => {
         if (attempts < maxAttempts) {
           setTimeout(poll, 5000); // Continue polling on error
         } else {
-          message.error('Failed to check scraping status. Please try again.');
-          setScrapingLoading(false);
+          message.error(`Failed to check scraping status for ${restaurantName}. Please try again later.`);
+          // Don't remove the pending task on network errors
         }
       }
     };
     
     // Start polling after a short delay
-    setTimeout(poll, 2000);
+    setTimeout(poll, isNewTask ? 2000 : 1000);
   };
 
   // Open modal for scraping new competitor
@@ -318,119 +437,226 @@ const CompetitorEntities: React.FC = () => {
     setModalVisible(true);
   };
 
+  // Create combined data source with loading competitors
+  const getCombinedDataSource = () => {
+    const loadingRows = Array.from(loadingCompetitors.entries()).map(([taskId, taskData]) => ({
+      id: `loading-${taskId}`,
+      name: taskData.name,
+      address: taskData.location || 'Scraping location...',
+      category: 'Scraping data...',
+      website: null,
+      is_selected: false,
+      created_at: new Date().toISOString(),
+      updated_at: null,
+      isLoading: true,
+      taskId: taskId,
+      startTime: taskData.startTime
+    }));
+    
+    return [...loadingRows, ...competitors];
+  };
+
   // Table columns
   const columns = [
     {
       title: 'Name',
       dataIndex: 'name',
       key: 'name',
-      render: (text: string, record: CompetitorEntity) => (
-        <Space>
-          <Text strong>{text}</Text>
-          {record.is_selected && (
-            <Tag color="green" icon={<CheckCircleOutlined />}>
-            </Tag>
-          )}
-        </Space>
+      width: 250,
+      render: (text: string, record: any) => (
+        <div style={{ 
+          minWidth: '200px',
+          wordWrap: 'break-word',
+          wordBreak: 'break-word',
+          whiteSpace: 'normal',
+          lineHeight: '1.4'
+        }}>
+          <Space wrap>
+            {record.isLoading ? (
+              <Space wrap>
+                <div 
+                  style={{
+                    width: '16px',
+                    height: '16px',
+                    border: '2px solid #f3f3f3',
+                    borderTop: '2px solid #1890ff',
+                    borderRadius: '50%',
+                    animation: 'spin 1s linear infinite',
+                    display: 'inline-block',
+                    flexShrink: 0
+                  }}
+                />
+                <Text strong style={{ 
+                  color: '#1890ff',
+                  wordWrap: 'break-word',
+                  wordBreak: 'break-word'
+                }}>
+                  {text}
+                </Text>
+              </Space>
+            ) : (
+              <Space wrap>
+                <Text strong style={{
+                  wordWrap: 'break-word',
+                  wordBreak: 'break-word'
+                }}>
+                  {text}
+                </Text>
+                {record.is_selected && (
+                  <Tag color="green" icon={<CheckCircleOutlined />}>
+                  </Tag>
+                )}
+              </Space>
+            )}
+          </Space>
+        </div>
       ),
     },
     {
       title: 'Website',
       dataIndex: 'website',
       key: 'website',
-      render: (website: string) => website ? (
-        <a href={website} target="_blank" rel="noopener noreferrer">
-          <LinkOutlined /> {website}
-        </a>
-      ) : (
-        <Text type="secondary">Not provided</Text>
-      ),
+      render: (website: string, record: any) => {
+        if (record.isLoading) {
+          return <Text type="secondary" style={{ fontStyle: 'italic' }}>Extracting website...</Text>;
+        }
+        return website ? (
+          <a href={website} target="_blank" rel="noopener noreferrer">
+            <LinkOutlined /> {website}
+          </a>
+        ) : (
+          <Text type="secondary">Not provided</Text>
+        );
+      },
     },
     {
       title: 'Location',
       dataIndex: 'address',
       key: 'address',
-      render: (address: string) => address || (
-        <Text type="secondary">No address</Text>
-      ),
+      render: (address: string, record: any) => {
+        if (record.isLoading) {
+          return <Text type="secondary" style={{ fontStyle: 'italic' }}>{address}</Text>;
+        }
+        return address || (
+          <Text type="secondary">No address</Text>
+        );
+      },
     },
     {
       title: 'Category',
       dataIndex: 'category',
       key: 'category',
-      render: (category: string) => category || (
-        <Text type="secondary">No category</Text>
-      ),
+      render: (category: string, record: any) => {
+        if (record.isLoading) {
+          return <Text type="secondary" style={{ fontStyle: 'italic' }}>{category}</Text>;
+        }
+        return category || (
+          <Text type="secondary">No category</Text>
+        );
+      },
     },
     {
       title: 'Created',
       dataIndex: 'created_at',
       key: 'created_at',
-      render: (date: string) => moment(date).format('MMM DD, YYYY'),
+      render: (date: string, record: any) => {
+        if (record.isLoading) {
+          const elapsed = Math.floor((Date.now() - record.startTime) / 1000);
+          return (
+            <Text type="secondary" style={{ fontStyle: 'italic' }}>
+              Scraping for {elapsed}s...
+            </Text>
+          );
+        }
+        return moment(date).format('MMM DD, YYYY');
+      },
     },
     {
       title: 'Actions',
       key: 'actions',
-      render: (_: any, record: CompetitorEntity) => (
-        <Space>
-          <Tooltip title="View Statistics">
-            <Button
-              type="text"
-              icon={<BarChartOutlined />}
-              onClick={() => handleViewStats(record)}
-            />
-          </Tooltip>
-          
-          <Tooltip title="View Items">
-            <Button
-              type="text"
-              icon={<EyeOutlined />}
-              onClick={() => navigate(`/competitor/${record.id}`)}
-            />
-          </Tooltip>
-          
-          <Tooltip title={record.is_selected ? "Stop Tracking" : "Start Tracking"}>
-            <Button
-              type="text"
-              icon={record.is_selected ? <CloseCircleOutlined /> : <CheckCircleOutlined />}
-              onClick={() => handleToggleSelection(record)}
-            />
-          </Tooltip>
-          
-          <Tooltip title="Edit">
-            <Button
-              type="text"
-              icon={<EditOutlined />}
-              onClick={() => handleEditCompetitor(record)}
-            />
-          </Tooltip>
-          
-          <Popconfirm
-            title="Are you sure you want to delete this competitor?"
-            description="This will also delete all associated competitor items."
-            onConfirm={() => handleDeleteCompetitor(record.id)}
-            okText="Yes"
-            cancelText="No"
-          >
-            <Tooltip title="Delete">
+      render: (_: any, record: any) => {
+        if (record.isLoading) {
+          return (
+            <Space>
+              <Tooltip title="Scraping in progress...">
+              </Tooltip>
+              <Text type="secondary" style={{ fontStyle: 'italic' }}>
+                Please wait...
+              </Text>
+            </Space>
+          );
+        }
+        
+        return (
+          <Space>
+            <Tooltip title="View Statistics">
               <Button
                 type="text"
-                danger
-                icon={<DeleteOutlined />}
+                icon={<BarChartOutlined />}
+                onClick={() => handleViewStats(record)}
               />
             </Tooltip>
-          </Popconfirm>
-        </Space>
-      ),
+            
+            <Tooltip title="View Items">
+              <Button
+                type="text"
+                icon={<EyeOutlined />}
+                onClick={() => navigate(`/competitor/${record.id}`)}
+              />
+            </Tooltip>
+            
+            <Tooltip title={record.is_selected ? "Stop Tracking" : "Start Tracking"}>
+              <Button
+                type="text"
+                icon={record.is_selected ? <CloseCircleOutlined /> : <CheckCircleOutlined />}
+                onClick={() => handleToggleSelection(record)}
+              />
+            </Tooltip>
+            
+            <Tooltip title="Edit">
+              <Button
+                type="text"
+                icon={<EditOutlined />}
+                onClick={() => handleEditCompetitor(record)}
+              />
+            </Tooltip>
+            
+            <Popconfirm
+              title="Are you sure you want to delete this competitor?"
+              description="This will also delete all associated competitor items."
+              onConfirm={() => handleDeleteCompetitor(record.id)}
+              okText="Yes"
+              cancelText="No"
+            >
+              <Tooltip title="Delete">
+                <Button
+                  type="text"
+                  danger
+                  icon={<DeleteOutlined />}
+                />
+              </Tooltip>
+            </Popconfirm>
+          </Space>
+        );
+      },
     },
   ];
 
   return (
-    <div style={{ 
-      padding: '0px 0px',
-      background: '#fafbfc',
-      minHeight: '100vh'
-    }}>
+    <>
+      <style>
+        {`
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `}
+      </style>
+      <div style={{ 
+        padding: '0px 0px',
+        background: '#fafbfc',
+        minHeight: '100vh'
+      }}>
       <div style={{ 
         maxWidth: '100vw', 
         margin: '0 auto' 
@@ -688,7 +914,7 @@ const CompetitorEntities: React.FC = () => {
         }}>
           <Table
             columns={columns}
-            dataSource={competitors}
+            dataSource={getCombinedDataSource()}
             rowKey="id"
             loading={loading}
             style={{
@@ -1220,6 +1446,7 @@ const CompetitorEntities: React.FC = () => {
         </Modal>
       </div>
     </div>
+    </>
   );
 };
 
