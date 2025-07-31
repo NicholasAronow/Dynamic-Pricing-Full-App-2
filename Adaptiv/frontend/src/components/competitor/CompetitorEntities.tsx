@@ -519,8 +519,11 @@ const CompetitorEntities: React.FC = () => {
                 }}>
                   {text}
                 </Text>
-                {record.is_selected && (
+                {record.is_selected? (
                   <Tag color="green" icon={<CheckCircleOutlined />}>
+                  </Tag>
+                ) : (
+                  <Tag color="red" icon={<CloseCircleOutlined />}>
                   </Tag>
                 )}
               </Space>
