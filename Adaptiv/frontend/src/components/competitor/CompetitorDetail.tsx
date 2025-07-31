@@ -247,7 +247,7 @@ const CompetitorDetail: React.FC = () => {
       <div style={{ padding: '20px' }}>
         <Button 
           icon={<ArrowLeftOutlined />} 
-          onClick={() => navigate('/competitor-analysis')}
+          onClick={() => navigate('/competitors')}
           style={{ marginBottom: '20px' }}
         >
           Back to Competitor Analysis
@@ -343,7 +343,7 @@ const CompetitorDetail: React.FC = () => {
         {/* Navigation */}
         <Button 
           icon={<ArrowLeftOutlined />} 
-          onClick={() => navigate('/competitor-analysis')}
+          onClick={() => navigate('/competitors')}
           style={{ 
             marginBottom: '32px',
             background: '#fff',

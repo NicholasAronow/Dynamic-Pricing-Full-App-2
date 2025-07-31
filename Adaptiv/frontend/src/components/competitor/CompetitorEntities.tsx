@@ -480,6 +480,7 @@ const CompetitorEntities: React.FC = () => {
       dataIndex: 'name',
       key: 'name',
       width: 250,
+      fixed: 'left' as const,
       render: (text: string, record: any) => (
         <div style={{ 
           minWidth: '200px',
@@ -536,6 +537,8 @@ const CompetitorEntities: React.FC = () => {
       title: 'Website',
       dataIndex: 'website',
       key: 'website',
+      width: 200,
+      ellipsis: true,
       render: (website: string, record: any) => {
         if (record.isLoading) {
           return <Text type="secondary" style={{ fontStyle: 'italic' }}>Extracting website...</Text>;
@@ -553,6 +556,8 @@ const CompetitorEntities: React.FC = () => {
       title: 'Location',
       dataIndex: 'address',
       key: 'address',
+      width: 180,
+      ellipsis: true,
       render: (address: string, record: any) => {
         if (record.isLoading) {
           return <Text type="secondary" style={{ fontStyle: 'italic' }}>{address}</Text>;
@@ -566,6 +571,7 @@ const CompetitorEntities: React.FC = () => {
       title: 'Category',
       dataIndex: 'category',
       key: 'category',
+      width: 120,
       render: (category: string, record: any) => {
         if (record.isLoading) {
           return <Text type="secondary" style={{ fontStyle: 'italic' }}>{category}</Text>;
@@ -579,6 +585,7 @@ const CompetitorEntities: React.FC = () => {
       title: 'Created',
       dataIndex: 'created_at',
       key: 'created_at',
+      width: 120,
       render: (date: string, record: any) => {
         if (record.isLoading) {
           const elapsed = Math.floor((Date.now() - record.startTime) / 1000);
@@ -594,6 +601,7 @@ const CompetitorEntities: React.FC = () => {
     {
       title: 'Actions',
       key: 'actions',
+      width: 200,
       render: (_: any, record: any) => {
         if (record.isLoading) {
           return (
@@ -947,6 +955,7 @@ const CompetitorEntities: React.FC = () => {
             dataSource={getCombinedDataSource()}
             rowKey="id"
             loading={loading}
+            scroll={{ x: 800 }}
             style={{
               fontSize: '12px',
               background: '#fff',
