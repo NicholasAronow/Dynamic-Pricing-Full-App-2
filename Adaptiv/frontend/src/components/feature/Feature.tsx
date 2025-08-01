@@ -15,7 +15,11 @@ import {
   Avatar,
   List,
   message,
-  Tooltip
+  Tooltip,
+  Layout,
+  Menu,
+  Dropdown,
+  Modal
 } from 'antd';
 import {
   ArrowUpOutlined,
@@ -26,7 +30,12 @@ import {
   SettingOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
-  LoadingOutlined
+  LoadingOutlined,
+  PlusOutlined,
+  MessageOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  MoreOutlined
 } from '@ant-design/icons';
 import { ReactComponent as AiSparkleIcon } from '../../assets/icons/ai_sparkle.svg';
 
@@ -35,9 +44,14 @@ import langgraphService, {
   ArchitectureInfo,
   MultiAgentRequest
 } from '../../services/langgraphService';
+import conversationService, {
+  Conversation,
+  ConversationMessage,
+} from '../../services/conversationService';
 
 const { Title, Paragraph, Text } = Typography;
 const { TextArea } = Input;
+const { Sider, Content } = Layout;
 
 interface ChatMessage {
   id: string;
@@ -46,7 +60,7 @@ interface ChatMessage {
   timestamp: Date;
   agentName?: string;
   isStreaming?: boolean;
-  toolsUsed?: { [agent: string]: string[] }; // Add this
+  toolsUsed?: { [agent: string]: string[] };
 }
 
 interface ChatState {
@@ -55,7 +69,11 @@ interface ChatState {
   currentInput: string;
   error: string | null;
   streamingMessageId?: string;
-  activeTools?: { [agent: string]: string[] }; // Add this
+  activeTools?: { [agent: string]: string[] };
+  currentConversationId?: number;
+  conversations: Conversation[];
+  conversationsLoading: boolean;
+  siderCollapsed: boolean;
 }
 
 const Feature: React.FC = () => {
@@ -64,7 +82,11 @@ const Feature: React.FC = () => {
     isLoading: false,
     currentInput: '',
     error: null,
-    activeTools: {} // Add this
+    activeTools: {},
+    currentConversationId: undefined,
+    conversations: [],
+    conversationsLoading: false,
+    siderCollapsed: false
   });
   
   const [architectures, setArchitectures] = useState<ArchitectureInfo[]>([]);
@@ -81,6 +103,7 @@ const Feature: React.FC = () => {
 
   useEffect(() => {
     loadArchitectures();
+    loadConversations();
   }, []);
 
   const loadArchitectures = async () => {
@@ -89,6 +112,107 @@ const Feature: React.FC = () => {
       setArchitectures(architectures);
     } catch (error) {
       console.error('Failed to load architectures:', error);
+    }
+  };
+
+  const loadConversations = async () => {
+    try {
+      setChatState(prev => ({ ...prev, conversationsLoading: true }));
+      const conversations = await conversationService.getConversations();
+      setChatState(prev => ({ 
+        ...prev, 
+        conversations,
+        conversationsLoading: false 
+      }));
+    } catch (error) {
+      console.error('Failed to load conversations:', error);
+      setChatState(prev => ({ ...prev, conversationsLoading: false }));
+    }
+  };
+
+  const createNewConversation = async () => {
+    try {
+      // Create conversation without title - will be generated after first message
+      const conversation = await conversationService.createConversation({});
+      setChatState(prev => ({
+        ...prev,
+        conversations: [conversation, ...prev.conversations],
+        currentConversationId: conversation.id,
+        messages: []
+      }));
+      return conversation;
+    } catch (error) {
+      console.error('Failed to create conversation:', error);
+      message.error('Failed to create new conversation');
+      return null;
+    }
+  };
+
+  const loadConversation = async (conversationId: number) => {
+    try {
+      setChatState(prev => ({ ...prev, isLoading: true }));
+      const conversationData = await conversationService.getConversation(conversationId);
+      
+      // Convert ConversationMessage to ChatMessage format
+      const messages: ChatMessage[] = conversationData.messages.map(msg => ({
+        id: msg.id.toString(),
+        role: msg.role,
+        content: msg.content,
+        timestamp: new Date(msg.created_at),
+        agentName: msg.agent_name || undefined,
+        toolsUsed: msg.tools_used ? { [msg.agent_name || 'unknown']: msg.tools_used } : undefined
+      }));
+      
+      setChatState(prev => ({
+        ...prev,
+        currentConversationId: conversationId,
+        messages,
+        isLoading: false
+      }));
+    } catch (error) {
+      console.error('Failed to load conversation:', error);
+      message.error('Failed to load conversation');
+      setChatState(prev => ({ ...prev, isLoading: false }));
+    }
+  };
+
+  const generateConversationTitle = async (firstMessage: string): Promise<string> => {
+    try {
+      // Simple LLM call to generate a title
+      const response = await fetch('/api/langgraph/generate-title', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ message: firstMessage })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        return data.title || conversationService.generateConversationTitle(firstMessage);
+      }
+    } catch (error) {
+      console.error('Failed to generate title with LLM:', error);
+    }
+    
+    // Fallback to simple title generation
+    return conversationService.generateConversationTitle(firstMessage);
+  };
+
+  const deleteConversation = async (conversationId: number) => {
+    try {
+      await conversationService.deleteConversation(conversationId);
+      setChatState(prev => ({
+        ...prev,
+        conversations: prev.conversations.filter(c => c.id !== conversationId),
+        currentConversationId: prev.currentConversationId === conversationId ? undefined : prev.currentConversationId,
+        messages: prev.currentConversationId === conversationId ? [] : prev.messages
+      }));
+      message.success('Conversation deleted');
+    } catch (error) {
+      console.error('Failed to delete conversation:', error);
+      message.error('Failed to delete conversation');
     }
   };
 
@@ -101,6 +225,26 @@ const Feature: React.FC = () => {
       content: chatState.currentInput.trim(),
       timestamp: new Date()
     };
+  
+    // Create or get current conversation
+    let conversationId = chatState.currentConversationId;
+    let shouldGenerateTitle = false;
+    
+    console.log('Current conversation ID:', conversationId);
+    
+    if (!conversationId) {
+      console.log('Creating new conversation');
+      const newConversation = await createNewConversation();
+      if (!newConversation) return;
+      conversationId = newConversation.id;
+      shouldGenerateTitle = true;
+      console.log('Created new conversation:', conversationId, 'shouldGenerateTitle:', shouldGenerateTitle);
+    } else {
+      // Check if existing conversation has no title
+      const currentConversation = chatState.conversations.find(c => c.id === conversationId);
+      shouldGenerateTitle = !currentConversation?.title;
+      console.log('Existing conversation:', conversationId, 'title:', currentConversation?.title, 'shouldGenerateTitle:', shouldGenerateTitle);
+    }
   
     // Create placeholder for assistant message
     const assistantMessage: ChatMessage = {
@@ -119,6 +263,16 @@ const Feature: React.FC = () => {
       error: null,
       streamingMessageId: assistantMessage.id
     }));
+
+    // Save user message to database
+    try {
+      await conversationService.addMessage(conversationId, {
+        role: 'user',
+        content: userMessage.content
+      });
+    } catch (error) {
+      console.error('Failed to save user message:', error);
+    }
 
     // Focus the input after clearing it
     setTimeout(() => {
@@ -225,6 +379,39 @@ const Feature: React.FC = () => {
                 ),
                 activeTools: {} // Clear active tools after saving
               }));
+              
+              // Save assistant message to database
+              try {
+                const toolsUsed = Object.values(chatState.activeTools || {}).flat();
+                await conversationService.addMessage(conversationId!, {
+                  role: 'assistant',
+                  content: currentContent,
+                  agent_name: 'Supervisor',
+                  tools_used: toolsUsed.length > 0 ? toolsUsed : undefined
+                });
+                
+                // Generate and update title if conversation has no title
+                if (shouldGenerateTitle) {
+                  console.log('Generating title for conversation:', conversationId, 'with message:', userMessage.content);
+                  const title = await generateConversationTitle(userMessage.content);
+                  console.log('Generated title:', title);
+                  await conversationService.updateConversation(conversationId!, { title });
+                  console.log('Updated conversation with title');
+                  
+                  // Update the conversation in the sidebar
+                  setChatState(prev => ({
+                    ...prev,
+                    conversations: prev.conversations.map(c => 
+                      c.id === conversationId ? { ...c, title } : c
+                    )
+                  }));
+                } else {
+                  console.log('Not generating title - shouldGenerateTitle:', shouldGenerateTitle);
+                }
+              } catch (error) {
+                console.error('Failed to save assistant message:', error);
+              }
+              
               // Focus input when response is complete
               setTimeout(() => {
                 if (inputRef.current) {
@@ -267,14 +454,170 @@ const Feature: React.FC = () => {
   // Check if this is the initial state (no messages)
   const isInitialState = chatState.messages.length === 0;
 
+  const renderConversationItem = (conversation: Conversation) => {
+    const isActive = conversation.id === chatState.currentConversationId;
+    const isRecent = conversationService.isRecentConversation(conversation);
+    
+    return (
+      <div
+        key={conversation.id}
+        className={`conversation-item ${
+          isActive ? 'active' : ''
+        } ${isRecent ? 'recent' : ''}`}
+        onClick={() => loadConversation(conversation.id)}
+        style={{
+          padding: '12px 16px',
+          cursor: 'pointer',
+          borderRadius: '8px',
+          margin: '4px 0',
+          backgroundColor: isActive ? '#e6f7ff' : 'transparent',
+          border: isActive ? '1px solid #1890ff' : '1px solid transparent',
+          transition: 'all 0.2s ease',
+          position: 'relative'
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{
+              fontSize: '14px',
+              fontWeight: isActive ? 600 : 400,
+              color: isActive ? '#1890ff' : '#262626',
+              marginBottom: '4px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap'
+            }}>
+              {conversation.title || 'Untitled Conversation'}
+            </div>
+            <div style={{
+              fontSize: '12px',
+              color: '#8c8c8c',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap'
+            }}>
+              {conversationService.formatRelativeTime(conversation.updated_at)}
+            </div>
+          </div>
+          <Dropdown
+            menu={{
+              items: [
+                {
+                  key: 'delete',
+                  label: 'Delete',
+                  icon: <DeleteOutlined />,
+                  danger: true,
+                  onClick: () => {
+                    Modal.confirm({
+                      title: 'Delete Conversation',
+                      content: 'Are you sure you want to delete this conversation?',
+                      onOk: () => deleteConversation(conversation.id)
+                    });
+                  }
+                }
+              ]
+            }}
+            trigger={['click']}
+            placement="bottomRight"
+          >
+            <Button
+              type="text"
+              size="small"
+              icon={<MoreOutlined />}
+              onClick={(e) => e.stopPropagation()}
+              style={{ opacity: 0.6 }}
+            />
+          </Dropdown>
+        </div>
+        {isRecent && (
+          <div style={{
+            position: 'absolute',
+            top: '8px',
+            right: '32px',
+            width: '6px',
+            height: '6px',
+            backgroundColor: '#52c41a',
+            borderRadius: '50%'
+          }} />
+        )}
+      </div>
+    );
+  };
+
+  const groupedConversations = conversationService.groupConversationsByDate(chatState.conversations);
+
   return (
-    <div style={{ 
-      height: '90vh', 
-      display: 'flex', 
-      flexDirection: 'column',
-      backgroundColor: '#fafafa'
-    }}>
+    <Layout style={{ height: '90vh', backgroundColor: '#fafafa' }}>
+      <Sider
+        width={300}
+        collapsed={chatState.siderCollapsed}
+        onCollapse={(collapsed) => setChatState(prev => ({ ...prev, siderCollapsed: collapsed }))}
+        style={{
+          backgroundColor: '#fff',
+          borderRight: '1px solid #f0f0f0',
+          overflow: 'hidden'
+        }}
+      >
+        <div style={{
+          padding: '16px',
+          borderBottom: '1px solid #f0f0f0',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        }}>
+          <Title level={4} style={{ margin: 0, fontSize: '16px' }}>
+            Conversations
+          </Title>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            size="small"
+            onClick={createNewConversation}
+            style={{ borderRadius: '6px' }}
+          >
+            New
+          </Button>
+        </div>
+        
+        <div style={{
+          height: 'calc(100% - 73px)',
+          overflow: 'auto',
+          padding: '8px 16px'
+        }}>
+          {chatState.conversationsLoading ? (
+            <div style={{ textAlign: 'center', padding: '20px' }}>
+              <Spin size="small" />
+              <div style={{ marginTop: '8px', fontSize: '12px', color: '#8c8c8c' }}>
+                Loading conversations...
+              </div>
+            </div>
+          ) : chatState.conversations.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '20px', color: '#8c8c8c' }}>
+              <MessageOutlined style={{ fontSize: '24px', marginBottom: '8px' }} />
+              <div style={{ fontSize: '14px' }}>No conversations yet</div>
+              <div style={{ fontSize: '12px', marginTop: '4px' }}>Start a new conversation to begin</div>
+            </div>
+          ) : (
+            Object.entries(groupedConversations).map(([dateGroup, conversations]) => (
+              <div key={dateGroup} style={{ marginBottom: '16px' }}>
+                <div style={{
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: '#8c8c8c',
+                  marginBottom: '8px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  {dateGroup}
+                </div>
+                {conversations.map(renderConversationItem)}
+              </div>
+            ))
+          )}
+        </div>
+      </Sider>
       
+      <Content style={{ display: 'flex', flexDirection: 'column' }}>
       {isInitialState ? (
         /* Welcome Screen - Centered */
         <div style={{
@@ -808,7 +1151,8 @@ const Feature: React.FC = () => {
           }
         `}
       </style>
-    </div>
+      </Content>
+    </Layout>
   );
 };
 

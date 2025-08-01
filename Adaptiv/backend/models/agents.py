@@ -4,6 +4,54 @@ from sqlalchemy.sql import func
 from datetime import datetime
 from config.database import Base
 
+# =====================================================
+# Conversation Management Models
+# =====================================================
+
+class Conversation(Base):
+    __tablename__ = 'conversations'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    title = Column(String(255))  # Auto-generated or user-defined
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+    
+    # Relationship to User and Messages
+    user = relationship("User", backref="conversations")
+    messages = relationship("ConversationMessage", back_populates="conversation", cascade="all, delete-orphan", order_by="ConversationMessage.created_at")
+    
+    # Indexes for efficient querying
+    __table_args__ = (
+        Index('idx_user_updated', 'user_id', 'updated_at'),
+        Index('idx_user_active', 'user_id', 'is_active'),
+    )
+
+class ConversationMessage(Base):
+    __tablename__ = 'conversation_messages'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey('conversations.id'), nullable=False, index=True)
+    role = Column(String(20), nullable=False)  # 'user' or 'assistant'
+    content = Column(Text, nullable=False)
+    agent_name = Column(String(50))  # Which agent responded (for assistant messages)
+    tools_used = Column(JSON)  # Tools used in this message
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Relationship to Conversation
+    conversation = relationship("Conversation", back_populates="messages")
+    
+    # Indexes for efficient querying
+    __table_args__ = (
+        Index('idx_conversation_created', 'conversation_id', 'created_at'),
+        Index('idx_conversation_role', 'conversation_id', 'role'),
+    )
+
+# =====================================================
+# Agent Report Models
+# =====================================================
+
 # Agent Report Models
 class CompetitorReport(Base):
     __tablename__ = "competitor_reports"

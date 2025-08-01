@@ -175,3 +175,53 @@ async def test_multi_agent_system(
     except Exception as e:
         logger.error(f"Multi-agent test failed: {e}")
         raise HTTPException(status_code=500, detail=f"Test failed: {str(e)}")
+
+
+@router.post("/generate-title")
+async def generate_conversation_title(
+    request: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Generate a conversation title based on the first user message"""
+    try:
+        message = request.get('message', '')
+        if not message:
+            raise HTTPException(status_code=400, detail="Message is required")
+        
+        # Create service with database session
+        langgraph_service = LangGraphService(db_session=db)
+        
+        # Simple prompt to generate a concise title
+        title_prompt = f"""Generate a short, descriptive title (max 50 characters) for a conversation that starts with this user message:
+
+"{message}"
+
+The title should be concise and capture the main topic or intent. Respond with only the title, no quotes or extra text."""
+        
+        # Use a simple LLM call to generate the title
+        result = await langgraph_service.execute_supervisor_workflow(
+            task=title_prompt,
+            context="Generate a conversation title",
+            user_id=current_user.id
+        )
+        
+        # Extract and clean the title
+        title = result.final_result.strip()
+        # Remove quotes if present
+        if title.startswith('"') and title.endswith('"'):
+            title = title[1:-1]
+        if title.startswith("'") and title.endswith("'"):
+            title = title[1:-1]
+        
+        # Ensure it's not too long
+        if len(title) > 50:
+            title = title[:47] + "..."
+        
+        return {"title": title}
+        
+    except Exception as e:
+        logger.error(f"Title generation failed: {e}")
+        # Return a fallback title based on the message
+        fallback_title = message[:47] + "..." if len(message) > 50 else message
+        return {"title": fallback_title}
