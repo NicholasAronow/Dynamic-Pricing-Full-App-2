@@ -29,7 +29,8 @@ import {
   BarChartOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
-  LinkOutlined
+  LinkOutlined,
+  LeftOutlined
 } from '@ant-design/icons';
 import competitorEntityService, {
   CompetitorEntity,
@@ -340,39 +341,6 @@ const CompetitorDetail: React.FC = () => {
         maxWidth: '100vw', 
         margin: '0 auto' 
       }}>
-        {/* Navigation */}
-        <Button 
-          icon={<ArrowLeftOutlined />} 
-          onClick={() => navigate('/competitors')}
-          style={{ 
-            marginBottom: '32px',
-            background: '#fff',
-            border: '1px solid #e5e5e7',
-            height: '40px',
-            padding: '0 20px',
-            borderRadius: '8px',
-            fontSize: '15px',
-            fontWeight: '500',
-            color: '#0a0a0a',
-            transition: 'all 0.3s ease',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = '#007AFF';
-            e.currentTarget.style.color = '#007AFF';
-            e.currentTarget.style.transform = 'translateX(-2px)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = '#e5e5e7';
-            e.currentTarget.style.color = '#0a0a0a';
-            e.currentTarget.style.transform = 'translateX(0)';
-          }}
-        >
-          Back to Competitor Analysis
-        </Button>
-
         <Card style={{
           border: 'none',
           borderRadius: '12px',
@@ -386,6 +354,37 @@ const CompetitorDetail: React.FC = () => {
             borderBottom: '1px solid #f0f0f2'
           }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '20px' }}>
+              {/* Navigation */}
+              <Button 
+                icon={<LeftOutlined />} 
+                onClick={() => navigate('/competitors')}
+                style={{ 
+                  marginBottom: '32px',
+                  background: '#fff',
+                  border: '1px solid #e5e5e7',
+                  height: '40px',
+                  padding: '0 20px',
+                  borderRadius: '8px',
+                  fontSize: '15px',
+                  fontWeight: '500',
+                  color: '#0a0a0a',
+                  transition: 'all 0.3s ease',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = '#007AFF';
+                  e.currentTarget.style.color = '#007AFF';
+                  e.currentTarget.style.transform = 'translateX(-2px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = '#e5e5e7';
+                  e.currentTarget.style.color = '#0a0a0a';
+                  e.currentTarget.style.transform = 'translateX(0)';
+                }}
+              >
+              </Button>
               <div style={{
                 width: '56px',
                 height: '56px',
