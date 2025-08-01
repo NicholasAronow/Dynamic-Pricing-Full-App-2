@@ -261,11 +261,20 @@ const PriceRecommendations: React.FC = () => {
       title: 'Product',
       dataIndex: 'name',
       key: 'name',
+      width: 200,
+      fixed: 'left' as const,
       sorter: (a, b) => a.name.localeCompare(b.name),
       sortDirections: ['ascend', 'descend'] as TableColumnType<any>['sortDirections'],
       render: (text: string, record: PriceRecommendation) => (
         <div 
-          style={{ fontWeight: 500, cursor: 'pointer' }} 
+          style={{ 
+            fontWeight: 500, 
+            cursor: 'pointer',
+            minWidth: '150px',
+            wordWrap: 'break-word',
+            wordBreak: 'break-word',
+            whiteSpace: 'normal'
+          }} 
           onClick={() => navigate(`/product/${record.id}`)}
         >
           {text}
@@ -276,6 +285,8 @@ const PriceRecommendations: React.FC = () => {
       title: 'Tags',
       dataIndex: 'category',
       key: 'category',
+      width: 120,
+      ellipsis: true,
       render: (category: string, record: PriceRecommendation) => (
         <Tag 
           color="#9370DB" 
@@ -292,6 +303,7 @@ const PriceRecommendations: React.FC = () => {
       title: 'Current Price',
       dataIndex: 'currentPrice',
       key: 'currentPrice',
+      width: 130,
       sorter: (a, b) => {
         // Primary sort by price
         if (a.currentPrice !== b.currentPrice) {
@@ -308,6 +320,7 @@ const PriceRecommendations: React.FC = () => {
     {
       title: 'Revenue',
       key: 'performance',
+      width: 150,
       sorter: (a: any, b: any) => {
         // Primary sort by revenue
         if (a.revenue !== b.revenue) {
@@ -338,6 +351,7 @@ const PriceRecommendations: React.FC = () => {
       ),
       key: 'margin',
       dataIndex: 'profitMargin',
+      width: 140,
       sorter: (a, b) => (a.profitMargin || 0) - (b.profitMargin || 0),
       sortDirections: ['descend', 'ascend'] as TableColumnType<any>['sortDirections'],
       render: (margin: number, record: any) => {
@@ -396,6 +410,7 @@ const PriceRecommendations: React.FC = () => {
         </Tooltip>
       ),
       key: 'netMargin',
+      width: 180,
       sorter: (a, b) => {
         const marginA = netMargins[a.name]?.net_margin_percentage || 0;
         const marginB = netMargins[b.name]?.net_margin_percentage || 0;
@@ -734,6 +749,7 @@ const PriceRecommendations: React.FC = () => {
               rowKey="id"
               loading={loading}
               pagination={false}
+              scroll={{ x: 920 }}
               onRow={(record) => ({
                 onClick: () => navigate(`/product/${record.id}`),
                 style: { cursor: 'pointer' }
