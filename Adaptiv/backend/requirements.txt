@@ -40,6 +40,7 @@ scipy>=1.10.0
 # OpenAI and Agents SDK
 openai>=1.1.0
 openai-agents>=0.0.16
+langsmith>=0.1.0  # LangSmith for agent tracking and observability
 
 # Anthropic (Claude) SDK
 anthropic>=0.15.0

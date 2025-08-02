@@ -24,6 +24,11 @@ SQUARE_ENVIRONMENT = os.getenv("SQUARE_ENVIRONMENT", "sandbox")
 KNOCK_API_KEY = os.getenv("KNOCK_API_KEY")
 KNOCK_PUBLIC_API_KEY = os.getenv("KNOCK_PUBLIC_API_KEY")
 
+# LangSmith Configuration
+LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY", "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")
+LANGSMITH_PROJECT = os.getenv("LANGSMITH_PROJECT", "adaptiv-agents")
+LANGSMITH_TRACING = os.getenv("LANGSMITH_TRACING", "true").lower() == "true"
+
 def get_openai_client():
     """
     Get OpenAI client instance.
@@ -105,6 +110,32 @@ def get_knock_client():
             return None
     else:
         print("Warning: KNOCK_API_KEY not set in environment variables")
+        return None
+
+def get_langsmith_client():
+    """
+    Get LangSmith client and configure tracing.
+    
+    Returns:
+        LangSmith client if API key is available, None otherwise
+    """
+    if LANGSMITH_API_KEY and LANGSMITH_TRACING:
+        try:
+            from langsmith import Client
+            import os
+            
+            # Set environment variables for LangSmith
+            os.environ["LANGCHAIN_TRACING_V2"] = "true"
+            os.environ["LANGCHAIN_API_KEY"] = LANGSMITH_API_KEY
+            os.environ["LANGCHAIN_PROJECT"] = LANGSMITH_PROJECT
+            
+            return Client(api_key=LANGSMITH_API_KEY)
+        except ImportError:
+            print("Warning: LangSmith package not installed")
+            return None
+    else:
+        if not LANGSMITH_API_KEY:
+            print("Warning: LANGSMITH_API_KEY not set in environment variables")
         return None
 
 # Validation functions

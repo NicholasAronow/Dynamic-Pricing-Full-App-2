@@ -23,8 +23,20 @@ from langchain_core.messages import ToolMessage
 
 from services.database_service import DatabaseService
 from config.database import get_db
+from config.external_apis import get_langsmith_client, LANGSMITH_TRACING, LANGSMITH_PROJECT
 
 logger = logging.getLogger(__name__)
+
+# Initialize LangSmith tracing if enabled
+if LANGSMITH_TRACING:
+    langsmith_client = get_langsmith_client()
+    if langsmith_client:
+        logger.info(f"LangSmith tracing enabled for project: {LANGSMITH_PROJECT}")
+    else:
+        logger.warning("LangSmith tracing requested but client initialization failed")
+else:
+    langsmith_client = None
+    logger.info("LangSmith tracing disabled")
 
 @dataclass
 class MultiAgentResponse:
@@ -3561,9 +3573,21 @@ Remember: You're not just retrieving data - you're uncovering the story that dat
             current_agent = None
             previous_message_count = len(initial_state["messages"])  # Track initial message count
             
+            # Configure tracing for this run
+            config = {"recursion_limit": 50}
+            if langsmith_client and user_id:
+                config["run_name"] = f"pricing_analysis_user_{user_id}"
+                config["tags"] = ["dynamic_pricing", "multi_agent", f"user_{user_id}"]
+                config["metadata"] = {
+                    "user_id": user_id,
+                    "task": task[:100],  # Truncate long tasks
+                    "timestamp": start_time.isoformat(),
+                    "context": context[:200] if context else None  # Truncate long context
+                }
+            
             async for chunk in self.supervisor_graph.astream(
                 initial_state,
-                config={"recursion_limit": 50}
+                config=config
             ):
                 for node_name, node_output in chunk.items():
                     if node_name not in execution_path:

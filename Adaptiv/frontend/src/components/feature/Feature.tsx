@@ -35,7 +35,9 @@ import {
   MessageOutlined,
   DeleteOutlined,
   EditOutlined,
-  MoreOutlined
+  MoreOutlined,
+  RightOutlined,
+  LeftOutlined
 } from '@ant-design/icons';
 import { ReactComponent as AiSparkleIcon } from '../../assets/icons/ai_sparkle.svg';
 
@@ -472,8 +474,21 @@ const Feature: React.FC = () => {
           margin: '4px 0',
           backgroundColor: isActive ? '#e6f7ff' : 'transparent',
           border: isActive ? '1px solid #1890ff' : '1px solid transparent',
-          transition: 'all 0.2s ease',
-          position: 'relative'
+          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          position: 'relative',
+          transform: 'translateX(0)',
+        }}
+        onMouseEnter={(e) => {
+          if (!isActive) {
+            e.currentTarget.style.backgroundColor = '#f5f5f5';
+            e.currentTarget.style.transform = 'translateX(4px)';
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!isActive) {
+            e.currentTarget.style.backgroundColor = 'transparent';
+            e.currentTarget.style.transform = 'translateX(0)';
+          }
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -529,7 +544,7 @@ const Feature: React.FC = () => {
             />
           </Dropdown>
         </div>
-        {isRecent && (
+        {/*{isRecent && (
           <div style={{
             position: 'absolute',
             top: '8px',
@@ -539,7 +554,7 @@ const Feature: React.FC = () => {
             backgroundColor: '#52c41a',
             borderRadius: '50%'
           }} />
-        )}
+        )}*/}
       </div>
     );
   };
@@ -547,72 +562,206 @@ const Feature: React.FC = () => {
   const groupedConversations = conversationService.groupConversationsByDate(chatState.conversations);
 
   return (
-    <Layout style={{ height: '90vh', backgroundColor: '#fafafa' }}>
+    <Layout style={{ height: '90vh', backgroundColor: '#fafafa'}}>
       <Sider
         width={300}
+        collapsedWidth={60}
+        collapsible
         collapsed={chatState.siderCollapsed}
         onCollapse={(collapsed) => setChatState(prev => ({ ...prev, siderCollapsed: collapsed }))}
+        trigger={null}
         style={{
-          backgroundColor: '#fff',
-          borderRight: '1px solid #f0f0f0',
-          overflow: 'hidden'
+          backgroundColor: '#fafafa',
+          borderRight: '1px solid #e0e0e0',
+          overflow: 'hidden',
         }}
       >
         <div style={{
           padding: '16px',
-          borderBottom: '1px solid #f0f0f0',
+          borderBottom: '1px solid #fafafa',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center'
         }}>
-          <Title level={4} style={{ margin: 0, fontSize: '16px' }}>
-            Conversations
-          </Title>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            size="small"
-            onClick={createNewConversation}
-            style={{ borderRadius: '6px' }}
-          >
-            New
-          </Button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Button
+              type="text"
+              icon={chatState.siderCollapsed ? <RightOutlined /> : <LeftOutlined />}
+              size="small"
+              onClick={() => setChatState(prev => ({ ...prev, siderCollapsed: !prev.siderCollapsed }))}
+              style={{ 
+                padding: '4px',
+                minWidth: 'auto',
+                height: '24px',
+                width: '24px'
+              }}
+            />
+            {!chatState.siderCollapsed && (
+              <Title level={4} style={{ margin: 0, fontSize: '16px' }}>
+                Conversations
+              </Title>
+            )}
+          </div>
+          {!chatState.siderCollapsed && (
+            <Button
+              type="text"
+              size="small"
+              onClick={createNewConversation}
+              style={{
+                borderRadius: '8px',
+                background: 'transparent',
+                border: '1px solid rgba(24, 144, 255, 0.2)',
+                boxShadow: '0 2px 8px rgba(24, 144, 255, 0.15)',
+                height: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontWeight: 500,
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(24, 144, 255, 0.3)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 2px 8px rgba(24, 144, 255, 0.2)';
+              }}
+            >
+              <AiSparkleIcon style={{
+                width: '14px',
+                height: '14px',
+                fill: 'url(#newButtonGradient)',
+                filter: 'drop-shadow(0 0 2px rgba(24, 144, 255, 0.4))'
+              }} />
+              <svg width="0" height="0" style={{ position: 'absolute' }}>
+                <defs>
+                  <linearGradient id="newButtonGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#1890ff" />
+                    <stop offset="100%" stopColor="#722ed1" />
+                  </linearGradient>
+                </defs>
+              </svg>
+              <span style={{
+                background: 'linear-gradient(135deg, #1890ff 0%, #722ed1 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text'
+              }}>New</span>
+            </Button>
+          )}
         </div>
         
         <div style={{
           height: 'calc(100% - 73px)',
           overflow: 'auto',
-          padding: '8px 16px'
+          padding: chatState.siderCollapsed ? '8px 4px' : '8px 16px'
         }}>
-          {chatState.conversationsLoading ? (
-            <div style={{ textAlign: 'center', padding: '20px' }}>
-              <Spin size="small" />
-              <div style={{ marginTop: '8px', fontSize: '12px', color: '#8c8c8c' }}>
-                Loading conversations...
-              </div>
-            </div>
-          ) : chatState.conversations.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '20px', color: '#8c8c8c' }}>
-              <MessageOutlined style={{ fontSize: '24px', marginBottom: '8px' }} />
-              <div style={{ fontSize: '14px' }}>No conversations yet</div>
-              <div style={{ fontSize: '12px', marginTop: '4px' }}>Start a new conversation to begin</div>
+          {chatState.siderCollapsed ? (
+            // Collapsed view - show only conversation icons
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <Tooltip title="New Conversation" placement="right">
+                <Button
+                  type="text"
+                  onClick={createNewConversation}
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: '10px',
+                    background: 'transparent',
+                    border: '1px solid rgba(24, 144, 255, 0.3)',
+                    boxShadow: '0 3px 10px rgba(24, 144, 255, 0.2)',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-2px) scale(1.05)';
+                    e.currentTarget.style.boxShadow = '0 6px 16px rgba(24, 144, 255, 0.3)';
+                    e.currentTarget.style.borderColor = 'rgba(24, 144, 255, 0.5)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0) scale(1)';
+                    e.currentTarget.style.boxShadow = '0 3px 10px rgba(24, 144, 255, 0.2)';
+                    e.currentTarget.style.borderColor = 'rgba(24, 144, 255, 0.3)';
+                  }}
+                >
+                  <AiSparkleIcon style={{
+                    width: '24px',
+                    height: '24px',
+                    fill: 'url(#collapsedButtonGradient)',
+                    filter: 'drop-shadow(0 0 3px rgba(24, 144, 255, 0.5))'
+                  }} />
+                  <svg width="0" height="0" style={{ position: 'absolute' }}>
+                    <defs>
+                      <linearGradient id="collapsedButtonGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#1890ff" />
+                        <stop offset="100%" stopColor="#722ed1" />
+                      </linearGradient>
+                    </defs>
+                  </svg>
+                </Button>
+              </Tooltip>
+              {chatState.conversations.slice(0, 8).map((conversation) => (
+                <Tooltip key={conversation.id} title={conversation.title || 'Untitled Conversation'} placement="right">
+                  <div
+                    onClick={() => loadConversation(conversation.id)}
+                    style={{
+                      width: '40px',
+                      height: '40px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: '8px',
+                      backgroundColor: conversation.id === chatState.currentConversationId ? '#e6f7ff' : '#f5f5f5',
+                      border: conversation.id === chatState.currentConversationId ? '2px solid #1890ff' : '2px solid transparent',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <MessageOutlined style={{ 
+                      color: conversation.id === chatState.currentConversationId ? '#1890ff' : '#666',
+                      fontSize: '16px'
+                    }} />
+                  </div>
+                </Tooltip>
+              ))}
             </div>
           ) : (
-            Object.entries(groupedConversations).map(([dateGroup, conversations]) => (
-              <div key={dateGroup} style={{ marginBottom: '16px' }}>
-                <div style={{
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  color: '#8c8c8c',
-                  marginBottom: '8px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  {dateGroup}
+            // Expanded view - show full conversation list
+            <>
+              {chatState.conversationsLoading ? (
+                <div style={{ textAlign: 'center', padding: '20px' }}>
+                  <Spin size="small" />
+                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#8c8c8c' }}>
+                    Loading conversations...
+                  </div>
                 </div>
-                {conversations.map(renderConversationItem)}
-              </div>
-            ))
+              ) : chatState.conversations.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '20px', color: '#8c8c8c' }}>
+                  <MessageOutlined style={{ fontSize: '24px', marginBottom: '8px' }} />
+                  <div style={{ fontSize: '14px' }}>No conversations yet</div>
+                  <div style={{ fontSize: '12px', marginTop: '4px' }}>Start a new conversation to begin</div>
+                </div>
+              ) : (
+                Object.entries(groupedConversations).map(([dateGroup, conversations]) => (
+                  <div key={dateGroup} style={{ marginBottom: '16px' }}>
+                    <div style={{
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      color: '#8c8c8c',
+                      marginBottom: '8px',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.5px'
+                    }}>
+                      {dateGroup}
+                    </div>
+                    {conversations.map(renderConversationItem)}
+                  </div>
+                ))
+              )}
+            </>
           )}
         </div>
       </Sider>
@@ -753,7 +902,7 @@ const Feature: React.FC = () => {
                   alignItems: 'flex-start',
                   flexDirection: msg.role === 'user' ? 'row-reverse' : 'row'
                  }}>
-                  {/* Avatar */}
+                  {/* Avatar 
                   <div style={{ flexShrink: 0 }}>
                     {msg.role === 'assistant' ? (
                       <div style={{
@@ -784,6 +933,7 @@ const Feature: React.FC = () => {
                       />
                     )}
                   </div>
+                  */}
 
                   {/* Message Content */}
                   <div style={{ 
