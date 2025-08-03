@@ -57,6 +57,9 @@ langchain-openai>=0.2.0
 langchain-core>=0.3.0
 langsmith>=0.1.0
 
+# Tavily AI search API
+tavily-python>=0.7.0
+
 # Notification systems
 knockapi>=0.4.0  # Knock Python SDK for notifications
 

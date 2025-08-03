@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional, AsyncGenerator
 from dataclasses import dataclass
 from typing import Annotated
+import os
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -20,6 +21,7 @@ from langgraph.graph import StateGraph, MessagesState, START
 from langgraph.types import Command
 from langgraph.prebuilt import create_react_agent, InjectedState
 from langchain_core.messages import ToolMessage
+from tavily import TavilyClient
 
 from services.database_service import DatabaseService
 from config.database import get_db
@@ -37,7 +39,6 @@ if LANGSMITH_TRACING:
 else:
     langsmith_client = None
     logger.info("LangSmith tracing disabled")
-
 @dataclass
 class MultiAgentResponse:
     """Response from multi-agent system execution"""
@@ -48,27 +49,177 @@ class MultiAgentResponse:
     messages: List[Dict[str, Any]]
 
 class PricingTools:
-    """Tools for pricing agents"""
+    """Tools for pricing agents with real web search"""
     
-    @staticmethod
+    def __init__(self):
+        # Initialize Tavily client
+        self.tavily_api_key = os.getenv("TAVILY_API_KEY")
+        if self.tavily_api_key:
+            self.tavily = TavilyClient(api_key=self.tavily_api_key)
+        else:
+            self.tavily = None
+            logger.warning("TAVILY_API_KEY not set - web search will use simulated results")
+    
+    def _search_web_impl(self, query: str, search_type: str = "general") -> str:
+        """Internal implementation of web search"""
+        if not self.tavily:
+            return f"[Simulated] Web search results for '{query}': Limited data available. Please set TAVILY_API_KEY for real results."
+        
+        try:
+            # Optimize query based on search type
+            optimized_query = self._optimize_query_for_search_type(query, search_type)
+            
+            # Configure search parameters based on type
+            search_params = self._get_search_params_for_type(search_type)
+            
+            # Perform search with optimized parameters
+            search_results = self.tavily.search(
+                query=optimized_query,
+                **search_params
+            )
+            
+            # Format results based on search type
+            return self._format_search_results(search_results, query, search_type)
+            
+        except Exception as e:
+            logger.error(f"Tavily search error for query '{query}': {e}")
+            return f"Search error: {str(e)}. Please try rephrasing your query or check if it's under 400 characters."
+    
+    def create_search_web_tool(self):
+        """Create the search_web tool with proper binding"""
+        @tool
+        def search_web(query: str, search_type: str = "general") -> str:
+            """Search the web for any information using Tavily's advanced search capabilities.
+            
+            Args:
+                query: The search query (keep under 400 characters for best results)
+                search_type: Type of search - 'general', 'news', 'pricing', 'competitor', 'market_trends', 'events'
+            
+            Returns:
+                Formatted search results with summary and key findings
+            """
+            return self._search_web_impl(query, search_type)
+        
+        return search_web
+    
+    def _optimize_query_for_search_type(self, query: str, search_type: str) -> str:
+        """Optimize query based on search type for better results"""
+        # Ensure query is under 400 characters
+        if len(query) > 350:  # Leave room for additional keywords
+            query = query[:350].rsplit(' ', 1)[0]  # Truncate at word boundary
+        
+        # Add context keywords based on search type
+        if search_type == "pricing":
+            return f"{query} pricing cost price analysis market"
+        elif search_type == "competitor":
+            return f"{query} competitors comparison market analysis competitive landscape"
+        elif search_type == "market_trends":
+            return f"{query} market trends industry analysis consumer behavior"
+        elif search_type == "news":
+            return f"{query} latest news recent developments"
+        elif search_type == "events":
+            return f"{query} events calendar local events upcoming festivals conferences"
+        else:
+            return query
+    
+    def _get_search_params_for_type(self, search_type: str) -> dict:
+        """Get optimized search parameters for different search types"""
+        base_params = {
+            "max_results": 5,
+            "include_answer": True,
+            "include_raw_content": False,
+            "include_images": False
+        }
+        
+        if search_type == "news":
+            base_params.update({
+                "topic": "news",
+                "days": 7,  # Last 7 days for news
+                "search_depth": "basic"  # Faster for news
+            })
+        elif search_type == "events":
+            base_params.update({
+                "search_depth": "basic",  # Fast search for events
+                "time_range": "month",  # Look for events in the next month
+                "include_raw_content": False  # Don't need full content for events
+            })
+        elif search_type in ["pricing", "competitor", "market_trends"]:
+            base_params.update({
+                "search_depth": "advanced",  # More thorough for business intelligence
+                "include_raw_content": True  # Better for detailed analysis
+            })
+        else:
+            base_params["search_depth"] = "basic"
+        
+        return base_params
+    
+    def _format_search_results(self, search_results: dict, original_query: str, search_type: str) -> str:
+        """Format search results with type-specific formatting"""
+        result_text = f"🔍 Web Search Results for '{original_query}' ({search_type}):\n\n"
+        
+        # Include AI-generated summary if available
+        if search_results.get('answer'):
+            result_text += f"📋 **Summary:** {search_results['answer']}\n\n"
+        
+        # Include individual results with relevance scoring
+        if search_results.get('results'):
+            result_text += "🔗 **Key Sources:**\n"
+            for i, result in enumerate(search_results['results'][:5], 1):
+                title = result.get('title', 'No title')
+                url = result.get('url', 'No URL')
+                content = result.get('content', 'No content available')
+                score = result.get('score', 0)
+                
+                # Add relevance indicator
+                relevance = "🟢 High" if score > 0.8 else "🟡 Medium" if score > 0.5 else "🔴 Low"
+                
+                result_text += f"\n{i}. **{title}** ({relevance} Relevance)\n"
+                result_text += f"   🌐 Source: {url}\n"
+                
+                # Truncate content based on search type
+                if search_type == "events":
+                    content_length = 250  # Medium length for event descriptions
+                elif search_type in ["pricing", "competitor"]:
+                    content_length = 300  # Longer for detailed business analysis
+                else:
+                    content_length = 200  # Standard length
+                
+                result_text += f"   📄 {content[:content_length]}...\n"
+                
+                # Add published date for news
+                if search_type == "news" and result.get('published_date'):
+                    result_text += f"   📅 Published: {result['published_date']}\n"
+                
+                # Add event-specific formatting hints
+                if search_type == "events":
+                    # Look for date/time patterns in content for events
+                    import re
+                    date_patterns = re.findall(r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:,?\s+\d{4})?|\d{1,2}/\d{1,2}/\d{2,4}|\d{4}-\d{2}-\d{2}', content, re.IGNORECASE)
+                    if date_patterns:
+                        result_text += f"   🗓️ Event Date: {date_patterns[0]}\n"
+        
+        # Add search metadata
+        result_text += f"\n🔍 Search completed with {len(search_results.get('results', []))} results"
+        
+        return result_text
+    
     @tool
-    def search_web_for_pricing(query: str) -> str:
+    def search_web_for_pricing(self, query: str) -> str:
         """Search the web for pricing information and market data"""
-        # Simulate web search results for pricing information
-        return f"Web search results for '{query}': Found 15 relevant sources. Key findings: Market average price is $45-65 range, trending upward 8% this quarter. Top competitors: CompanyA ($52), CompanyB ($48), CompanyC ($61). Consumer sentiment shows price sensitivity at $60+ threshold."
+        return self.search_web(query, "pricing")
     
-    @staticmethod
     @tool
-    def search_competitor_analysis(product_name: str, category: str) -> str:
+    def search_competitor_analysis(self, product_name: str, category: str) -> str:
         """Search for competitor pricing and positioning analysis"""
-        return f"Competitor analysis for {product_name} in {category}: 12 direct competitors identified. Price range: $35-$75. Market leader pricing at $58 with premium positioning. Opportunity gap identified in $42-$48 range for value positioning."
+        query = f"{product_name} {category} competitors"
+        return self.search_web(query, "competitor")
     
-    @staticmethod
     @tool
-    def get_market_trends(category: str) -> str:
+    def get_market_trends(self, category: str) -> str:
         """Get current market trends and consumer behavior"""
-        return f"Market trends for {category}: Demand increasing 12% YoY, seasonal peak in Q4, price elasticity -1.3, consumer preference shifting toward value-oriented options, online sales growing 25% faster than retail."
-    
+        query = f"{category} market trends 2024 2025 consumer behavior pricing elasticity demand"
+        return self.search_web(query, "market_trends")
+
     @staticmethod
     @tool
     def select_pricing_algorithm(product_type: str, market_conditions: str, business_goals: str) -> str:
@@ -3034,9 +3185,7 @@ Remember: You are the strategic pricing expert that businesses rely on for criti
         self.web_researcher = create_react_agent(
             model=self.model,
             tools=[
-                self.tools.search_web_for_pricing,
-                self.tools.search_competitor_analysis,
-                self.tools.get_market_trends
+                self.tools.create_search_web_tool()
             ],
             prompt="""You are a specialized web research analyst focused on pricing intelligence and market dynamics. Your expertise lies in gathering, analyzing, and synthesizing real-time market data to support pricing decisions.
 
@@ -3045,6 +3194,7 @@ You are a meticulous researcher who uncovers critical market insights that drive
 </identity>
 
 <research_capabilities>
+- Use flexible web search to find any information needed for pricing analysis
 - Search for current market pricing data across industries and regions
 - Analyze competitor pricing strategies, positioning, and value propositions
 - Gather market trends, consumer behavior patterns, and demand signals
@@ -3052,6 +3202,7 @@ You are a meticulous researcher who uncovers critical market insights that drive
 - Research regulatory considerations and market constraints
 - Find industry benchmarks and best practices
 - Discover customer willingness-to-pay indicators
+- Perform targeted searches for news, general information, or specific business intelligence
 </research_capabilities>
 
 <research_methodology>
@@ -3081,6 +3232,22 @@ You are a meticulous researcher who uncovers critical market insights that drive
    - Note confidence levels and data recency
    - Suggest areas for deeper investigation
 </research_methodology>
+
+<available_tools>
+**search_web(query, search_type)**: Your primary and only search tool for all research needs
+   - search_type options: 'general', 'news', 'pricing', 'competitor', 'market_trends', 'events'
+   - Automatically optimizes search parameters based on type
+   - Provides relevance scoring and structured results
+   - Handles one or more research scenarios most pertinent to the prompt:
+     * 'pricing': For product pricing, cost analysis, market rates
+     * 'competitor': For competitive positioning, competitor pricing strategies  
+     * 'market_trends': For industry trends, consumer behavior, demand patterns
+     * 'news': For recent developments, announcements, market changes
+     * 'events': For local events, festivals, conferences, seasonal activities that might affect demand
+     * 'general': For any other business intelligence or research needs
+
+This single tool replaces all specialized search functions and provides maximum flexibility for any research query.
+</available_tools>
 
 <information_priorities>
 1. **Competitor Pricing**: Exact prices, tiers, and recent changes
@@ -3529,9 +3696,11 @@ Remember: You're not just retrieving data - you're uncovering the story that dat
         
             # Build initial state with conversation history
             messages = []
-            # Add previous messages if provided, but only the content exchanges
-            # Add previous messages if provided, but only the content exchanges
             if previous_messages:
+                logger.warning(previous_messages)
+                logger.info(f"Processing {len(previous_messages)} previous messages")
+                for i, msg in enumerate(previous_messages):
+                    logger.info(f"Message {i}: role={msg.get('role')}, has_tool_calls={bool(msg.get('tool_calls') or msg.get('additional_kwargs', {}).get('tool_calls'))}, content_length={len(msg.get('content', ''))}")
                 # Process messages in reverse to find the last meaningful exchange
                 for i in range(len(previous_messages) - 1, -1, -1):
                     msg = previous_messages[i]
@@ -3540,31 +3709,33 @@ Remember: You're not just retrieving data - you're uncovering the story that dat
                     if msg.get('role') == 'user':
                         messages.insert(0, HumanMessage(content=msg.get('content', '')))
                     
-                    # For assistant messages, only include those with actual content and no handoff tool calls
+                    # For assistant messages, only include those with actual content and no tool calls
                     elif msg.get('role') == 'assistant' and msg.get('content', '').strip():
-                        # Check if this message has handoff tool calls
+                        # Check if this message has any tool calls (including handoffs)
                         tool_calls = msg.get('tool_calls') or msg.get('additional_kwargs', {}).get('tool_calls', [])
-                        has_handoff = any(
-                            'transfer_to_' in tc.get('function', {}).get('name', '') 
-                            for tc in tool_calls
-                        ) if tool_calls else False
                         
-                        # Only add if it's not a handoff message
-                        if not has_handoff:
-                            messages.insert(0, AIMessage(content=msg.get('content', '')))
+                        # Only add messages that have NO tool calls at all
+                        # This prevents orphaned tool calls in conversation history
+                        if not tool_calls:
+                            # Create clean AIMessage without any additional_kwargs
+                            clean_message = AIMessage(
+                                content=msg.get('content', ''),
+                                additional_kwargs={}  # Ensure no tool_calls leak through
+                            )
+                            messages.insert(0, clean_message)
                     
                     # Stop after collecting a few exchanges (to keep context manageable)
                     if len(messages) >= 6:  # 3 exchanges
                         break
                 
-                # Ensure messages are in chronological order
-                messages = list(reversed(messages))
+                # Messages are already in chronological order from insert(0, ...)
+                logger.info(f"Final conversation history has {len(messages)} messages")
+                for i, msg in enumerate(messages):
+                    logger.info(f"History message {i}: {type(msg).__name__} - {msg.content[:50]}...")
 
             # Add the new user message
             messages.append(HumanMessage(content=task))
-            
-            # Add the new user message
-            messages.append(HumanMessage(content=task))
+            logger.info(f"Added new user message: {task}")
             
             initial_state = {"messages": messages}
             
@@ -3643,38 +3814,30 @@ Remember: You're not just retrieving data - you're uncovering the story that dat
                             new_messages = current_messages[previous_message_count:]
                             
                             for msg in new_messages:
+                                # Include all AI messages, not just from the orchestrator
                                 if isinstance(msg, AIMessage) and msg.content:
                                     content = msg.content
+                                    
+                                    # Determine which agent this is from
+                                    agent_name = current_agent
                                     
                                     # Yield message start
                                     yield json.dumps({
                                         "type": "message_start",
-                                        "agent": current_agent,
+                                        "agent": agent_name,
                                         "timestamp": datetime.now().isoformat()
                                     })
                                     
-                                    # Stream words with small delays
-                                    # Stream words with small delays
-                                    words = content.split(' ')  # Split by space only
+                                    # Stream the content
+                                    words = content.split(' ')
                                     for i, word in enumerate(words):
-                                        # Skip empty words
                                         if not word:
                                             continue
-                                            
-                                        # Check if this word starts a list item
-                                        if word.startswith('-') or (len(word) > 0 and word[0].isdigit() and '.' in word):
-                                            # Add newline before list items if not at start
-                                            if i > 0 and formatted_content:
-                                                formatted_content = '\n' + word
-                                            else:
-                                                formatted_content = word
-                                        else:
-                                            formatted_content = word
                                         
                                         yield json.dumps({
                                             "type": "message_chunk",
-                                            "agent": current_agent,
-                                            "content": formatted_content + (" " if i < len(words) - 1 else ""),
+                                            "agent": agent_name,
+                                            "content": word + (" " if i < len(words) - 1 else ""),
                                             "timestamp": datetime.now().isoformat()
                                         })
                                         await asyncio.sleep(0.02)
@@ -3682,7 +3845,7 @@ Remember: You're not just retrieving data - you're uncovering the story that dat
                                     # Yield message complete
                                     yield json.dumps({
                                         "type": "message_complete",
-                                        "agent": current_agent,
+                                        "agent": agent_name,
                                         "timestamp": datetime.now().isoformat()
                                     })
                             
@@ -3726,15 +3889,26 @@ Remember: You're not just retrieving data - you're uncovering the story that dat
         if not messages:
             return "No messages generated"
         
-        # Get the last AI message as the final result
-        # LangGraph messages are AIMessage/HumanMessage objects, not dicts
+        # Get all AI messages (not just the last one)
         from langchain_core.messages import AIMessage
         
-        ai_messages = [msg for msg in messages if isinstance(msg, AIMessage)]
-        if ai_messages:
-            return ai_messages[-1].content or "No content in final message"
+        ai_messages = [msg for msg in messages if isinstance(msg, AIMessage) and msg.content]
         
-        return "No AI response generated"
+        if not ai_messages:
+            return "No AI response generated"
+        
+        # If there are multiple AI messages, concatenate them
+        # This captures responses from all agents including tool results
+        if len(ai_messages) > 1:
+            # Join all AI message contents with proper spacing
+            all_content = []
+            for msg in ai_messages:
+                if msg.content and msg.content.strip():
+                    all_content.append(msg.content.strip())
+            
+            return "\n\n".join(all_content) if all_content else "No content in messages"
+        else:
+            return ai_messages[-1].content or "No content in final message"
     
     def _convert_messages_to_dict(self, messages: List[Any]) -> List[Dict[str, Any]]:
         from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage

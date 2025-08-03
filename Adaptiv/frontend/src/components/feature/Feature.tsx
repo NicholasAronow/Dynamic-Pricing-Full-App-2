@@ -299,14 +299,16 @@ const Feature: React.FC = () => {
         context: '',
         previous_messages: previousMessages
       };
-  
       let currentContent = '';
       let currentAgentThinking = '';
+      let lastAgentName = 'Ada'; // Track the last agent that provided content
   
       // Stream the response
       for await (const chunk of langgraphService.streamTask(request)) {
         switch (chunk.type) {
           case 'agent_start':
+            // Track which agent is active
+            lastAgentName = chunk.agent === 'pricing_orchestrator' ? 'Ada' : chunk.agent;
             // Clear tools for this agent when it starts
             setChatState(prev => ({
               ...prev,
@@ -325,6 +327,26 @@ const Feature: React.FC = () => {
                   : m
               )
             }));
+            break;
+          
+          case 'message_start':
+            // A new message is starting from an agent
+            lastAgentName = chunk.agent === 'pricing_orchestrator' ? 'Ada' : chunk.agent;
+            break;
+
+          case 'message_chunk':
+            // Accumulate all content, regardless of which agent it comes from
+            if (chunk.content) {
+              currentContent += chunk.content;
+              setChatState(prev => ({
+                ...prev,
+                messages: prev.messages.map(m => 
+                  m.id === assistantMessage.id 
+                    ? { ...m, content: currentContent, agentName: lastAgentName }
+                    : m
+                )
+              }));
+            }
             break;
         
           case 'tool_call':
@@ -364,57 +386,64 @@ const Feature: React.FC = () => {
             // Message from an agent is complete, but keep streaming
             break;
         
-            case 'complete':
-              // All done - save tools with the message
-              setChatState(prev => ({
-                ...prev,
-                isLoading: false,
-                streamingMessageId: undefined,
-                messages: prev.messages.map(m => 
-                  m.id === assistantMessage.id 
-                    ? { 
-                        ...m, 
-                        isStreaming: false,
-                        toolsUsed: { ...prev.activeTools } // Save the tools used
-                      }
-                    : m
-                ),
-                activeTools: {} // Clear active tools after saving
-              }));
-              
-              // Save assistant message to database
-              try {
-                const toolsUsed = Object.values(chatState.activeTools || {}).flat();
+            // Around line 419, when saving the assistant message, update to:
+
+          case 'complete':
+            // Use the accumulated content, not just final_result
+            const finalContent = currentContent || chunk.final_result || '';
+            
+            setChatState(prev => ({
+              ...prev,
+              isLoading: false,
+              streamingMessageId: undefined,
+              messages: prev.messages.map(m => 
+                m.id === assistantMessage.id 
+                  ? { 
+                      ...m, 
+                      content: finalContent,
+                      isStreaming: false,
+                      toolsUsed: { ...prev.activeTools },
+                      agentName: lastAgentName
+                    }
+                  : m
+              ),
+              activeTools: {}
+            }));
+            
+            // Save the complete response including tool results
+            try {
+              const toolsUsed = Object.values(chatState.activeTools || {}).flat();
+              if (shouldGenerateTitle) {
+                console.log('Generating title for conversation:', conversationId, 'with message:', userMessage.content);
+                const title = await generateConversationTitle(userMessage.content);
+                console.log('Generated title:', title);
+                await conversationService.updateConversation(conversationId!, { title });
+                console.log('Updated conversation with title');
+                
+                setChatState(prev => ({
+                  ...prev,
+                  conversations: prev.conversations.map(c => 
+                    c.id === conversationId ? { ...c, title } : c
+                  )
+                }));
+              }
+              if (finalContent && finalContent.trim().length > 0) {
                 await conversationService.addMessage(conversationId!, {
                   role: 'assistant',
-                  content: currentContent,
-                  agent_name: 'Supervisor',
+                  content: finalContent,
+                  agent_name: lastAgentName,
                   tools_used: toolsUsed.length > 0 ? toolsUsed : undefined
                 });
                 
-                // Generate and update title if conversation has no title
-                if (shouldGenerateTitle) {
-                  console.log('Generating title for conversation:', conversationId, 'with message:', userMessage.content);
-                  const title = await generateConversationTitle(userMessage.content);
-                  console.log('Generated title:', title);
-                  await conversationService.updateConversation(conversationId!, { title });
-                  console.log('Updated conversation with title');
-                  
-                  // Update the conversation in the sidebar
-                  setChatState(prev => ({
-                    ...prev,
-                    conversations: prev.conversations.map(c => 
-                      c.id === conversationId ? { ...c, title } : c
-                    )
-                  }));
-                } else {
-                  console.log('Not generating title - shouldGenerateTitle:', shouldGenerateTitle);
-                }
-              } catch (error) {
-                console.error('Failed to save assistant message:', error);
+                console.log('Saved assistant message with content:', finalContent);
               }
+                
+                
               
-              // Focus input when response is complete
+            } catch (error) {
+              console.error('Failed to save assistant message:', error);
+            }
+              
               setTimeout(() => {
                 if (inputRef.current) {
                   inputRef.current.focus();
