@@ -44,7 +44,7 @@ if LANGSMITH_TRACING:
 else:
     langsmith_client = None
     logger.info("LangSmith tracing disabled")
-TAVILY_API_KEY = "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"
+TAVILY_API_KEY = ""
 @dataclass
 class MultiAgentResponse:
     """Response from multi-agent system execution"""
