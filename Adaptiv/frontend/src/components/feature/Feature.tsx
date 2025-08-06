@@ -299,16 +299,26 @@ const Feature: React.FC = () => {
         context: '',
         previous_messages: previousMessages
       };
+      // Replace the entire switch statement in the streaming loop (lines ~380-430) with:
+
       let currentContent = '';
       let currentAgentThinking = '';
-      let lastAgentName = 'Ada'; // Track the last agent that provided content
-  
+      let lastAgentName = 'Ada';
+      let allAgentsContent: { [agent: string]: string } = {}; // Track content from all agents
+      let agentContents: { [agent: string]: string } = {};
+      let lastCompleteAgent: string | null = null;
       // Stream the response
       for await (const chunk of langgraphService.streamTask(request)) {
         switch (chunk.type) {
           case 'agent_start':
             // Track which agent is active
             lastAgentName = chunk.agent === 'pricing_orchestrator' ? 'Ada' : chunk.agent;
+            
+            // Initialize content tracking for this agent if needed
+            if (!allAgentsContent[chunk.agent]) {
+              allAgentsContent[chunk.agent] = '';
+            }
+            
             // Clear tools for this agent when it starts
             setChatState(prev => ({
               ...prev,
@@ -317,13 +327,21 @@ const Feature: React.FC = () => {
                 [chunk.agent]: []
               }
             }));
-            // Show agent thinking in a subtle way
-            currentAgentThinking = chunk.message || 'Thinking...';
+            
+            // Show agent thinking status
+            currentAgentThinking = `${chunk.agent === 'pricing_orchestrator' ? 'Ada' : chunk.agent} is thinking...`;
+            
+            // Update message to show current status
+            const currentFullContent = Object.values(allAgentsContent).filter(c => c).join('\n\n');
             setChatState(prev => ({
               ...prev,
               messages: prev.messages.map(m => 
                 m.id === assistantMessage.id 
-                  ? { ...m, content: currentContent || currentAgentThinking, agentName: chunk.agent }
+                  ? { 
+                      ...m, 
+                      content: currentFullContent || currentAgentThinking, 
+                      agentName: lastAgentName 
+                    }
                   : m
               )
             }));
@@ -335,20 +353,32 @@ const Feature: React.FC = () => {
             break;
 
           case 'message_chunk':
-            // Accumulate all content, regardless of which agent it comes from
             if (chunk.content) {
-              currentContent += chunk.content;
+              // Accumulate content per agent
+              if (!agentContents[chunk.agent]) {
+                agentContents[chunk.agent] = '';
+              }
+              agentContents[chunk.agent] += chunk.content;
+              
+              // Always show the latest content from the most recent agent
+              const displayAgent = chunk.agent === 'pricing_orchestrator' ? 'Ada' : chunk.agent;
+              
               setChatState(prev => ({
                 ...prev,
                 messages: prev.messages.map(m => 
                   m.id === assistantMessage.id 
-                    ? { ...m, content: currentContent, agentName: lastAgentName }
+                    ? { 
+                        ...m, 
+                        content: agentContents[chunk.agent],
+                        agentName: displayAgent
+                      }
                     : m
                 )
               }));
             }
             break;
-        
+            
+
           case 'tool_call':
             // Add tool to active tools list
             setChatState(prev => ({
@@ -362,36 +392,20 @@ const Feature: React.FC = () => {
               }
             }));
             break;
-        
+
           case 'tool_response':
             // Tool completed, keep them to show what was used
             break;
-        
-          case 'message_chunk':
-            // Accumulate content
-            if (chunk.content) {
-              currentContent += chunk.content;
-              setChatState(prev => ({
-                ...prev,
-                messages: prev.messages.map(m => 
-                  m.id === assistantMessage.id 
-                    ? { ...m, content: currentContent }
-                    : m
-                )
-              }));
-            }
-            break;
-        
+
           case 'message_complete':
-            // Message from an agent is complete, but keep streaming
+            // Mark this agent as complete
+            lastCompleteAgent = chunk.agent;
             break;
-        
-            // Around line 419, when saving the assistant message, update to:
 
           case 'complete':
-            // Use the accumulated content, not just final_result
-            const finalContent = currentContent || chunk.final_result || '';
-            
+            // Use the combined content from all agents
+            const finalContent = chunk.final_result || Object.values(agentContents).filter(c => c).join('\n\n') || '';
+  
             setChatState(prev => ({
               ...prev,
               isLoading: false,
@@ -403,7 +417,7 @@ const Feature: React.FC = () => {
                       content: finalContent,
                       isStreaming: false,
                       toolsUsed: { ...prev.activeTools },
-                      agentName: lastAgentName
+                      agentName: 'Ada'  // Always show as Ada for the final response
                     }
                   : m
               ),
@@ -437,20 +451,17 @@ const Feature: React.FC = () => {
                 
                 console.log('Saved assistant message with content:', finalContent);
               }
-                
-                
-              
             } catch (error) {
               console.error('Failed to save assistant message:', error);
             }
-              
-              setTimeout(() => {
-                if (inputRef.current) {
-                  inputRef.current.focus();
-                }
-              }, 100);
-              break;
-        
+            
+            setTimeout(() => {
+              if (inputRef.current) {
+                inputRef.current.focus();
+              }
+            }, 100);
+            break;
+
           case 'error':
             setChatState(prev => ({
               ...prev,
@@ -993,11 +1004,12 @@ const Feature: React.FC = () => {
                         ).map(([agent, tools]) => {
                           if (!tools || tools.length === 0) return null;
                           
+                          // Update the agentDisplay mapping to include database_agent
                           const agentDisplay = {
                             'database_agent': { name: '🗄️ Database Specialist', color: '#1890ff' },
                             'web_researcher': { name: '🔍 Market Researcher', color: '#722ed1' },
                             'algorithm_selector': { name: '⚙️ Algorithm Specialist', color: '#fa8c16' },
-                            'pricing_orchestrator': { name: '💼 Pricing Expert', color: '#52c41a' }
+                            'pricing_orchestrator': { name: '💼 Ada', color: '#52c41a' }  // Changed to show as Ada
                           }[agent] || { name: agent, color: '#666' };
                           
                           return (

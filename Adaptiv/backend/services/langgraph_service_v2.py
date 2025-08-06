@@ -45,6 +45,7 @@ if LANGSMITH_TRACING:
 else:
     langsmith_client = None
     logger.info("LangSmith tracing disabled")
+TAVILY_API_KEY = ""
 @dataclass
 class MultiAgentResponse:
     """Response from multi-agent system execution"""
@@ -59,7 +60,7 @@ class PricingTools:
     
     def __init__(self):
         # Initialize Tavily client
-        self.tavily_api_key = os.getenv("TAVILY_API_KEY")
+        self.tavily_api_key = os.getenv("TAVILY_API_KEY") or TAVILY_API_KEY
         if self.tavily_api_key:
             self.tavily = TavilyClient(api_key=self.tavily_api_key)
         else:
@@ -308,7 +309,7 @@ class LangGraphService:
         self.model = ChatAnthropic(
             model="claude-3-5-sonnet-20241022", 
             temperature=0.3,
-            api_key=os.getenv("ANTHROPIC_API_KEY")
+            api_key=""
         )
         self.tools = PricingTools()
         self.db_session = db_session
@@ -949,6 +950,12 @@ Always focus on providing valuable business insights, not just raw data.
                     "context": context[:200] if context else None  # Truncate long context
                 }
             
+            # Add after line 735, before the main streaming loop:
+# Track which agents have been activated
+                        # After the activated_agents initialization (line ~750):
+            activated_agents = set()
+            agent_responses = {}  # Track responses from each agent
+
             async for chunk in self.supervisor_graph.astream(
                 initial_state,
                 config=config
@@ -958,13 +965,23 @@ Always focus on providing valuable business insights, not just raw data.
                         execution_path.append(node_name)
                         current_agent = node_name
                         
-                        # Yield agent activation
-                        agent_display_name = {
-                            "pricing_orchestrator": "💼 Pricing Expert",
-                            "web_researcher": "🔍 Market Researcher", 
-                            "algorithm_selector": "⚙️ Algorithm Specialist",
-                            "database_agent": "🗄️ Database Specialist"
-                        }.get(node_name, f"🤖 {node_name}")
+                        # Emit agent_start event
+                        if node_name not in activated_agents:
+                            activated_agents.add(node_name)
+                            agent_display_name = {
+                                "pricing_orchestrator": "Ada",
+                                "web_researcher": "Market Researcher", 
+                                "algorithm_selector": "Algorithm Specialist",
+                                "database_agent": "Database Specialist"
+                            }.get(node_name, node_name)
+                            
+                            yield json.dumps({
+                                "type": "agent_start",
+                                "agent": node_name,
+                                "message": f"{agent_display_name} is analyzing...",
+                                "timestamp": datetime.now().isoformat()
+                            })
+                            await asyncio.sleep(0.01)
                     
                     result = node_output
                     
@@ -996,52 +1013,58 @@ Always focus on providing valuable business insights, not just raw data.
                                     "tool_call_id": getattr(msg, 'tool_call_id', ''),
                                     "timestamp": datetime.now().isoformat()
                                 })
+                                await asyncio.sleep(0.01)
 
-                    # Extract and stream only NEW messages (beyond the initial conversation)
+                    # Extract and stream messages from ALL agents
                     if "messages" in node_output and node_output["messages"]:
                         current_messages = node_output["messages"]
                         
-                        # Only process messages that are new (beyond the initial count)
                         if len(current_messages) > previous_message_count:
-                            # Get only the new messages
                             new_messages = current_messages[previous_message_count:]
                             
                             for msg in new_messages:
-                                # Include all AI messages, not just from the orchestrator
                                 if isinstance(msg, AIMessage) and msg.content:
-                                    # Use the safe content extraction helper
                                     content = self._safe_extract_content(msg.content)
                                     
-                                    # Determine which agent this is from
-                                    agent_name = current_agent
-                                    
-                                    # Yield message start
-                                    yield json.dumps({
-                                        "type": "message_start",
-                                        "agent": agent_name,
-                                        "timestamp": datetime.now().isoformat()
-                                    })
-                                    
-                                    # Stream the content (now guaranteed to be a string)
-                                    words = content.split(' ')
-                                    for i, word in enumerate(words):
-                                        if not word:
-                                            continue
+                                    if content and content.strip():
+                                        # Store content from each agent
+                                        if current_agent not in agent_responses:
+                                            agent_responses[current_agent] = []
+                                        agent_responses[current_agent].append(content.strip())
                                         
-                                        yield json.dumps({
-                                            "type": "message_chunk",
-                                            "agent": agent_name,
-                                            "content": word + (" " if i < len(words) - 1 else ""),
-                                            "timestamp": datetime.now().isoformat()
-                                        })
-                                        await asyncio.sleep(0.02)
-                                    
-                                    # Yield message complete
-                                    yield json.dumps({
-                                        "type": "message_complete",
-                                        "agent": agent_name,
-                                        "timestamp": datetime.now().isoformat()
-                                    })
+                                        # Only stream if this is the pricing_orchestrator's final response
+                                        # OR if it's a sub-agent providing significant content
+                                        should_stream = (
+                                            current_agent == "pricing_orchestrator" or 
+                                            (current_agent in ["web_researcher", "database_agent", "algorithm_selector"] and len(content) > 100)
+                                        )
+                                        
+                                        if should_stream:
+                                            yield json.dumps({
+                                                "type": "message_start",
+                                                "agent": current_agent,
+                                                "timestamp": datetime.now().isoformat()
+                                            })
+                                            
+                                            # Stream the content
+                                            words = content.split(' ')
+                                            for i, word in enumerate(words):
+                                                if not word:
+                                                    continue
+                                                
+                                                yield json.dumps({
+                                                    "type": "message_chunk",
+                                                    "agent": current_agent,
+                                                    "content": word + (" " if i < len(words) - 1 else ""),
+                                                    "timestamp": datetime.now().isoformat()
+                                                })
+                                                await asyncio.sleep(0.02)
+                                            
+                                            yield json.dumps({
+                                                "type": "message_complete",
+                                                "agent": current_agent,
+                                                "timestamp": datetime.now().isoformat()
+                                            })
                             
                             # Update the previous message count
                             previous_message_count = len(current_messages)
@@ -1079,32 +1102,40 @@ Always focus on providing valuable business insights, not just raw data.
         return await self.execute_supervisor_workflow(task, context)
     
     def _extract_final_result(self, messages: List[Any]) -> str:
-        """Extract the final result from message history"""
+        """Extract the final result from message history, prioritizing the orchestrator's final synthesis"""
         if not messages:
             return "No messages generated"
         
-        # Get all AI messages (not just the last one)
         from langchain_core.messages import AIMessage
         
+        # Get all AI messages
         ai_messages = [msg for msg in messages if isinstance(msg, AIMessage) and msg.content]
         
         if not ai_messages:
             return "No AI response generated"
         
-        # If there are multiple AI messages, concatenate them
-        # This captures responses from all agents including tool results
-        if len(ai_messages) > 1:
-            # Join all AI message contents with proper spacing
-            all_content = []
-            for msg in ai_messages:
-                safe_content = self._safe_extract_content(msg.content)
-                if safe_content and safe_content.strip():
-                    all_content.append(safe_content.strip())
-            
-            return "\n\n".join(all_content) if all_content else "No content in messages"
-        else:
-            final_content = self._safe_extract_content(ai_messages[-1].content)
-            return final_content or "No content in final message"
+        # Look for the LAST message from the pricing_orchestrator specifically
+        # This should be the synthesized response
+        orchestrator_messages = []
+        other_agent_messages = []
+        
+        for msg in ai_messages:
+            content = self._safe_extract_content(msg.content)
+            if content and content.strip():
+                # Try to identify if this is from the orchestrator
+                # (You might need to add metadata to messages to track their source)
+                if "I'll help you" in content or "Based on" in content or "Let me" in content:
+                    orchestrator_messages.append(content.strip())
+                else:
+                    other_agent_messages.append(content.strip())
+        
+        # Prefer the last orchestrator message as it should be the synthesis
+        if orchestrator_messages:
+            return orchestrator_messages[-1]
+        
+        # If no clear orchestrator message, combine all responses
+        all_content = orchestrator_messages + other_agent_messages
+        return "\n\n".join(all_content) if all_content else "No content in messages"
     
     def _convert_messages_to_dict(self, messages: List[Any]) -> List[Dict[str, Any]]:
         from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
