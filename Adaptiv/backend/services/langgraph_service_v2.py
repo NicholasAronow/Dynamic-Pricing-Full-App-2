@@ -15,6 +15,7 @@ from typing import Annotated
 import os
 
 from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.tools import tool, InjectedToolCallId
 from langgraph.graph import StateGraph, MessagesState, START
@@ -44,7 +45,6 @@ if LANGSMITH_TRACING:
 else:
     langsmith_client = None
     logger.info("LangSmith tracing disabled")
-TAVILY_API_KEY = ""
 @dataclass
 class MultiAgentResponse:
     """Response from multi-agent system execution"""
@@ -59,7 +59,7 @@ class PricingTools:
     
     def __init__(self):
         # Initialize Tavily client
-        self.tavily_api_key = os.getenv("TAVILY_API_KEY") or TAVILY_API_KEY
+        self.tavily_api_key = os.getenv("TAVILY_API_KEY")
         if self.tavily_api_key:
             self.tavily = TavilyClient(api_key=self.tavily_api_key)
         else:
@@ -287,8 +287,29 @@ def create_handoff_tool(*, agent_name: str, description: str | None = None):
 class LangGraphService:
     """Pricing Expert Orchestrator with Sub-Agents"""
     
+    def _safe_extract_content(self, content) -> str:
+        """Safely extract text content from Claude message content that might be a list or other type"""
+        if isinstance(content, list):
+            # Claude sometimes returns content as a list of content blocks
+            content_text = ""
+            for block in content:
+                if isinstance(block, dict) and 'text' in block:
+                    content_text += block['text']
+                elif isinstance(block, str):
+                    content_text += block
+            return content_text
+        elif isinstance(content, str):
+            return content
+        else:
+            # Convert any other type to string
+            return str(content) if content else ""
+    
     def __init__(self, db_session=None):
-        self.model = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+        self.model = ChatAnthropic(
+            model="claude-3-5-sonnet-20241022", 
+            temperature=0.3,
+            api_key=os.getenv("ANTHROPIC_API_KEY")
+        )
         self.tools = PricingTools()
         self.db_session = db_session
         self.database_tools = None  # Will be initialized when user_id is available
@@ -878,13 +899,16 @@ Always focus on providing valuable business insights, not just raw data.
                             i = j  # Continue from before the tool chain
                             continue
                         
-                        elif msg.get('content', '').strip():
-                            # This is a regular assistant message with content and no tool calls
-                            clean_message = AIMessage(
-                                content=msg.get('content', ''),
-                                additional_kwargs={}  # Ensure clean message
-                            )
-                            clean_messages.insert(0, clean_message)
+                        else:
+                            # This is a regular assistant message, check if it has content
+                            raw_content = msg.get('content', '')
+                            safe_content = self._safe_extract_content(raw_content)
+                            if safe_content.strip():
+                                clean_message = AIMessage(
+                                    content=safe_content,
+                                    additional_kwargs={}  # Ensure clean message
+                                )
+                                clean_messages.insert(0, clean_message)
                     
                     # Skip tool messages entirely when building clean history
                     # They should only exist as part of complete tool call chains
@@ -898,7 +922,9 @@ Always focus on providing valuable business insights, not just raw data.
                 messages = clean_messages
                 logger.info(f"Final conversation history has {len(messages)} clean messages")
                 for i, msg in enumerate(messages):
-                    logger.info(f"History message {i}: {type(msg).__name__} - {msg.content[:50]}...")
+                    # Handle different content types for logging
+                    content_preview = str(msg.content)[:50] if msg.content else "No content"
+                    logger.info(f"History message {i}: {type(msg).__name__} - {content_preview}...")
             
             # Add the new user message
             messages.append(HumanMessage(content=task))
@@ -983,7 +1009,8 @@ Always focus on providing valuable business insights, not just raw data.
                             for msg in new_messages:
                                 # Include all AI messages, not just from the orchestrator
                                 if isinstance(msg, AIMessage) and msg.content:
-                                    content = msg.content
+                                    # Use the safe content extraction helper
+                                    content = self._safe_extract_content(msg.content)
                                     
                                     # Determine which agent this is from
                                     agent_name = current_agent
@@ -995,7 +1022,7 @@ Always focus on providing valuable business insights, not just raw data.
                                         "timestamp": datetime.now().isoformat()
                                     })
                                     
-                                    # Stream the content
+                                    # Stream the content (now guaranteed to be a string)
                                     words = content.split(' ')
                                     for i, word in enumerate(words):
                                         if not word:
@@ -1070,12 +1097,14 @@ Always focus on providing valuable business insights, not just raw data.
             # Join all AI message contents with proper spacing
             all_content = []
             for msg in ai_messages:
-                if msg.content and msg.content.strip():
-                    all_content.append(msg.content.strip())
+                safe_content = self._safe_extract_content(msg.content)
+                if safe_content and safe_content.strip():
+                    all_content.append(safe_content.strip())
             
             return "\n\n".join(all_content) if all_content else "No content in messages"
         else:
-            return ai_messages[-1].content or "No content in final message"
+            final_content = self._safe_extract_content(ai_messages[-1].content)
+            return final_content or "No content in final message"
     
     def _convert_messages_to_dict(self, messages: List[Any]) -> List[Dict[str, Any]]:
         from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
