@@ -55,6 +55,262 @@ class MultiAgentResponse:
     metadata: Dict[str, Any]
     messages: List[Dict[str, Any]]
 
+class DatabaseWriteTools:
+    """Tools for safely modifying database information"""
+    
+    def __init__(self, user_id: int = None, db_session=None):
+        self.db_session = db_session
+        self.user_id = user_id
+    
+    @tool
+    def add_competitor(self, name: str, location: str, category: str, notes: str = None) -> str:
+        """Add a new competitor to the database
+        
+        Args:
+            name: Competitor business name
+            location: Business location/address
+            category: Business category (e.g., 'coffee shop', 'restaurant')
+            notes: Optional notes about the competitor
+        """
+        try:
+            from models.competitor import CompetitorEntity
+            
+            # Check if competitor already exists
+            existing = self.db_session.query(CompetitorEntity).filter_by(
+                name=name,
+                user_id=self.user_id
+            ).first()
+            
+            if existing:
+                return f"Competitor '{name}' already exists in your database."
+            
+            # Create new competitor
+            new_competitor = CompetitorEntity(
+                name=name,
+                location=location,
+                category=category,
+                notes=notes,
+                user_id=self.user_id,
+                created_at=datetime.now(),
+                updated_at=datetime.now()
+            )
+            
+            self.db_session.add(new_competitor)
+            self.db_session.commit()
+            
+            return f"✅ Successfully added '{name}' as a competitor in {location}."
+            
+        except Exception as e:
+            self.db_session.rollback()
+            return f"❌ Error adding competitor: {str(e)}"
+    
+    @tool
+    def update_item_price(self, item_name: str, new_price: float, notes: str = None) -> str:
+        """Update the price of an existing menu item
+        
+        Args:
+            item_name: Name of the menu item
+            new_price: New price for the item
+            notes: Optional notes about the price change
+        """
+        try:
+            from models.item import Item
+            from models.price_history import PriceHistory
+            
+            # Find the item
+            item = self.db_session.query(Item).filter_by(
+                name=item_name,
+                user_id=self.user_id
+            ).first()
+            
+            if not item:
+                return f"❌ Item '{item_name}' not found in your menu."
+            
+            # Store old price in history
+            price_history = PriceHistory(
+                item_id=item.id,
+                old_price=item.price,
+                new_price=new_price,
+                change_reason=notes or "Price updated via Ada",
+                changed_by=self.user_id,
+                created_at=datetime.now()
+            )
+            
+            # Update the item price
+            old_price = item.price
+            item.price = new_price
+            item.updated_at = datetime.now()
+            
+            self.db_session.add(price_history)
+            self.db_session.commit()
+            
+            return f"✅ Updated '{item_name}' price from ${old_price:.2f} to ${new_price:.2f}"
+            
+        except Exception as e:
+            self.db_session.rollback()
+            return f"❌ Error updating price: {str(e)}"
+    
+    @tool
+    def add_menu_item(self, name: str, price: float, category: str, 
+                      description: str = None, cost: float = None) -> str:
+        """Add a new item to your menu
+        
+        Args:
+            name: Item name
+            price: Selling price
+            category: Item category
+            description: Optional item description
+            cost: Optional item cost (for margin calculations)
+        """
+        try:
+            from models.item import Item
+            
+            # Check if item already exists
+            existing = self.db_session.query(Item).filter_by(
+                name=name,
+                user_id=self.user_id
+            ).first()
+            
+            if existing:
+                return f"Item '{name}' already exists. Use update_item_price to modify it."
+            
+            # Create new item
+            new_item = Item(
+                name=name,
+                price=price,
+                category=category,
+                description=description,
+                cost=cost,
+                user_id=self.user_id,
+                created_at=datetime.now(),
+                updated_at=datetime.now()
+            )
+            
+            self.db_session.add(new_item)
+            self.db_session.commit()
+            
+            margin = ((price - cost) / price * 100) if cost else None
+            margin_text = f" (Margin: {margin:.1f}%)" if margin else ""
+            
+            return f"✅ Added '{name}' to menu at ${price:.2f}{margin_text}"
+            
+        except Exception as e:
+            self.db_session.rollback()
+            return f"❌ Error adding item: {str(e)}"
+    
+    @tool
+    def add_competitor_item(self, competitor_name: str, item_name: str, 
+                           price: float, category: str = None) -> str:
+        """Add a competitor's menu item for price comparison
+        
+        Args:
+            competitor_name: Name of the competitor
+            item_name: Name of their menu item
+            price: Price of the item
+            category: Optional category
+        """
+        try:
+            from models.competitor import CompetitorEntity, CompetitorItem
+            
+            # Find competitor
+            competitor = self.db_session.query(CompetitorEntity).filter_by(
+                name=competitor_name,
+                user_id=self.user_id
+            ).first()
+            
+            if not competitor:
+                return f"❌ Competitor '{competitor_name}' not found. Add them first using add_competitor."
+            
+            # Check if item already exists
+            existing = self.db_session.query(CompetitorItem).filter_by(
+                competitor_id=competitor.id,
+                name=item_name
+            ).first()
+            
+            if existing:
+                # Update existing item
+                existing.price = price
+                existing.updated_at = datetime.now()
+                self.db_session.commit()
+                return f"✅ Updated '{item_name}' price for {competitor_name} to ${price:.2f}"
+            
+            # Create new competitor item
+            new_item = CompetitorItem(
+                competitor_id=competitor.id,
+                name=item_name,
+                price=price,
+                category=category,
+                created_at=datetime.now(),
+                updated_at=datetime.now()
+            )
+            
+            self.db_session.add(new_item)
+            self.db_session.commit()
+            
+            return f"✅ Added '{item_name}' at ${price:.2f} for competitor {competitor_name}"
+            
+        except Exception as e:
+            self.db_session.rollback()
+            return f"❌ Error adding competitor item: {str(e)}"
+
+    @tool
+    def bulk_import_data(self, data_type: str, csv_content: str) -> str:
+        """Import multiple items from CSV data
+        
+        Args:
+            data_type: Type of data ('menu_items', 'competitors', 'competitor_items')
+            csv_content: CSV formatted string with headers
+        """
+        try:
+            import csv
+            from io import StringIO
+            
+            # Parse CSV
+            reader = csv.DictReader(StringIO(csv_content))
+            rows = list(reader)
+            
+            if not rows:
+                return "❌ No data found in CSV"
+            
+            results = []
+            errors = []
+            
+            if data_type == 'menu_items':
+                for row in rows:
+                    try:
+                        result = self.add_menu_item(
+                            name=row.get('name'),
+                            price=float(row.get('price', 0)),
+                            category=row.get('category', 'Uncategorized'),
+                            description=row.get('description'),
+                            cost=float(row.get('cost')) if row.get('cost') else None
+                        )
+                        results.append(result)
+                    except Exception as e:
+                        errors.append(f"Row {row}: {str(e)}")
+            
+            elif data_type == 'competitors':
+                for row in rows:
+                    try:
+                        result = self.add_competitor(
+                            name=row.get('name'),
+                            location=row.get('location', ''),
+                            category=row.get('category', ''),
+                            notes=row.get('notes')
+                        )
+                        results.append(result)
+                    except Exception as e:
+                        errors.append(f"Row {row}: {str(e)}")
+            
+            summary = f"Imported {len(results)} items successfully."
+            if errors:
+                summary += f"\n{len(errors)} errors occurred:\n" + "\n".join(errors[:5])
+            
+            return summary
+            
+        except Exception as e:
+            return f"❌ Error importing data: {str(e)}"
+
 class PricingTools:
     """Tools for pricing agents with real web search"""
     
@@ -253,7 +509,51 @@ class PricingTools:
             selected = "value_based"
             
         return f"SELECTED ALGORITHM: {algorithms[selected]}. Rationale: Based on {product_type} product type, {market_conditions} market conditions, and {business_goals} business goals, this algorithm will optimize for your specific situation."
-
+    @tool
+    def process_uploaded_file(self, file_type: str, file_content: str, 
+                            file_name: str = None) -> str:
+        """Process uploaded files and extract structured data
+        
+        Args:
+            file_type: Type of file (csv, json, excel, pdf)
+            file_content: Base64 encoded file content or text content
+            file_name: Optional filename for context
+        """
+        try:
+            import base64
+            import json
+            import csv
+            from io import StringIO
+            
+            if file_type == 'csv':
+                # Process CSV content
+                reader = csv.DictReader(StringIO(file_content))
+                data = list(reader)
+                
+                # Analyze the data structure
+                if not data:
+                    return "Empty CSV file"
+                
+                # Detect data type based on columns
+                columns = data[0].keys()
+                
+                if 'price' in columns or 'item' in columns:
+                    return f"Menu data detected with {len(data)} items. Use 'bulk_import_data' tool to import."
+                elif 'competitor' in columns or 'business' in columns:
+                    return f"Competitor data detected with {len(data)} entries. Use 'bulk_import_data' tool to import."
+                else:
+                    return f"CSV processed: {len(data)} rows, columns: {', '.join(columns)}"
+                    
+            elif file_type == 'json':
+                # Process JSON content
+                data = json.loads(file_content)
+                return f"JSON processed with {len(data)} items" if isinstance(data, list) else "JSON object processed"
+                
+            else:
+                return f"File type '{file_type}' processing not yet implemented"
+                
+        except Exception as e:
+            return f"Error processing file: {str(e)}"
 class DatabaseTools:
     """Tools for accessing database information"""
     
@@ -312,8 +612,9 @@ class LangGraphService:
             api_key=""
         )
         self.tools = PricingTools()
-        self.db_session = db_session
-        self.database_tools = None  # Will be initialized when user_id is available
+        self.db_session = db_session  # Store the session
+        self.database_tools = None
+        self.user_id = None  # Initialize as None
         
         # Don't create agents here - they'll be created when needed
         self.pricing_orchestrator = None
@@ -322,28 +623,16 @@ class LangGraphService:
         self.database_agent = None
         self.supervisor_graph = None
         
-        # Create handoff tools for sub-agents
-        self.transfer_to_web_researcher = create_handoff_tool(
-            agent_name="web_researcher",
-            description="Transfer to web research agent for market data and competitor analysis"
-        )
-        self.transfer_to_algorithm_selector = create_handoff_tool(
-            agent_name="algorithm_selector",
-            description="Transfer to algorithm selection agent for pricing strategy recommendations"
-        )
-        self.transfer_to_database_agent = create_handoff_tool(
-            agent_name="database_agent",
-            description="Transfer to database agent to retrieve business data, sales history, menu items, and competitor information from the database"
-        )
-        
-        # Initialize agents
-        self._create_agents()
-        
-        # Build supervisor graph (main architecture)
-        self.supervisor_graph = self._build_supervisor_graph()
+        # Log initialization
+        logger.info(f"LangGraphService initialized with db_session: {bool(db_session)}")
     
     def _initialize_agents_with_context(self, user_id: int):
         """Initialize or reinitialize agents with user context"""
+        logger.info(f"Initializing agents with user context for user_id: {user_id}")
+        
+        # Store user_id first
+        self.user_id = user_id
+        
         # Initialize database tools with user_id
         self.database_tools = DatabaseTools(user_id=user_id, db_session=self.db_session)
         
@@ -361,11 +650,13 @@ class LangGraphService:
             description="Transfer to database agent to retrieve business data, sales history, menu items, and competitor information from the database"
         )
         
-        # Create agents
+        # Create agents (this will now have access to self.user_id)
         self._create_agents()
         
         # Build supervisor graph
         self.supervisor_graph = self._build_supervisor_graph()
+        
+        logger.info(f"✅ Agents initialized with context for user {user_id}")
 
     def _create_agents(self):
         """Create the pricing orchestrator and specialized sub-agents"""
@@ -378,24 +669,45 @@ class LangGraphService:
                 self.transfer_to_algorithm_selector,
                 self.transfer_to_database_agent
             ],
-            prompt="""You are an elite pricing consultant and orchestrator with deep expertise in pricing strategy, revenue optimization, and market dynamics. You help businesses make data-driven pricing decisions through intelligent conversation and analysis.
-
-<identity>
-You are the lead pricing strategist coordinating a team of specialized sub-agents. Your role is to understand complex pricing challenges, gather necessary information, and use the algorithm agent to implement actionable pricing recommendations that drive business growth.
-</identity>
+            prompt="""You are Ada, an elite pricing consultant and business data manager...
 
 <capabilities>
 - Engage in natural, consultative conversations about pricing challenges
-- Use the database as a source of truth before asking the client any clarifying questions
-- Ask strategic clarifying questions to understand business context, goals, and constraints for any information that could not be provided by the database
-- Coordinate with specialized sub-agents for specific expertise:
-  * Web Researcher: For real-time market data, competitor analysis, and industry trends
-  * Algorithm Selector: For choosing and implementing optimal pricing strategies
-  * Database Agent: For retrieving business data, sales history, product catalogs, and historical performance
-- Synthesize information from multiple sources into cohesive pricing strategies
-- Explain complex pricing concepts in accessible, business-friendly terms
-- Provide implementation roadmaps with clear next steps
+- Manage and update business data including menu items, competitors, and pricing
+- Process uploaded files and import data into the system
+- Track competitor pricing and market changes
+- Maintain historical records of all price changes
+- Coordinate with specialized sub-agents:
+  * Web Researcher: For real-time market data and competitor discovery
+  * Database Agent: For data retrieval AND updates (with user confirmation)
+  * Algorithm Selector: For pricing strategy recommendations
 </capabilities>
+
+<data_management_protocol>
+When users want to modify data:
+1. Clearly confirm what changes they want to make
+2. Use the database agent to execute the changes
+3. Provide clear feedback on what was changed
+4. Suggest related actions (e.g., after adding a competitor, offer to add their menu items)
+
+When users upload files:
+1. Identify the file type and content structure
+2. Validate the data format
+3. Offer to import the data with a preview
+4. Execute bulk imports efficiently
+5. Report on success/failures
+</data_management_protocol>
+
+<example_interactions>
+User: "I found out Starbucks is nearby, add them as a competitor"
+Ada: "I'll add Starbucks as a competitor. What's their location? I can also help you track their menu prices if you'd like."
+
+User: "Update my cappuccino price to $5.25"
+Ada: "I'll update your cappuccino from $4.75 to $5.25. This represents a 10.5% increase. Would you like me to analyze how this compares to competitor pricing?"
+
+User: "I have a CSV of competitor prices"
+Ada: "I can import that competitor pricing data for you. Let me process the file and show you what I found, then we can import it to track their prices."
+</example_interactions>
 
 <workflow>
 1. **Understand the Query**
@@ -699,71 +1011,209 @@ Remember: Your algorithm selection can make or break a pricing strategy. Be deci
         self.database_agent = self._create_sql_database_agent()
     
     def _create_sql_database_agent(self):
-        """Create SQL-based database agent using LangChain SQLDatabase and toolkit"""
+        """Create SQL-based database agent with both read and write capabilities"""
         try:
             # Import database configuration
             from config.database import DATABASE_URL
+            import sqlalchemy
+            from sqlalchemy.orm import sessionmaker
             
-            # Create SQLDatabase connection
+            # Create SQLDatabase connection for read operations
             db = SQLDatabase.from_uri(DATABASE_URL)
             
             # Create SQL toolkit with tools
             toolkit = SQLDatabaseToolkit(db=db, llm=self.model)
             sql_tools = toolkit.get_tools()
             
-            # System prompt for SQL agent
-            sql_agent_prompt = """
-You are a database specialist agent that helps analyze business data by generating and executing SQL queries.
-
-## Your Capabilities:
-- Generate SQL queries based on natural language requests
-- Execute queries safely against the database
-- Analyze query results and provide insights
-- Answer both quantitative and qualitative business questions
-
-## Database Schema Context:
-The database contains tables for:
-- menu_items: Product catalog with prices, costs, categories
-- orders: Sales transactions with timestamps and totals
-- order_items: Line items linking orders to menu items with quantities
-- competitor_entities: Competitor information and pricing data
-- competitor_items: Competitor menu items and prices
-- users: User accounts and business information
-
-## Safety Guidelines:
-- ONLY use SELECT statements - never INSERT, UPDATE, DELETE, or DROP
-- Always limit query results (use LIMIT clause when appropriate)
-- Be cautious with large result sets
-- Validate queries before execution
-- If unsure about a query, explain your approach first
-
-## Response Format:
-1. Understand the business question or analysis request
-2. Generate appropriate SQL query with explanation
-3. Execute the query using available tools
-4. Analyze results and provide business insights
-5. Suggest follow-up analyses if relevant
-
-## Example Workflow:
-User: "What are our top-selling items this month?"
-1. Generate SQL to find top items by quantity/revenue this month
-2. Execute query using sql_db_query tool
-3. Analyze results to identify trends and insights
-4. Provide actionable recommendations
-
-Always focus on providing valuable business insights, not just raw data.
-"""
+            # Initialize write tools
+            write_tools = []
             
-            # Create the SQL agent
+            # Create a session for write operations if we have user context
+            if self.db_session and self.user_id:
+                # Create DatabaseWriteTools instance
+                db_write_tools = DatabaseWriteTools(
+                    user_id=self.user_id, 
+                    db_session=self.db_session
+                )
+                
+                # Add write capability tools
+                write_tools = [
+                    db_write_tools.add_competitor,
+                    db_write_tools.update_item_price,
+                    db_write_tools.add_menu_item,
+                    db_write_tools.add_competitor_item,
+                    db_write_tools.bulk_import_data,
+                ]
+                
+                logger.info(f"✅ Database write tools initialized for user {self.user_id}")
+            else:
+                logger.warning(f"⚠️ Database write tools not initialized - user_id: {self.user_id}, db_session: {bool(self.db_session)}")
+            
+            # For business info updates, create a special tool
+            @tool
+            def update_business_info(field: str, value: str) -> str:
+                """Update business information fields like address, name, phone, etc.
+                
+                Args:
+                    field: The field to update (name, address, city, state, etc.)
+                    value: The new value for the field
+                """
+                if not self.db_session or not self.user_id:
+                    return "❌ Cannot update business info without user context"
+                
+                try:
+                    import models
+                    
+                    # Get the user record
+                    user = self.db_session.query(models.User).filter_by(id=self.user_id).first()
+                    if not user:
+                        return f"❌ User record not found"
+                    
+                    # Get or create business profile
+                    business_profile = user.business
+                    if not business_profile:
+                        business_profile = models.BusinessProfile(user_id=self.user_id)
+                        self.db_session.add(business_profile)
+                        self.db_session.flush()  # Get the ID
+                    
+                    # Map common field names to database columns
+                    field_mapping = {
+                        'name': 'business_name',
+                        'business_name': 'business_name',
+                        'address': 'street_address',
+                        'street_address': 'street_address',
+                        'city': 'city',
+                        'state': 'state',
+                        'postal_code': 'postal_code',
+                        'zip': 'postal_code',
+                        'country': 'country',
+                        'industry': 'industry',
+                        'company_size': 'company_size',
+                        'description': 'description',
+                        'founded_year': 'founded_year',
+                    }
+                    
+                    # Get the actual database field
+                    db_field = field_mapping.get(field.lower(), field.lower())
+                    
+                    # Check if the field exists on the business profile model
+                    if not hasattr(business_profile, db_field):
+                        return f"❌ Field '{field}' is not a valid business information field. Available fields: {', '.join(field_mapping.keys())}"
+                    
+                    # Get old value for confirmation
+                    old_value = getattr(business_profile, db_field)
+                    
+                    # Update the field
+                    setattr(business_profile, db_field, value)
+                    
+                    # Handle special case for founded_year (convert to int if needed)
+                    if db_field == 'founded_year' and value:
+                        try:
+                            setattr(business_profile, db_field, int(value))
+                        except ValueError:
+                            return f"❌ Founded year must be a valid number, got: {value}"
+                    
+                    self.db_session.commit()
+                    
+                    return f"✅ Successfully updated {field} from '{old_value}' to '{value}'"
+                    
+                except Exception as e:
+                    self.db_session.rollback()
+                    logger.error(f"Error updating business info: {e}")
+                    return f"❌ Error updating {field}: {str(e)}"
+            
+            # Add the business info update tool if we have context
+            if self.db_session and self.user_id:
+                write_tools.append(update_business_info)
+            
+            # Combine all tools
+            all_tools = sql_tools + write_tools
+            
+            # Enhanced prompt with write capabilities
+            sql_agent_prompt = """
+    You are a database specialist agent that helps analyze and manage business data.
+
+    ## Your Capabilities:
+    ### Read Operations:
+    - Generate and execute SQL queries for analysis
+    - Retrieve business metrics and insights
+    - Analyze sales patterns and trends
+
+    ### Write Operations:
+    - Update business information (address, phone, email, name)
+    - Add new competitors to track
+    - Update menu item prices with history tracking
+    - Add new menu items with cost/margin data
+    - Import competitor pricing information
+    - Bulk import data from CSV format
+
+    ## Available Tools:
+    - SQL query tools for reading data
+    - update_business_info: Update business details like address, phone, etc.
+    - add_competitor: Add new competitor businesses
+    - update_item_price: Update menu item prices
+    - add_menu_item: Add new items to menu
+    - add_competitor_item: Add competitor pricing data
+    - bulk_import_data: Import multiple items from CSV
+
+    ## Database Schema:
+    - users: Business account information (address, phone, email, etc.)
+    - items: Your menu items (name, price, cost, category)
+    - orders: Sales transactions
+    - order_items: Order line items
+    - competitor_entities: Competitor businesses
+    - competitor_items: Competitor menu/pricing
+    - price_history: Track price changes over time
+
+    ## When updating business information:
+    1. Use the update_business_info tool for address, phone, email changes
+    2. Clearly confirm what was changed
+    3. Provide the old and new values
+
+    ## Example:
+    User: "Change my business address to 17 Bank Street, Princeton NJ"
+    Response: I'll update your business address now.
+    [Use update_business_info("address", "17 Bank Street, Princeton NJ")]
+    Then report: "✅ Successfully updated your business address to 17 Bank Street, Princeton NJ"
+
+    Remember: Be helpful, precise, and always confirm successful changes.
+    """
+            
+            # Create the enhanced SQL agent
             sql_agent = create_react_agent(
                 model=self.model,
-                tools=sql_tools,
+                tools=all_tools,
                 prompt=sql_agent_prompt,
                 name="database_agent"
             )
             
-            logger.info("✅ SQL Database Agent created successfully")
+            logger.info(f"✅ SQL Database Agent created successfully with {len(all_tools)} tools")
             return sql_agent
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to create SQL Database Agent: {e}", exc_info=True)
+            
+            # Return a more helpful fallback agent
+            fallback_prompt = f"""Database agent initialization failed. Error: {str(e)}
+            
+    This usually means:
+    1. Database connection issues - check DATABASE_URL
+    2. Missing database tables - run migrations
+    3. Permission issues - check database user permissions
+
+    I cannot perform database operations right now, but I can still help with:
+    - General pricing advice
+    - Market analysis (via web search)
+    - Strategy recommendations
+
+    Please contact support if this persists."""
+            
+            return create_react_agent(
+                model=self.model,
+                tools=[],
+                prompt=fallback_prompt,
+                name="database_agent"
+            )
             
         except Exception as e:
             logger.error(f"❌ Failed to create SQL Database Agent: {e}")
@@ -1022,49 +1472,39 @@ Always focus on providing valuable business insights, not just raw data.
                         if len(current_messages) > previous_message_count:
                             new_messages = current_messages[previous_message_count:]
                             
+                            # In the message streaming section, make sure we stream ALL AI messages:
                             for msg in new_messages:
                                 if isinstance(msg, AIMessage) and msg.content:
                                     content = self._safe_extract_content(msg.content)
                                     
+                                    # Stream ALL content, not just from certain agents
                                     if content and content.strip():
-                                        # Store content from each agent
-                                        if current_agent not in agent_responses:
-                                            agent_responses[current_agent] = []
-                                        agent_responses[current_agent].append(content.strip())
+                                        # Always stream the content
+                                        yield json.dumps({
+                                            "type": "message_start",
+                                            "agent": current_agent,
+                                            "timestamp": datetime.now().isoformat()
+                                        })
                                         
-                                        # Only stream if this is the pricing_orchestrator's final response
-                                        # OR if it's a sub-agent providing significant content
-                                        should_stream = (
-                                            current_agent == "pricing_orchestrator" or 
-                                            (current_agent in ["web_researcher", "database_agent", "algorithm_selector"] and len(content) > 100)
-                                        )
-                                        
-                                        if should_stream:
-                                            yield json.dumps({
-                                                "type": "message_start",
-                                                "agent": current_agent,
-                                                "timestamp": datetime.now().isoformat()
-                                            })
-                                            
-                                            # Stream the content
-                                            words = content.split(' ')
-                                            for i, word in enumerate(words):
-                                                if not word:
-                                                    continue
-                                                
-                                                yield json.dumps({
-                                                    "type": "message_chunk",
-                                                    "agent": current_agent,
-                                                    "content": word + (" " if i < len(words) - 1 else ""),
-                                                    "timestamp": datetime.now().isoformat()
-                                                })
-                                                await asyncio.sleep(0.02)
+                                        # Stream the content in chunks
+                                        words = content.split(' ')
+                                        for i, word in enumerate(words):
+                                            if not word:
+                                                continue
                                             
                                             yield json.dumps({
-                                                "type": "message_complete",
+                                                "type": "message_chunk",
                                                 "agent": current_agent,
+                                                "content": word + (" " if i < len(words) - 1 else ""),
                                                 "timestamp": datetime.now().isoformat()
                                             })
+                                            await asyncio.sleep(0.02)
+                                        
+                                        yield json.dumps({
+                                            "type": "message_complete",
+                                            "agent": current_agent,
+                                            "timestamp": datetime.now().isoformat()
+                                        })
                             
                             # Update the previous message count
                             previous_message_count = len(current_messages)
@@ -1074,9 +1514,11 @@ Always focus on providing valuable business insights, not just raw data.
             total_time = (datetime.now() - start_time).total_seconds()
             converted_messages = self._convert_messages_to_dict(result["messages"]) if result else []
             
+            # When sending the complete event, include all content:
             yield json.dumps({
                 "type": "complete",
-                "final_result": final_result,
+                "final_result": final_result,  # This is just for reference
+                "preserve_content": True,  # Signal to frontend to keep accumulated content
                 "execution_path": execution_path,
                 "total_execution_time": total_time,
                 "metadata": {

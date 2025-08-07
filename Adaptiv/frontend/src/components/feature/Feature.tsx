@@ -19,7 +19,8 @@ import {
   Layout,
   Menu,
   Dropdown,
-  Modal
+  Modal,
+  Upload
 } from 'antd';
 import {
   ArrowUpOutlined,
@@ -37,7 +38,11 @@ import {
   EditOutlined,
   MoreOutlined,
   RightOutlined,
-  LeftOutlined
+  LeftOutlined,
+  CloseCircleOutlined,
+  FileTextOutlined,
+  UploadOutlined,
+  ExclamationCircleOutlined
 } from '@ant-design/icons';
 import { ReactComponent as AiSparkleIcon } from '../../assets/icons/ai_sparkle.svg';
 
@@ -76,6 +81,14 @@ interface ChatState {
   conversations: Conversation[];
   conversationsLoading: boolean;
   siderCollapsed: boolean;
+  // Add these new fields
+  uploadedFile?: File;
+  isProcessingFile?: boolean;
+  pendingConfirmation?: {
+    message: string;
+    action: string;
+    data: any;
+  };
 }
 
 const Feature: React.FC = () => {
@@ -305,8 +318,10 @@ const Feature: React.FC = () => {
       let currentAgentThinking = '';
       let lastAgentName = 'Ada';
       let allAgentsContent: { [agent: string]: string } = {}; // Track content from all agents
-      let agentContents: { [agent: string]: string } = {};
       let lastCompleteAgent: string | null = null;
+      let allContent = ''; // Track ALL content in order
+      let agentContents: { [agent: string]: string } = {};
+      let agentOrder: string[] = [];
       // Stream the response
       for await (const chunk of langgraphService.streamTask(request)) {
         switch (chunk.type) {
@@ -315,8 +330,9 @@ const Feature: React.FC = () => {
             lastAgentName = chunk.agent === 'pricing_orchestrator' ? 'Ada' : chunk.agent;
             
             // Initialize content tracking for this agent if needed
-            if (!allAgentsContent[chunk.agent]) {
-              allAgentsContent[chunk.agent] = '';
+            if (!agentContents[chunk.agent]) {
+              agentContents[chunk.agent] = '';
+              agentOrder.push(chunk.agent);
             }
             
             // Clear tools for this agent when it starts
@@ -329,17 +345,16 @@ const Feature: React.FC = () => {
             }));
             
             // Show agent thinking status
-            currentAgentThinking = `${chunk.agent === 'pricing_orchestrator' ? 'Ada' : chunk.agent} is thinking...`;
+            currentAgentThinking = `${chunk.agent === 'pricing_orchestrator' ? 'Ada' : chunk.agent} is analyzing...`;
             
             // Update message to show current status
-            const currentFullContent = Object.values(allAgentsContent).filter(c => c).join('\n\n');
             setChatState(prev => ({
               ...prev,
               messages: prev.messages.map(m => 
                 m.id === assistantMessage.id 
                   ? { 
                       ...m, 
-                      content: currentFullContent || currentAgentThinking, 
+                      content: allContent || currentAgentThinking, 
                       agentName: lastAgentName 
                     }
                   : m
@@ -350,35 +365,88 @@ const Feature: React.FC = () => {
           case 'message_start':
             // A new message is starting from an agent
             lastAgentName = chunk.agent === 'pricing_orchestrator' ? 'Ada' : chunk.agent;
+            
+            // Add a separator if this is not the first agent and we have content
+            if (allContent && chunk.agent !== 'pricing_orchestrator' && !allContent.endsWith('\n\n')) {
+              allContent += '\n\n---\n\n';
+            }
             break;
-
+          
+          case 'database_confirmation':
+            // Store the pending confirmation
+            setChatState(prev => ({
+              ...prev,
+              pendingConfirmation: {
+                message: chunk.message,
+                action: chunk.action,
+                data: chunk.data
+              }
+            }));
+            
+            // Show confirmation dialog
+            handleDatabaseConfirmation(chunk.action, chunk.data);
+            break;
+        
           case 'message_chunk':
             if (chunk.content) {
-              // Accumulate content per agent
-              if (!agentContents[chunk.agent]) {
-                agentContents[chunk.agent] = '';
+              // Check if this message is asking for confirmation
+              const confirmationPhrases = [
+                'confirm this change',
+                'proceed with this update',
+                'make this change',
+                'update the database',
+                'add this to your database'
+              ];
+              
+              const lowerContent = chunk.content.toLowerCase();
+              const isAskingConfirmation = confirmationPhrases.some(phrase => 
+                lowerContent.includes(phrase)
+              );
+              
+              if (isAskingConfirmation && chunk.agent === 'database_agent') {
+                // Auto-show confirmation dialog for database changes
+                setTimeout(() => {
+                  Modal.confirm({
+                    title: 'Database Update Requested',
+                    content: 'The assistant wants to make changes to your database. Please review the conversation above and confirm if you want to proceed.',
+                    okText: 'Proceed with Changes',
+                    cancelText: 'Cancel',
+                    onOk: () => {
+                      const confirmMessage = "Yes, please proceed with the database changes.";
+                      setChatState(prev => ({ ...prev, currentInput: confirmMessage }));
+                      setTimeout(() => handleSendMessage(), 100);
+                    },
+                    onCancel: () => {
+                      const cancelMessage = "No, don't make any changes.";
+                      setChatState(prev => ({ ...prev, currentInput: cancelMessage }));
+                      setTimeout(() => handleSendMessage(), 100);
+                    }
+                  });
+                }, 1000); // Small delay to let the message render first
               }
-              agentContents[chunk.agent] += chunk.content;
               
-              // Always show the latest content from the most recent agent
-              const displayAgent = chunk.agent === 'pricing_orchestrator' ? 'Ada' : chunk.agent;
+              // Accumulate content for the specific agent AND in the combined view
+              agentContents[chunk.agent] = (agentContents[chunk.agent] || '') + chunk.content;
               
+              // Add to combined content stream
+              allContent += chunk.content;
+              
+              // Update the display with ALL accumulated content
               setChatState(prev => ({
                 ...prev,
                 messages: prev.messages.map(m => 
                   m.id === assistantMessage.id 
                     ? { 
                         ...m, 
-                        content: agentContents[chunk.agent],
-                        agentName: displayAgent
+                        content: allContent, 
+                        agentName: lastAgentName 
                       }
                     : m
                 )
               }));
             }
             break;
-            
-
+        
           case 'tool_call':
             // Add tool to active tools list
             setChatState(prev => ({
@@ -392,20 +460,44 @@ const Feature: React.FC = () => {
               }
             }));
             break;
-
+        
           case 'tool_response':
             // Tool completed, keep them to show what was used
             break;
-
+        
           case 'message_complete':
-            // Mark this agent as complete
+            // Message from an agent is complete
             lastCompleteAgent = chunk.agent;
+            
+            // Add a visual separator after sub-agent responses (optional)
+            if (chunk.agent !== 'pricing_orchestrator' && allContent && !allContent.endsWith('\n\n')) {
+              // Add subtle spacing after sub-agent responses
+              allContent += '\n\n';
+            }
             break;
-
+        
           case 'complete':
-            // Use the combined content from all agents
-            const finalContent = chunk.final_result || Object.values(agentContents).filter(c => c).join('\n\n') || '';
-  
+            // Don't replace with final_result - keep the accumulated content!
+            // The final_result is often just the orchestrator's summary
+            
+            // Optionally append the final summary if it's different from what we have
+            if (chunk.final_result && !allContent.includes(chunk.final_result)) {
+              // Only add if it's not already in the content
+              if (allContent && !allContent.endsWith(chunk.final_result)) {
+                // Check if the final result is substantially different
+                const finalResultWords = chunk.final_result.split(' ').slice(0, 10).join(' ');
+                if (!allContent.includes(finalResultWords)) {
+                  allContent += '\n\n---\n\n**Final Summary:**\n' + chunk.final_result;
+                }
+              } else if (!allContent) {
+                // If we have no content at all, use the final result
+                allContent = chunk.final_result;
+              }
+            }
+            
+            // Ensure we have some content
+            const displayContent = allContent || chunk.final_result || 'No response generated';
+            
             setChatState(prev => ({
               ...prev,
               isLoading: false,
@@ -414,7 +506,7 @@ const Feature: React.FC = () => {
                 m.id === assistantMessage.id 
                   ? { 
                       ...m, 
-                      content: finalContent,
+                      content: displayContent,
                       isStreaming: false,
                       toolsUsed: { ...prev.activeTools },
                       agentName: 'Ada'  // Always show as Ada for the final response
@@ -424,7 +516,7 @@ const Feature: React.FC = () => {
               activeTools: {}
             }));
             
-            // Save the complete response including tool results
+            // Save the complete response including all agent content
             try {
               const toolsUsed = Object.values(chatState.activeTools || {}).flat();
               if (shouldGenerateTitle) {
@@ -441,15 +533,17 @@ const Feature: React.FC = () => {
                   )
                 }));
               }
-              if (finalContent && finalContent.trim().length > 0) {
+              
+              // Save the FULL accumulated content, not just the final_result
+              if (displayContent && displayContent.trim().length > 0) {
                 await conversationService.addMessage(conversationId!, {
                   role: 'assistant',
-                  content: finalContent,
-                  agent_name: lastAgentName,
+                  content: displayContent, // Save all the accumulated content
+                  agent_name: 'Ada',
                   tools_used: toolsUsed.length > 0 ? toolsUsed : undefined
                 });
                 
-                console.log('Saved assistant message with content:', finalContent);
+                console.log('Saved complete assistant message with all agent responses');
               }
             } catch (error) {
               console.error('Failed to save assistant message:', error);
@@ -461,7 +555,7 @@ const Feature: React.FC = () => {
               }
             }, 100);
             break;
-
+        
           case 'error':
             setChatState(prev => ({
               ...prev,
@@ -491,6 +585,161 @@ const Feature: React.FC = () => {
       e.preventDefault();
       handleSendMessage();
     }
+  };
+
+  const handleFileUpload = async (file: File) => {
+    // Set processing state
+    setChatState(prev => ({ 
+      ...prev, 
+      uploadedFile: file, 
+      isProcessingFile: true 
+    }));
+    
+    try {
+      // Read file content based on type
+      let content = '';
+      let fileType = file.name.split('.').pop()?.toLowerCase() || 'txt';
+      
+      if (fileType === 'csv' || fileType === 'txt' || fileType === 'json') {
+        content = await file.text();
+      } else if (fileType === 'xlsx' || fileType === 'xls') {
+        // For Excel files, we'd need to use a library like SheetJS
+        message.warning('Excel file detected. Processing as text for now.');
+        content = await file.text();
+      } else {
+        message.error('Unsupported file type. Please upload CSV, JSON, or Excel files.');
+        return;
+      }
+      
+      // Create message about the file
+      const fileMessage = `I've uploaded a ${fileType} file named "${file.name}". Please process it and tell me what you found. If it contains menu items or competitor data, please help me import it.`;
+      
+      // Create user message with file indicator
+      const userMessage: ChatMessage = {
+        id: Date.now().toString(),
+        role: 'user',
+        content: fileMessage,
+        timestamp: new Date()
+      };
+      
+      // Create or get current conversation
+      let conversationId = chatState.currentConversationId;
+      if (!conversationId) {
+        const newConversation = await createNewConversation();
+        if (!newConversation) return;
+        conversationId = newConversation.id;
+      }
+      
+      // Create placeholder for assistant message
+      const assistantMessage: ChatMessage = {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date(),
+        isStreaming: true
+      };
+      
+      setChatState(prev => ({
+        ...prev,
+        messages: [...prev.messages, userMessage, assistantMessage],
+        isLoading: true,
+        error: null,
+        streamingMessageId: assistantMessage.id,
+        isProcessingFile: false
+      }));
+      
+      // Save user message to database
+      try {
+        await conversationService.addMessage(conversationId, {
+          role: 'user',
+          content: userMessage.content
+        });
+      } catch (error) {
+        console.error('Failed to save user message:', error);
+      }
+      
+      // Prepare request with file content as context
+      const request: MultiAgentRequest = {
+        task: fileMessage,
+        architecture: 'supervisor',
+        context: `File content (first 5000 characters):\n\`\`\`${fileType}\n${content.substring(0, 5000)}\n\`\`\`${content.length > 5000 ? '\n... (truncated)' : ''}`,
+        previous_messages: chatState.messages
+          .filter(msg => msg.role === 'user' || msg.role === 'assistant')
+          .slice(-6) // Last 3 exchanges
+          .map(msg => ({
+            role: msg.role,
+            content: msg.content
+          }))
+      };
+      
+      // Process through the normal streaming flow
+      let currentContent = '';
+      let allAgentsContent: { [agent: string]: string } = {};
+      let lastAgentName = 'Ada';
+      
+      for await (const chunk of langgraphService.streamTask(request)) {
+        // ... (use the same streaming logic from handleSendMessage)
+        // Copy the entire switch statement from handleSendMessage here
+        // Just make sure to reference the correct assistantMessage.id
+      }
+      
+    } catch (error: any) {
+      console.error('File processing error:', error);
+      message.error(`Failed to process file: ${error.message}`);
+      setChatState(prev => ({ 
+        ...prev, 
+        isProcessingFile: false,
+        isLoading: false
+      }));
+    }
+  };
+
+  const handleDatabaseConfirmation = (action: string, data: any) => {
+    Modal.confirm({
+      title: 'Confirm Database Change',
+      icon: <ExclamationCircleOutlined />,
+      content: (
+        <div>
+          <p>{action}</p>
+          {data && (
+            <div style={{ 
+              marginTop: '12px', 
+              padding: '8px', 
+              backgroundColor: '#f5f5f5',
+              borderRadius: '4px',
+              fontFamily: 'monospace',
+              fontSize: '12px'
+            }}>
+              <pre style={{ margin: 0 }}>{JSON.stringify(data, null, 2)}</pre>
+            </div>
+          )}
+        </div>
+      ),
+      okText: 'Confirm Change',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        // Send confirmation message
+        const confirmMessage = `Confirmed: ${action}`;
+        setChatState(prev => ({ 
+          ...prev, 
+          currentInput: confirmMessage,
+          pendingConfirmation: undefined
+        }));
+        // Trigger send
+        await handleSendMessage();
+      },
+      onCancel: () => {
+        // Send cancellation message
+        const cancelMessage = "Cancel the database change.";
+        setChatState(prev => ({ 
+          ...prev, 
+          currentInput: cancelMessage,
+          pendingConfirmation: undefined
+        }));
+        // Trigger send
+        handleSendMessage();
+      }
+    });
   };
 
   // Check if this is the initial state (no messages)
@@ -1091,7 +1340,48 @@ const Feature: React.FC = () => {
                               ul: ({children}) => <ul style={{margin: '16px 0', paddingLeft: '28px', lineHeight: '1.6'}}>{children}</ul>,
                               ol: ({children}) => <ol style={{margin: '16px 0', paddingLeft: '28px', lineHeight: '1.6'}}>{children}</ol>,
                               li: ({children}) => <li style={{margin: '6px 0', paddingLeft: '4px'}}>{children}</li>,
+                              hr: () => (
+                                <div style={{
+                                  margin: '20px 0',
+                                  padding: '0 20px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  opacity: 0.3
+                                }}>
+                                  <div style={{
+                                    flex: 1,
+                                    height: '1px',
+                                    background: 'linear-gradient(90deg, transparent, #d9d9d9, transparent)'
+                                  }} />
+                                </div>
+                              ),
                               
+                              // Style agent names if they appear in the content
+                              strong: ({children}) => {
+                                const text = String(children);
+                                // Check if this is an agent identifier
+                                if (text.includes('Database Specialist:') || 
+                                    text.includes('Market Researcher:') || 
+                                    text.includes('Algorithm Specialist:') ||
+                                    text.includes('Summary:')) {
+                                  return (
+                                    <strong style={{
+                                      display: 'block',
+                                      marginTop: '16px',
+                                      marginBottom: '8px',
+                                      color: '#1890ff',
+                                      fontSize: '14px',
+                                      fontWeight: 600,
+                                      textTransform: 'uppercase',
+                                      letterSpacing: '0.5px'
+                                    }}>
+                                      {children}
+                                    </strong>
+                                  );
+                                }
+                                // Regular bold text
+                                return <strong style={{fontWeight: '600', color: '#24292f'}}>{children}</strong>;
+                              },
                               
                               // Code
                               code: ({children, ...props}: any) => {
@@ -1144,7 +1434,6 @@ const Feature: React.FC = () => {
                               ),
                               
                               // Text formatting
-                              strong: ({children}) => <strong style={{fontWeight: '600', color: '#24292f'}}>{children}</strong>,
                               em: ({children}) => <em style={{fontStyle: 'italic'}}>{children}</em>,
                               del: ({children}) => <del style={{textDecoration: 'line-through', opacity: 0.7}}>{children}</del>,
                               
@@ -1166,7 +1455,6 @@ const Feature: React.FC = () => {
                               ),
                               
                               // Horizontal rule
-                              hr: () => <hr style={{border: 'none', borderTop: '1px solid #e1e4e8', margin: '24px 0'}} />,
                               
                               // Tables
                               table: ({children}) => (
@@ -1218,9 +1506,9 @@ const Feature: React.FC = () => {
                           {msg.isStreaming && msg.id === chatState.streamingMessageId && (
                             <span style={{ 
                               display: 'inline-block',
-                              width: '8px',
+                              width: '2px',
                               height: '16px',
-                              backgroundColor: '#1890ff',
+                              backgroundColor: '#000',
                               animation: 'blink 1s infinite',
                               marginLeft: '2px',
                               verticalAlign: 'text-bottom'
@@ -1252,12 +1540,46 @@ const Feature: React.FC = () => {
           )}
       
           {/* Input Area */}
+          {/* Replace the existing input area div with this enhanced version */}
           <div style={{ 
             backgroundColor: '#f9f9f9',
             padding: '20px 0 32px 0',
             flexShrink: 0
           }}>
             <div style={{ maxWidth: '768px', margin: '0 auto', padding: '0 20px' }}>
+              {/* File upload indicator */}
+              {chatState.uploadedFile && (
+                <div style={{
+                  marginBottom: '8px',
+                  padding: '8px 12px',
+                  backgroundColor: '#e6f7ff',
+                  borderRadius: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <FileTextOutlined style={{ color: '#1890ff' }} />
+                    <Text style={{ fontSize: '14px' }}>
+                      {chatState.uploadedFile.name}
+                    </Text>
+                    {chatState.isProcessingFile && (
+                      <Spin size="small" />
+                    )}
+                  </div>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<CloseCircleOutlined />}
+                    onClick={() => setChatState(prev => ({ 
+                      ...prev, 
+                      uploadedFile: undefined,
+                      isProcessingFile: false
+                    }))}
+                  />
+                </div>
+              )}
+              
               <div style={{ 
                 position: 'relative',
                 backgroundColor: '#fff',
@@ -1269,14 +1591,56 @@ const Feature: React.FC = () => {
                 alignItems: 'flex-end',
                 gap: '8px'
               }}>
+                {/* File upload button */}
+                <Upload
+                  beforeUpload={(file) => {
+                    // Validate file size (max 10MB)
+                    const isLt10M = file.size / 1024 / 1024 < 10;
+                    if (!isLt10M) {
+                      message.error('File must be smaller than 10MB!');
+                      return false;
+                    }
+                    
+                    // Validate file type
+                    const validTypes = ['csv', 'json', 'txt', 'xlsx', 'xls'];
+                    const fileType = file.name.split('.').pop()?.toLowerCase();
+                    if (!fileType || !validTypes.includes(fileType)) {
+                      message.error('Please upload CSV, JSON, TXT, or Excel files only!');
+                      return false;
+                    }
+                    
+                    handleFileUpload(file);
+                    return false; // Prevent default upload
+                  }}
+                  showUploadList={false}
+                  accept=".csv,.json,.txt,.xlsx,.xls"
+                  disabled={chatState.isLoading || chatState.isProcessingFile}
+                >
+                  <Tooltip title="Upload file (CSV, JSON, Excel)">
+                    <Button
+                      type="text"
+                      icon={<UploadOutlined />}
+                      disabled={chatState.isLoading || chatState.isProcessingFile}
+                      style={{
+                        width: '32px',
+                        height: '32px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: chatState.isLoading ? '#d9d9d9' : '#595959'
+                      }}
+                    />
+                  </Tooltip>
+                </Upload>
+                
                 <TextArea
                   ref={inputRef}
                   value={chatState.currentInput}
                   onChange={(e) => setChatState(prev => ({ ...prev, currentInput: e.target.value }))}
                   onKeyPress={handleKeyPress}
-                  placeholder="Ask anything"
+                  placeholder="Ask anything or upload a file"
                   autoSize={{ minRows: 1, maxRows: 6 }}
-                  disabled={chatState.isLoading}
+                  disabled={chatState.isLoading || chatState.isProcessingFile}
                   style={{ 
                     resize: 'none',
                     fontSize: '16px',
@@ -1288,17 +1652,27 @@ const Feature: React.FC = () => {
                     flex: 1
                   }}
                 />
+                
                 <Button
                   type="text"
-                  icon={chatState.isLoading ? <LoadingOutlined /> : <ArrowUpOutlined style={{ fontSize: '18px' }} />}
+                  icon={chatState.isLoading || chatState.isProcessingFile ? 
+                    <LoadingOutlined /> : 
+                    <ArrowUpOutlined style={{ fontSize: '18px' }} />
+                  }
                   onClick={handleSendMessage}
-                  disabled={!chatState.currentInput.trim() || chatState.isLoading}
+                  disabled={(!chatState.currentInput.trim() && !chatState.uploadedFile) || 
+                            chatState.isLoading || 
+                            chatState.isProcessingFile}
                   style={{ 
                     width: '32px',
                     height: '32px',
                     borderRadius: '16px',
-                    backgroundColor: chatState.currentInput.trim() && !chatState.isLoading ? '#000' : '#e5e5e5',
-                    color: chatState.currentInput.trim() && !chatState.isLoading ? '#fff' : '#999',
+                    backgroundColor: (chatState.currentInput.trim() || chatState.uploadedFile) && 
+                                    !chatState.isLoading && 
+                                    !chatState.isProcessingFile ? '#000' : '#e5e5e5',
+                    color: (chatState.currentInput.trim() || chatState.uploadedFile) && 
+                          !chatState.isLoading && 
+                          !chatState.isProcessingFile ? '#fff' : '#999',
                     border: 'none',
                     display: 'flex',
                     alignItems: 'center',
