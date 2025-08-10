@@ -6,9 +6,10 @@ import os
 from typing import List, Optional
 from dotenv import load_dotenv
 try:
-    from pydantic_settings import BaseSettings
+    from pydantic_settings import BaseSettings, SettingsConfigDict
 except ImportError:
     from pydantic import BaseSettings
+    SettingsConfigDict = None
 
 # Load environment variables
 load_dotenv()
@@ -60,9 +61,20 @@ class Settings(BaseSettings):
         "https://adaptiv-frontend-nicholasaronow.vercel.app"
     ]
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    # Pydantic v2 (pydantic-settings) supports SettingsConfigDict. If present, use it
+    # to configure reading from .env and ignoring extra variables. Otherwise, fall
+    # back to the v1-style inner Config with extra = "ignore".
+    if 'SettingsConfigDict' in globals() and SettingsConfigDict is not None:
+        model_config = SettingsConfigDict(
+            env_file=".env",
+            case_sensitive=False,
+            extra="ignore",
+        )
+    else:
+        class Config:
+            env_file = ".env"
+            case_sensitive = False
+            extra = "ignore"
 
 # Global settings instance
 _settings: Optional[Settings] = None

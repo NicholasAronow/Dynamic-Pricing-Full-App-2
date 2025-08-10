@@ -45,6 +45,7 @@ if LANGSMITH_TRACING:
 else:
     langsmith_client = None
     logger.info("LangSmith tracing disabled")
+TAVILY_API_KEY = ""
 @dataclass
 class MultiAgentResponse:
     """Response from multi-agent system execution"""
@@ -315,7 +316,7 @@ class PricingTools:
     
     def __init__(self):
         # Initialize Tavily client
-        self.tavily_api_key = os.getenv("TAVILY_API_KEY")
+        self.tavily_api_key = os.getenv("TAVILY_API_KEY") or TAVILY_API_KEY
         if self.tavily_api_key:
             self.tavily = TavilyClient(api_key=self.tavily_api_key)
         else:

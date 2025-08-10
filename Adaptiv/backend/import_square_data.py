@@ -251,7 +251,7 @@ def import_square_orders(user_id: int, db: Session, catalog_mapping: Dict[str, i
                             "sort_order": "ASC"
                         }
                     },
-                    "limit": 100  # Square limits to 100 orders per request
+                    "limit": 1000  # Square limits to 100 orders per request
                 }
             )
             

@@ -42,6 +42,38 @@ def get_square_status(
         logger.error(f"Error getting Square status: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@square_router.get("/sync/status/current")
+def get_current_persistent_sync_status(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Return the current persistent Square sync metadata (active sync status)."""
+    try:
+        from utils.redis_client import redis_client
+        
+        # First check Redis for real-time sync progress (from Celery worker)
+        redis_progress = redis_client.get_sync_progress(current_user.id)
+        if redis_progress and redis_progress.get('active'):
+            # Build response in the expected format with active_sync
+            meta = {
+                'active_sync': redis_progress
+            }
+            logger.info(f"Returning Redis sync progress for user {current_user.id}: stage={redis_progress.get('stage')}, progress={redis_progress.get('progress')}")
+            return {"success": True, "data": meta}
+        
+        # Fall back to database if no active sync in Redis
+        square_service = SquareService(db)
+        integration = square_service.get_user_square_integration(current_user.id)
+        if not integration:
+            raise HTTPException(status_code=404, detail="Square integration not found")
+        meta = integration.sync_metadata or {}
+        return {"success": True, "data": meta}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting current persistent sync status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 @square_router.post("/sync-catalog")
 def sync_catalog(
     current_user: models.User = Depends(get_current_user),
@@ -76,10 +108,23 @@ def sync_orders(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 # Constants
-SQUARE_ENV = os.getenv("SQUARE_ENV", "production")  # 'sandbox' or 'production'
-SQUARE_APP_ID = os.getenv("SQUARE_APP_ID", "")
-SQUARE_APP_SECRET = os.getenv("SQUARE_APP_SECRET", "")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "https://www.adaptiv.one").rstrip('/')
+SQUARE_ENV = os.getenv("SQUARE_ENV", "sandbox")  # 'sandbox' or 'production'
+if SQUARE_ENV == "sandbox":
+    # Prefer *_APP_* vars, fall back to *_APPLICATION_* vars for backwards compatibility
+    SQUARE_APP_ID = os.getenv("SQUARE_APP_ID_SANDBOX") or os.getenv("SQUARE_APPLICATION_ID_SANDBOX") or os.getenv("SQUARE_APPLICATION_ID", "")
+    SQUARE_APP_SECRET = os.getenv("SQUARE_APP_SECRET_SANDBOX") or os.getenv("SQUARE_APPLICATION_SECRET_SANDBOX") or os.getenv("SQUARE_APPLICATION_SECRET", "")
+    FRONTEND_URL = "http://localhost:3000"
+else:
+    SQUARE_APP_ID = os.getenv("SQUARE_APP_ID") or os.getenv("SQUARE_APPLICATION_ID", "")
+    SQUARE_APP_SECRET = os.getenv("SQUARE_APP_SECRET") or os.getenv("SQUARE_APPLICATION_SECRET", "")
+    FRONTEND_URL = os.getenv("FRONTEND_URL", "https://www.adaptiv.one").rstrip('/')
+
+# Log resolved IDs (mask secrets)
+try:
+    masked_secret = (SQUARE_APP_SECRET[:4] + "***") if SQUARE_APP_SECRET else ""
+    logger.info(f"Square OAuth: Resolved APP_ID set? {bool(SQUARE_APP_ID)}, SECRET set? {bool(SQUARE_APP_SECRET)} ({masked_secret}) env={SQUARE_ENV}")
+except Exception:
+    pass
 
 # Square hosts based on environment
 SQUARE_OAUTH_HOST = "https://connect.squareupsandbox.com" if SQUARE_ENV == "sandbox" else "https://connect.squareup.com"
@@ -112,6 +157,18 @@ async def square_auth(
     # Return the URL to the frontend
     return {"auth_url": auth_url}
 
+@square_router.get("/callback")
+async def square_oauth_callback(
+    request: Request,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Handle Square OAuth redirect (server-side). Forwards to process_square_callback."""
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    # Reuse the existing processor to avoid duplicate logic
+    return await process_square_callback({"code": code, "state": state}, current_user, db)
+
 @square_router.post("/process-callback")
 async def process_square_callback(
     data: Dict[str, Any],
@@ -133,6 +190,14 @@ async def process_square_callback(
         logger.info(f"Square OAuth: Exchanging code for token - code: {code[:5]}...")
         logger.info(f"Square OAuth: Using client_id: {SQUARE_APP_ID}")
         logger.info(f"Square OAuth: Using redirect_uri: {FRONTEND_URL}/integrations/square/callback")
+
+        # Validate configuration before making request
+        if not SQUARE_APP_ID or not SQUARE_APP_SECRET:
+            logger.error(f"Square OAuth: Missing SQUARE credentials for env={SQUARE_ENV}. APP_ID set? {bool(SQUARE_APP_ID)} SECRET set? {bool(SQUARE_APP_SECRET)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Server misconfiguration: Square credentials are not set"
+            )
         
         request_data = {
             "client_id": SQUARE_APP_ID,
@@ -144,11 +209,19 @@ async def process_square_callback(
         
         logger.info(f"Square OAuth: Request data: {json.dumps({k: v if k != 'client_secret' else '***' for k, v in request_data.items()})}")
         
-        token_response = requests.post(
-            f"{SQUARE_API_BASE}/oauth2/token",
-            headers={"Content-Type": "application/json"},
-            json=request_data
-        )
+        try:
+            token_response = requests.post(
+                f"{SQUARE_API_BASE}/oauth2/token",
+                headers={"Content-Type": "application/json"},
+                json=request_data,
+                timeout=15
+            )
+        except Exception as req_err:
+            logger.error(f"Square OAuth: Token request failed: {req_err}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to reach Square token endpoint: {str(req_err)}"
+            )
         
         logger.info(f"Square OAuth: Token response status: {token_response.status_code}")
         logger.info(f"Square OAuth: Token response headers: {token_response.headers}")
@@ -165,7 +238,23 @@ async def process_square_callback(
             )
         
         logger.info(f"Square OAuth: Token response received")
-        
+        # Handle non-200 responses explicitly with surfaced details
+        if token_response.status_code >= 400:
+            if data:
+                err_summary = data.get('error_description') or data.get('error') or str(data)
+                logger.error(f"Square OAuth: Error response {token_response.status_code}: {err_summary}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"OAuth error ({token_response.status_code}): {err_summary}"
+                )
+            else:
+                snippet = token_response.text[:200]
+                logger.error(f"Square OAuth: Non-JSON error response {token_response.status_code}: {snippet}")
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Square token exchange failed ({token_response.status_code}). Body: {snippet}"
+                )
+
         if "error" in data:
             logger.error(f"Square OAuth error: {data.get('error')}")
             raise HTTPException(
@@ -250,18 +339,28 @@ async def process_square_callback(
             
             # Start initial sync as a background task
             logger.info(f"Starting initial Square sync as background task for user {current_user.id}")
-            from tasks import sync_square_data_task
-
-            # Force sync = True for initial sync to get all historical data
-            initial_sync_task = sync_square_data_task.delay(current_user.id, force_sync=True)
-            logger.info(f"Initial sync task started with ID: {initial_sync_task.id}")
-
-            # Store the task ID in the integration metadata for tracking
-            new_integration.metadata = {
-                "initial_sync_task_id": initial_sync_task.id,
-                "initial_sync_started_at": datetime.now().isoformat()
-            }
-            db.commit()
+            try:
+                from tasks import sync_square_data_task
+                # Force sync = True for initial sync to get all historical data
+                initial_sync_task = sync_square_data_task.delay(current_user.id, force_sync=True)
+                logger.info(f"Initial sync task started with ID: {initial_sync_task.id}")
+                # Store the task ID in the integration metadata for tracking
+                existing_integration.sync_metadata = {
+                    "initial_sync_task_id": initial_sync_task.id,
+                    "initial_sync_started_at": datetime.now().isoformat()
+                }
+                db.commit()
+            except Exception as enqueue_err:
+                logger.error(f"Failed to enqueue initial Square sync: {enqueue_err}")
+                # Persist enqueue failure into sync_metadata but do not fail the OAuth flow
+                if not existing_integration.sync_metadata or not isinstance(existing_integration.sync_metadata, dict):
+                    existing_integration.sync_metadata = {}
+                existing_integration.sync_metadata.update({
+                    "initial_sync_enqueued": False,
+                    "initial_sync_error": str(enqueue_err),
+                    "initial_sync_attempted_at": datetime.now().isoformat()
+                })
+                db.commit()
             
             return {"success": True, "message": "Square integration updated successfully"}
         
@@ -305,18 +404,28 @@ async def process_square_callback(
         
         # Start initial sync as a background task
         logger.info(f"Starting initial Square sync as background task for user {current_user.id}")
-        from tasks import sync_square_data_task
-
-        # Force sync = True for initial sync to get all historical data
-        initial_sync_task = sync_square_data_task.delay(current_user.id, force_sync=True)
-        logger.info(f"Initial sync task started with ID: {initial_sync_task.id}")
-
-        # Store the task ID in the integration metadata for tracking
-        new_integration.metadata = {
-            "initial_sync_task_id": initial_sync_task.id,
-            "initial_sync_started_at": datetime.now().isoformat()
-        }
-        db.commit()
+        try:
+            from tasks import sync_square_data_task
+            # Force sync = True for initial sync to get all historical data
+            initial_sync_task = sync_square_data_task.delay(current_user.id, force_sync=True)
+            logger.info(f"Initial sync task started with ID: {initial_sync_task.id}")
+            # Store the task ID in the integration metadata for tracking
+            new_integration.sync_metadata = {
+                "initial_sync_task_id": initial_sync_task.id,
+                "initial_sync_started_at": datetime.now().isoformat()
+            }
+            db.commit()
+        except Exception as enqueue_err:
+            logger.error(f"Failed to enqueue initial Square sync: {enqueue_err}")
+            # Persist enqueue failure into sync_metadata but do not fail the OAuth flow
+            if not new_integration.sync_metadata or not isinstance(new_integration.sync_metadata, dict):
+                new_integration.sync_metadata = {}
+            new_integration.sync_metadata.update({
+                "initial_sync_enqueued": False,
+                "initial_sync_error": str(enqueue_err),
+                "initial_sync_attempted_at": datetime.now().isoformat()
+            })
+            db.commit()
         
         return {"success": True, "message": "Square integration created successfully"}
         

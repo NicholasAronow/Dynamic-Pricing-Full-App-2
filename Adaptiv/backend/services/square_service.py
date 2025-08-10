@@ -7,6 +7,7 @@ import logging
 import requests
 import os
 import json
+from utils.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,9 @@ class SquareService:
             if self.square_env == "sandbox" 
             else "https://connect.squareup.com"
         )
+        self.square_app_id = (os.getenv('SQUARE_APP_ID_SANDBOX') if self.square_env == 'sandbox' else os.getenv('SQUARE_APP_ID'))
+        self.square_app_secret = (os.getenv('SQUARE_APP_SECRET_SANDBOX') if self.square_env == 'sandbox' else os.getenv('SQUARE_APP_SECRET'))
+        
     
     def _make_square_request(self, endpoint: str, access_token: str, method: str = 'GET', data: Dict = None) -> Dict[str, Any]:
         """
@@ -92,6 +96,146 @@ class SquareService:
                 models.POSIntegration.provider == 'square'
             )
         ).first()
+    
+    # ----------------------
+    # Persistent sync metadata helpers
+    # ----------------------
+    def _now_iso(self) -> str:
+        return datetime.now(timezone.utc).isoformat()
+    
+    def _deep_merge(self, base: Dict[str, Any], update: Dict[str, Any]) -> Dict[str, Any]:
+        for k, v in update.items():
+            if isinstance(v, dict) and isinstance(base.get(k), dict):
+                self._deep_merge(base[k], v)
+            else:
+                base[k] = v
+        return base
+    
+    def _read_sync_meta(self, integration: models.POSIntegration) -> Dict[str, Any]:
+        try:
+            return dict(integration.sync_metadata or {})
+        except Exception:
+            return {}
+    
+    def start_active_sync(self, user_id: int, task_id: str, stage: str = "initializing", progress: int = 0) -> Dict[str, Any]:
+        integration = self.get_user_square_integration(user_id)
+        if not integration:
+            raise ValueError("Square integration not found for user")
+        meta = self._read_sync_meta(integration)
+        started_at = self._now_iso()
+        meta['active_sync'] = {
+            'task_id': task_id,
+            'started_at': started_at,
+            'stage': stage,
+            'progress': progress,
+            'active': True,
+            'items_processed': 0,
+            'orders_created': 0,
+            'orders_updated': 0,
+            'per_location': {}
+        }
+        integration.sync_metadata = meta
+        integration.updated_at = datetime.now()
+        self.db.commit()
+        
+        # Also store in Redis for real-time visibility
+        try:
+            redis_data = {
+                'active': True,
+                'stage': stage,
+                'progress': progress,
+                'orders_created': 0,
+                'orders_updated': 0,
+                'pages_processed': 0,
+                'started_at': started_at,
+                'task_id': task_id
+            }
+            redis_client.set_sync_progress(user_id, redis_data)
+        except Exception as e:
+            logger.warning(f"Failed to set initial Redis sync progress: {e}")
+        
+        return meta.get('active_sync', {})
+    
+    def update_active_sync(self, user_id: int, update_dict: Dict[str, Any]) -> Dict[str, Any]:
+        integration = self.get_user_square_integration(user_id)
+        if not integration:
+            raise ValueError("Square integration not found for user")
+        meta = self._read_sync_meta(integration)
+        active = meta.get('active_sync', {})
+        if not active:
+            # initialize a minimal structure if missing
+            active = {'active': True, 'started_at': self._now_iso(), 'per_location': {}}
+        self._deep_merge(active, update_dict)
+        meta['active_sync'] = active
+        integration.sync_metadata = meta
+        integration.updated_at = datetime.now()
+        self.db.commit()
+        
+        # Also update Redis for real-time cross-process visibility
+        try:
+            redis_data = {
+                'active': True,
+                'stage': active.get('stage', 'syncing'),
+                'progress': active.get('progress', 0),
+                'orders_created': active.get('orders_created', 0),
+                'orders_updated': active.get('orders_updated', 0),
+                'pages_processed': active.get('pages_processed', 0),
+                'started_at': active.get('started_at'),
+                'task_id': active.get('task_id')
+            }
+            redis_client.set_sync_progress(user_id, redis_data)
+        except Exception as e:
+            logger.warning(f"Failed to update Redis sync progress: {e}")
+        
+        return active
+    
+    def update_location_sync_state(self, user_id: int, location_id: str, partial: Dict[str, Any]) -> Dict[str, Any]:
+        integration = self.get_user_square_integration(user_id)
+        if not integration:
+            raise ValueError("Square integration not found for user")
+        meta = self._read_sync_meta(integration)
+        active = meta.setdefault('active_sync', {'active': True, 'started_at': self._now_iso(), 'per_location': {}})
+        per_location = active.setdefault('per_location', {})
+        current = per_location.get(location_id, {'location_id': location_id})
+        self._deep_merge(current, partial)
+        current['location_id'] = location_id
+        per_location[location_id] = current
+        active['per_location'] = per_location
+        meta['active_sync'] = active
+        integration.sync_metadata = meta
+        integration.updated_at = datetime.now()
+        self.db.commit()
+        return current
+    
+    def finalize_active_sync(self, user_id: int, success: bool, summary: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        integration = self.get_user_square_integration(user_id)
+        if not integration:
+            raise ValueError("Square integration not found for user")
+        meta = self._read_sync_meta(integration)
+        active = meta.get('active_sync', {})
+        active['active'] = False
+        active['ended_at'] = self._now_iso()
+        active['status'] = 'completed' if success else 'failed'
+        meta['active_sync'] = active
+        key = 'last_success' if success else 'last_failure'
+        meta[key] = {
+            'started_at': active.get('started_at'),
+            'ended_at': active.get('ended_at'),
+            'summary': summary or {}
+        }
+        if success:
+            integration.last_sync_at = datetime.now(timezone.utc)
+        integration.sync_metadata = meta
+        integration.updated_at = datetime.now()
+        self.db.commit()
+        
+        # Clear Redis sync progress on completion
+        try:
+            redis_client.delete_sync_progress(user_id)
+        except Exception as e:
+            logger.warning(f"Failed to clear Redis sync progress: {e}")
+        
+        return meta
     
     def create_square_integration(
         self, 
@@ -256,8 +400,8 @@ class SquareService:
             refresh_url = 'https://connect.squareup.com/oauth2/token'
             
             payload = {
-                'client_id': os.getenv('SQUARE_APPLICATION_ID'),
-                'client_secret': os.getenv('SQUARE_APPLICATION_SECRET'),
+                'client_id': self.square_app_id,
+                'client_secret': self.square_app_secret,
                 'grant_type': 'refresh_token',
                 'refresh_token': integration.refresh_token
             }
@@ -394,6 +538,8 @@ class SquareService:
                 # No existing orders, get from the last N days
                 start_date = datetime.now() - timedelta(days=days)
                 logger.info(f"Starting full sync from {start_date.isoformat()}")
+            # Identify whether this is an initial (full) sync
+            initial_sync = not (latest_order and latest_order.order_date)
             
             # Build search query with date filter
             # Format the date properly for Square API (ISO 8601 with timezone)
@@ -413,10 +559,14 @@ class SquareService:
                     },
                     'sort': {
                         'sort_field': 'CLOSED_AT',
-                        'sort_order': 'DESC'
+                        'sort_order': 'ASC'
                     }
-                }
+                },
+                # Be explicit about entries vs orders array
+                'return_entries': False
             }
+            # Explicitly control page size during initial sync to avoid huge pages
+            request_body['limit'] = 10
             
             # Get all location IDs for multi-location support
             location_ids = self.get_all_location_ids(user_id)
@@ -457,6 +607,7 @@ class SquareService:
             orders_updated = 0
             cursor = None
             page_count = 0
+            oldest_processed_at: Optional[datetime] = None
             
             # Batch operations
             new_orders = []
@@ -469,9 +620,13 @@ class SquareService:
                 current_request = request_body.copy()
                 if cursor:
                     current_request['cursor'] = cursor
+                # Ensure limit is applied on every page request during initial sync
+                if initial_sync:
+                    current_request['limit'] = 10
                 
                 logger.info(f"Fetching orders page {page_count} for user {user_id}")
-                logger.debug(f"Request body: {json.dumps(current_request, indent=2)}")
+                # Elevate to INFO so we can verify 'limit' is present in production logs
+                logger.info(f"SearchOrders request body: {json.dumps(current_request, indent=2)}")
                 
                 response = self._make_square_request_with_refresh(
                     '/v2/orders/search',
@@ -487,6 +642,9 @@ class SquareService:
                     logger.info(f"No orders found on page {page_count}, stopping pagination")
                     break
                 
+                # Track per-location stats for this page
+                per_location_page: Dict[str, Dict[str, Any]] = {}
+                
                 # Process orders in batch
                 for order_data in orders_in_page:
                     order_id = order_data.get('id')
@@ -494,12 +652,35 @@ class SquareService:
                     # Skip if order already exists
                     if order_id in existing_order_ids:
                         orders_updated += 1
+                        # update per-location page counters
+                        loc = order_data.get('location_id')
+                        if loc:
+                            stats = per_location_page.setdefault(loc, {'orders_created': 0, 'orders_updated': 0, 'last_synced_at': None})
+                            stats['orders_updated'] += 1
+                            # Prefer closed_at when available, fallback to created_at
+                            ts_str = order_data.get('closed_at') or order_data.get('created_at')
+                            if ts_str:
+                                try:
+                                    dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+                                    stats['last_synced_at'] = max(stats['last_synced_at'], dt) if stats['last_synced_at'] else dt
+                                    # Track overall oldest processed timestamp for progress proxy
+                                    oldest_processed_at = min(oldest_processed_at, dt) if oldest_processed_at else dt
+                                except Exception:
+                                    pass
                         continue
                     
                     order_location_id = order_data.get('location_id')
                     order_date = datetime.fromisoformat(
                         order_data.get('created_at', '').replace('Z', '+00:00')
                     )
+                    # Track overall oldest processed timestamp using closed_at if possible
+                    ts_str2 = order_data.get('closed_at') or order_data.get('created_at')
+                    if ts_str2:
+                        try:
+                            ts2 = datetime.fromisoformat(ts_str2.replace('Z', '+00:00'))
+                            oldest_processed_at = min(oldest_processed_at, ts2) if oldest_processed_at else ts2
+                        except Exception:
+                            pass
                     
                     total_money = order_data.get('total_money', {})
                     total_amount = float(total_money.get('amount', 0)) / 100 if total_money.get('amount') else 0
@@ -536,8 +717,61 @@ class SquareService:
                         })
                     
                     orders_created += 1
+                    # update per-location page counters
+                    if order_location_id:
+                        stats = per_location_page.setdefault(order_location_id, {'orders_created': 0, 'orders_updated': 0, 'last_synced_at': None})
+                        stats['orders_created'] += 1
+                        stats['last_synced_at'] = max(stats['last_synced_at'], order_date) if stats['last_synced_at'] else order_date
                 
-                # Check for next page
+                # Persist progress after each page
+                try:
+                    # Compute progress using date-based proxy: how far we've advanced from start_date toward now
+                    # Ensure timezone-aware calculations
+                    start_dt = start_date
+                    if start_dt.tzinfo is None:
+                        start_dt = start_dt.replace(tzinfo=timezone.utc)
+                    else:
+                        start_dt = start_dt.astimezone(timezone.utc)
+
+                    now_utc = datetime.now(timezone.utc)
+                    denom = max((now_utc - start_dt).total_seconds(), 1.0)
+                    if oldest_processed_at is not None:
+                        processed_utc = oldest_processed_at.astimezone(timezone.utc)
+                        # How much of the window (start..now) have we covered from the now-side backwards?
+                        num = max((now_utc - processed_utc).total_seconds(), 0.0)
+                        ratio = max(0.0, min(1.0, num / denom))
+                    else:
+                        ratio = 0.0
+
+                    # Map ratio into a bounded range so finalization can complete to 100%
+                    if initial_sync:
+                        base = 40.0  # after catalog/validation stages
+                        cap = 90.0   # leave headroom for finalization
+                    else:
+                        base = 60.0
+                        cap = 95.0
+                    progress = int(min(cap, max(base, base + ratio * (cap - base))))
+
+                    self.update_active_sync(user_id, {
+                        'stage': 'syncing_orders',
+                        'progress': progress,
+                        'orders_created': orders_created,
+                        'orders_updated': orders_updated,
+                        'pages_processed': page_count
+                    })
+                    # Update per-location states
+                    for loc_id, s in per_location_page.items():
+                        partial = {
+                            'orders_created': s.get('orders_created', 0),
+                            'orders_updated': s.get('orders_updated', 0)
+                        }
+                        if s.get('last_synced_at'):
+                            partial['last_synced_at'] = s['last_synced_at'].astimezone(timezone.utc).isoformat()
+                        self.update_location_sync_state(user_id, loc_id, partial)
+                except Exception as meta_err:
+                    logger.warning(f"Failed to persist sync metadata for user {user_id}: {meta_err}")
+                
+                # Check for next page (after persisting progress for this page)
                 cursor = response.get('cursor')
                 if not cursor:
                     logger.info(f"No more pages available, pagination complete for user {user_id}")
@@ -606,14 +840,15 @@ class SquareService:
             ).count()
             
             # Check if integration is active (has access token and not expired)
-            from datetime import datetime, timezone
             is_active = (
                 integration.access_token is not None and 
                 integration.access_token.strip() != "" and
                 (integration.expires_at is None or integration.expires_at > datetime.now(timezone.utc))
             )
             
-            return {
+            # Include current persistent sync metadata (if any)
+            meta = integration.sync_metadata or {}
+            result = {
                 'status': 'connected',
                 'integration_id': integration.id,
                 'merchant_id': integration.merchant_id,
@@ -623,6 +858,9 @@ class SquareService:
                 'synced_orders_30_days': order_count,
                 'is_active': is_active
             }
+            if meta:
+                result['sync_metadata'] = meta
+            return result
             
         except Exception as e:
             logger.error(f"Error getting sync status: {str(e)}")

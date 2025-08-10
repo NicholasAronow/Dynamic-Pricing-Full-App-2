@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Card, Row, Col, Button, Tag, Space, Spin, Radio, Tooltip, message } from 'antd';
+import { Typography, Card, Row, Col, Button, Tag, Space, Spin, Radio, Tooltip, message, Progress } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { ShoppingOutlined, ArrowUpOutlined, ArrowDownOutlined, TagsOutlined, ShopOutlined, QuestionCircleOutlined, LineChartOutlined, CrownOutlined} from '@ant-design/icons';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, Area } from 'recharts';
@@ -68,6 +68,11 @@ const Dashboard: React.FC = () => {
   // Use pos_connected field from the user object
   const isPosConnected = user?.pos_connected ?? false;
   const [hasAnySalesData, setHasAnySalesData] = useState(false);
+  // Initial Square sync (persistent) status
+  const [activeSync, setActiveSync] = useState<any | null>(null);
+  const [isInitialSyncActive, setIsInitialSyncActive] = useState<boolean>(false);
+  const [initialSyncProgress, setInitialSyncProgress] = useState<number>(0);
+  const [initialSyncStage, setInitialSyncStage] = useState<string>('initializing');
 
   /// Helper function to convert timeframe to dates
   const getDateRangeFromTimeFrame = (timeFrame: string) => {
@@ -115,6 +120,43 @@ const Dashboard: React.FC = () => {
     if (user && isPosConnected) {
       fetchDashboardData(timeFrame);
     }
+  }, [user, isPosConnected, timeFrame]);
+
+  // Poll persistent Square sync status (shows banner during initial sync after POS connection)
+  useEffect(() => {
+    let interval: any;
+    const poll = async () => {
+      try {
+        const res = await orderService.getCurrentSquarePersistentSyncStatus();
+        if (res.success && res.data && res.data.active_sync) {
+          const a = res.data.active_sync;
+          setActiveSync(a);
+          const active = a.active === true;
+          setIsInitialSyncActive(active);
+          setInitialSyncProgress(Number(a.progress || 0));
+          setInitialSyncStage(String(a.stage || ''));
+          if (!active && (a.status === 'completed' || Number(a.progress || 0) >= 100)) {
+            // Refresh dashboard once on completion
+            if (user && isPosConnected) {
+              fetchDashboardData(timeFrame, true);
+            }
+          }
+          if (!active && interval) {
+            clearInterval(interval);
+          }
+        } else {
+          setIsInitialSyncActive(false);
+        }
+      } catch (err) {
+        // silent
+      }
+    };
+    // Always poll; backend will return empty/missing meta if not applicable
+    poll();
+    interval = setInterval(poll, 500);
+    return () => {
+      if (interval) clearInterval(interval);
+    };
   }, [user, isPosConnected, timeFrame]);
 
   // Separate effect for items time frame - optimized to use analytics service
@@ -967,6 +1009,36 @@ const Dashboard: React.FC = () => {
       <Title level={5} type="secondary" style={{ marginTop: 0, marginBottom: 24 }}>
         Welcome back, {formattedName}! Here's your dynamic pricing overview
       </Title>
+      {/* Initial Square Sync Progress Banner */}
+      {isInitialSyncActive && (
+        <Card
+          style={{
+            marginBottom: 16,
+            border: '1px solid #e5e7eb',
+            borderRadius: 12,
+            background: '#fafafa',
+            position: 'relative',
+            zIndex: 20
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <Text strong>Syncing your Square data…</Text>
+              <div style={{ color: '#6b7280', fontSize: 12 }}>
+                Stage: {initialSyncStage?.replace(/_/g, ' ') || 'initializing'}
+                {activeSync?.orders_created !== undefined || activeSync?.orders_updated !== undefined ? (
+                  <>
+                    {' '}• Orders created: {activeSync?.orders_created || 0}, updated: {activeSync?.orders_updated || 0}
+                  </>
+                ) : null}
+              </div>
+            </div>
+            <div style={{ minWidth: 260 }}>
+              <Progress percent={Math.max(0, Math.min(100, initialSyncProgress))} status="active" />
+            </div>
+          </div>
+        </Card>
+      )}
       
       {/* Single conditional blur overlay for the entire dashboard */}
       {!isPosConnected && (

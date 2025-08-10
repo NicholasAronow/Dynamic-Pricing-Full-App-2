@@ -1,4 +1,4 @@
-from sqlalchemy import Column, ForeignKey, Integer, String, DateTime
+from sqlalchemy import Column, ForeignKey, Integer, String, DateTime, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from config.database import Base
@@ -20,6 +20,10 @@ class POSIntegration(Base):
     last_sync_at = Column(DateTime(timezone=True), nullable=True)
     pos_id = Column(String, nullable=True, index=True)  # Store primary location ID
     location_ids = Column(String, nullable=True)  # Store all location IDs as JSON string
+    
+    # Persistent sync progress/state (JSON)
+    # Use a non-reserved name (not "metadata") to avoid SQLAlchemy conflicts
+    sync_metadata = Column(JSON, nullable=True)
     
     # Relationship to User
     user = relationship("User", backref="pos_integrations")

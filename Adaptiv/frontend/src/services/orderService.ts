@@ -207,6 +207,20 @@ export const orderService = {
     }
   },
 
+  // Get current user's persistent Square sync metadata (active sync status)
+  getCurrentSquarePersistentSyncStatus: async (): Promise<{success: boolean, data?: any, error?: string}> => {
+    try {
+      const response = await api.get('/integrations/square/sync/status/current');
+      // Backend shape: { success: true, data: meta }
+      const data = response.data?.data ?? response.data;
+      return { success: true, data };
+    } catch (error: any) {
+      // 404 if integration not found, or 500. Treat as not active.
+      console.error('Error fetching current Square sync metadata:', error);
+      return { success: false, error: error.response?.data?.detail || 'Failed to fetch sync metadata' };
+    }
+  },
+
   // Poll sync status until completion
   pollSquareSyncStatus: async (task_id: string, onProgress?: (progress: number, status: string) => void): Promise<{success: boolean, result?: any, error?: string}> => {
     const maxAttempts = 60; // 5 minutes with 5-second intervals

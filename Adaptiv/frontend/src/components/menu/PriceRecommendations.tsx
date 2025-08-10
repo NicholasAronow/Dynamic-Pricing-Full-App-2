@@ -14,7 +14,8 @@ import {
   Statistic,
   Row,
   Col,
-  message
+  message,
+  Progress
 } from 'antd';
 import type { RadioChangeEvent, TableProps, TableColumnType } from 'antd';
 import { Key } from 'rc-table/lib/interface';
@@ -72,6 +73,11 @@ const PriceRecommendations: React.FC = () => {
   const [loadingRecipes, setLoadingRecipes] = useState<boolean>(true);
   const [syncingOrders, setSyncingOrders] = useState<boolean>(false);
   const [netMargins, setNetMargins] = useState<{[key: string]: any}>({});
+  // Initial Square sync (persistent) status
+  const [activeSync, setActiveSync] = useState<any | null>(null);
+  const [isInitialSyncActive, setIsInitialSyncActive] = useState<boolean>(false);
+  const [initialSyncProgress, setInitialSyncProgress] = useState<number>(0);
+  const [initialSyncStage, setInitialSyncStage] = useState<string>('initializing');
   
   // Calculate summary metrics with safety checks
   const totalRevenue = recommendations.reduce((sum, item) => sum + (item.revenue || 0), 0);
@@ -196,6 +202,46 @@ const PriceRecommendations: React.FC = () => {
     
     fetchRecipes();
   }, [recommendations]);
+
+  // Poll persistent Square sync status
+  useEffect(() => {
+    let interval: any;
+    const poll = async () => {
+      try {
+        const res = await orderService.getCurrentSquarePersistentSyncStatus();
+        if (res.success && res.data && res.data.active_sync) {
+          const a = res.data.active_sync;
+          setActiveSync(a);
+          const active = a.active === true;
+          setIsInitialSyncActive(active);
+          setInitialSyncProgress(Number(a.progress || 0));
+          setInitialSyncStage(String(a.stage || ''));
+          // If sync just completed, refresh recommendations once
+          if (!active && (a.status === 'completed' || Number(a.progress || 0) >= 100)) {
+            try {
+              const updated = await pricingService.getPriceRecommendations(timeFrame);
+              setRecommendations(updated);
+            } catch (e) {
+              // ignore refresh errors
+            }
+          }
+          if (!active && interval) {
+            clearInterval(interval);
+          }
+        } else {
+          setIsInitialSyncActive(false);
+        }
+      } catch (err) {
+        // Fail silently to avoid UI spam
+      }
+    };
+    // Always poll; backend will return empty or missing meta if not connected
+    poll();
+    interval = setInterval(poll, 4000);
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [timeFrame]);
 
   useEffect(() => {
     const fetchRecommendations = async () => {
@@ -519,7 +565,36 @@ const PriceRecommendations: React.FC = () => {
           </Button>
         </div>
       </div>
-      
+
+      {/* Initial Square Sync Progress Banner */}
+      {isInitialSyncActive && (
+        <Card
+          style={{
+            marginBottom: 16,
+            border: '1px solid #e5e7eb',
+            borderRadius: 12,
+            background: '#fafafa'
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <Text strong>Syncing your Square data…</Text>
+              <div style={{ color: '#6b7280', fontSize: 12 }}>
+                Stage: {initialSyncStage?.replace(/_/g, ' ') || 'initializing'}
+                {activeSync?.orders_created !== undefined || activeSync?.orders_updated !== undefined ? (
+                  <>
+                    {' '}• Orders created: {activeSync?.orders_created || 0}, updated: {activeSync?.orders_updated || 0}
+                  </>
+                ) : null}
+              </div>
+            </div>
+            <div style={{ minWidth: 260 }}>
+              <Progress percent={Math.max(0, Math.min(100, initialSyncProgress))} status="active" />
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* POS Connection Overlay */}
       {!isPosConnected && (
         <div style={{

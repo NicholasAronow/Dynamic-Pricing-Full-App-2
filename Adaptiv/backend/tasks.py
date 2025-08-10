@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 import models
 from config.database import SessionLocal
 from services.task_service import TaskService
+from services.square_service import SquareService
 import json
 import asyncio
 import os
@@ -1030,12 +1031,22 @@ def sync_square_data_task(self, user_id: int, force_sync: bool = False) -> Dict[
         
         # Create database session
         db = SessionLocal()
+        square_service = SquareService(db)
+        # Start persistent sync metadata
+        try:
+            square_service.start_active_sync(user_id, task_id=str(self.request.id), stage='initializing', progress=0)
+        except Exception as meta_err:
+            logger.warning(f"Failed to start persistent sync metadata for user {user_id}: {meta_err}")
         
         # Use TaskService to handle the business logic
         task_service = TaskService(db)
         
         # Update progress
         self.update_state(state='PROGRESS', meta={'progress': 10, 'status': 'Validating prerequisites...'})
+        try:
+            square_service.update_active_sync(user_id, {'stage': 'validating', 'progress': 10})
+        except Exception as meta_err:
+            logger.warning(f"Failed to update sync metadata (validating) for user {user_id}: {meta_err}")
         
         # Validate prerequisites
         validation = task_service.validate_sync_prerequisites(user_id)
@@ -1044,12 +1055,34 @@ def sync_square_data_task(self, user_id: int, force_sync: bool = False) -> Dict[
         
         # Update progress
         self.update_state(state='PROGRESS', meta={'progress': 20, 'status': 'Starting sync...'})
+        try:
+            square_service.update_active_sync(user_id, {'stage': 'starting', 'progress': 20})
+        except Exception as meta_err:
+            logger.warning(f"Failed to update sync metadata (starting) for user {user_id}: {meta_err}")
         
         # Perform the sync using the service
+        try:
+            # Mark syncing stage
+            square_service.update_active_sync(user_id, {'stage': 'syncing', 'progress': 30})
+        except Exception:
+            pass
         result = task_service.sync_square_data(user_id, force_sync)
         
         # Update progress
         self.update_state(state='PROGRESS', meta={'progress': 100, 'status': 'Sync completed successfully'})
+        try:
+            # Best-effort summary numbers
+            orders_created = (result or {}).get('orders_sync', {}).get('orders_created', 0)
+            orders_updated = (result or {}).get('orders_sync', {}).get('orders_updated', 0)
+            square_service.update_active_sync(user_id, {
+                'stage': 'finalizing',
+                'progress': 95,
+                'orders_created': orders_created,
+                'orders_updated': orders_updated,
+            })
+            square_service.finalize_active_sync(user_id, success=True, summary=result)
+        except Exception as meta_err:
+            logger.warning(f"Failed to finalize persistent sync metadata for user {user_id}: {meta_err}")
         
         return result
         
@@ -1057,6 +1090,14 @@ def sync_square_data_task(self, user_id: int, force_sync: bool = False) -> Dict[
         logger.exception(f"Error in Square sync task: {str(e)}")
         if db:
             db.rollback()
+        # Attempt to mark sync as failed in persistent metadata
+        try:
+            if db:
+                square_service = SquareService(db)
+                square_service.update_active_sync(user_id, {'stage': 'failed', 'progress': 100})
+                square_service.finalize_active_sync(user_id, success=False, summary={'error': str(e)})
+        except Exception as meta_err:
+            logger.warning(f"Failed to persist failure sync metadata for user {user_id}: {meta_err}")
         return {
             "success": False,
             "error": str(e),
