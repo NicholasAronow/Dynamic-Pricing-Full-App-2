@@ -331,8 +331,8 @@ const DynamicPricingAgentsContent: React.FC = () => {
       });
       
       // Get current user info for debugging
-      const userData = localStorage.getItem('user');
-      const currentUser = userData ? JSON.parse(userData) : {};
+      const userData = user;
+      const currentUser = userData;// ? JSON.parse(userData) : {};
       console.log('Current user when fetching recommendations:', { id: currentUser.id, email: currentUser.email });
       
       // Fetch recommendations, optionally filtered by batch_id
