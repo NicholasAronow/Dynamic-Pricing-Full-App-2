@@ -76,10 +76,17 @@ const DynamicPricingAgentsContent: React.FC = () => {
     { name: 'Performance Monitor', status: 'idle', icon: <CheckCircleOutlined /> },
     { name: 'Experimentation', status: 'idle', icon: <ExperimentOutlined /> }
   ]);
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   // Load recommendations and previous analysis results on component mount
   useEffect(() => {
     console.log('DynamicPricingAgents component mounted');
+    console.log('Auth state:', { user: user ? { id: user.id, email: user.email } : null, authLoading });
+    
+    // Only fetch data if user is loaded and auth is not loading
+    if (authLoading || !user || !user.id) {
+      console.log('User not loaded yet or auth still loading, waiting...');
+      return;
+    }
     
     // Always fetch available batches first, as it may trigger recommendation fetch
     fetchAvailableBatches();
@@ -123,9 +130,9 @@ const DynamicPricingAgentsContent: React.FC = () => {
       console.log('No saved recommendations found in localStorage');
     }
     
-    // Load previous analysis results
+    // Load latest analysis results
     fetchLatestAnalysisResults();
-  }, []);
+  }, [user, authLoading]);
   
   // Effect to fetch recommendations when selectedBatchId changes
   useEffect(() => {
@@ -142,8 +149,7 @@ const DynamicPricingAgentsContent: React.FC = () => {
       console.log('Fetching available batches from API...');
       
       // Get current user info for debugging
-      const userData = user;
-      const currentUser = userData;// ? JSON.parse(userData) : {};
+      const currentUser = user || {};
       console.log('Current user when fetching batches:', { id: currentUser.id, email: currentUser.email });
       
       const batchesResponse = await pricingService.getAvailableBatches();
@@ -331,8 +337,7 @@ const DynamicPricingAgentsContent: React.FC = () => {
       });
       
       // Get current user info for debugging
-      const userData = user;
-      const currentUser = userData;// ? JSON.parse(userData) : {};
+      const currentUser = user || {};
       console.log('Current user when fetching recommendations:', { id: currentUser.id, email: currentUser.email });
       
       // Fetch recommendations, optionally filtered by batch_id
