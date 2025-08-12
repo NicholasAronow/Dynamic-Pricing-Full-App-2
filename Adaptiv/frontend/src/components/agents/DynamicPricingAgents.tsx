@@ -8,10 +8,12 @@ import { api } from '../../services/api';
 import { API_BASE_URL } from 'config';
 import pricingService, { AgentPricingRecommendation } from '../../services/pricingService';
 import { Typography } from 'antd';
+import { useAuth } from 'context/AuthContext';
 
 const { TabPane } = Tabs;
 const { Option } = Select;
 const { Title, Text } = Typography;
+
 
 
 interface AgentStatus {
@@ -74,7 +76,7 @@ const DynamicPricingAgentsContent: React.FC = () => {
     { name: 'Performance Monitor', status: 'idle', icon: <CheckCircleOutlined /> },
     { name: 'Experimentation', status: 'idle', icon: <ExperimentOutlined /> }
   ]);
-
+  const { user } = useAuth();
   // Load recommendations and previous analysis results on component mount
   useEffect(() => {
     console.log('DynamicPricingAgents component mounted');
@@ -140,8 +142,8 @@ const DynamicPricingAgentsContent: React.FC = () => {
       console.log('Fetching available batches from API...');
       
       // Get current user info for debugging
-      const userData = localStorage.getItem('user');
-      const currentUser = userData ? JSON.parse(userData) : {};
+      const userData = user;
+      const currentUser = userData;// ? JSON.parse(userData) : {};
       console.log('Current user when fetching batches:', { id: currentUser.id, email: currentUser.email });
       
       const batchesResponse = await pricingService.getAvailableBatches();
